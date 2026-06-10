@@ -1,0 +1,166 @@
+# ═══════════════════════════════════════════════════════════════════
+# Trawler 配置文件 — 复制为 config.toml 并根据需要修改
+#
+# ⚠️ 从旧版 config.yaml 迁移的用户：请手动将配置迁移到此格式。
+#    旧格式已不再支持。参考此文件创建新的 config.toml。
+# 提示：使用 `trawler login --platform bili` 可通过扫码快速登录 B 站，
+#        自动填充 [bilibili.auth] 部分。
+# ═══════════════════════════════════════════════════════════════════
+
+# ── 通用设置 ─────────────────────────────────────────────────────
+[general]
+# 数据存储目录（相对路径基于项目根目录）
+data_dir = "./data"
+
+# ── 登录态自动续期 ─────────────────────────────────────────────
+[auth.renewal]
+# 距上次成功续期至少间隔多少小时才再次尝试
+min_interval_hours = 24
+# 距过期不到多少天时强制续期（即使 min_interval 未到）
+force_before_days = 7
+# 后台检查续期的时间间隔（小时）
+check_interval_hours = 6
+
+# ── 下载设置 ────────────────────────────────────────────────────
+[download]
+# 下载文件保存目录
+dir = "./downloads"
+# yt-dlp 画质偏好：worst / best / 具体格式
+quality = "worst"
+# yt-dlp 格式选择字符串
+format = "bestaudio/worst"
+# 最大同时下载数
+max_concurrent = 3
+
+# ── 转录设置（语音转文字）──────────────────────────────────────
+[transcribe]
+# FunASR 模型：base / medium / large
+model = "base"
+# 语言代码
+language = "zh"
+# 转录文本输出目录
+output_dir = "./transcripts"
+# 转录完成后是否删除原始音视频文件
+delete_after_transcribe = true
+
+# ── AI 分析设置 ────────────────────────────────────────────────
+[analysis]
+# 是否启用内容分析（摘要/标签等）
+enabled = true
+# 分析服务提供者：codebuddy / openai / 其他兼容接口
+provider = "codebuddy"
+# API 基础地址（留空使用 provider 默认地址）
+api_base = ""
+# API 密钥
+api_key = ""
+# 模型名称
+model_name = ""
+
+# ══════════════════════════════════════════════════════════════════
+# B 站（Bilibili）配置
+# ══════════════════════════════════════════════════════════════════
+
+[bilibili.auth]
+# B 站登录 Cookie 凭据 — 推荐使用 trawler login --platform bili 扫码登录
+# 手动填写方法：浏览器登录 B 站后从 Cookie 中提取以下字段
+sessdata = ""
+bili_jct = ""
+buvid3 = ""
+dedeuserid = ""
+ac_time_value = ""
+# 登录过期时间（Unix 时间戳，0 表示未知）
+expires_at = 0
+
+[bilibili.monitor]
+# 监控模式：rss（通过 RSSHub）或 dynamic（通过动态 API）
+mode = "rss"
+# 检查间隔（分钟）
+interval_minutes = 3
+# 是否同时监控动态（图文/短视频）
+watch_dynamic = true
+# 单次检查最多拉取的视频数
+max_videos_per_check = 10
+# RSSHub 实例列表（按优先级排序，自动 fallback）
+rsshub_instances = [
+    "https://rsshub.yfi.moe",
+    "https://rsshub.liumingye.cn",
+    "https://rss.shab.fun",
+]
+
+# 每个 [[bilibili.subscriptions]] 代表一个订阅的 UP 主
+# 取消注释并添加 UP 主的 UID 和名称：
+# [[bilibili.subscriptions]]
+# uid = 123456
+# name = "示例UP主"
+
+[bilibili.notification]
+# 是否启用新视频通知
+enabled = true
+# Gotify 推送服务地址
+gotify_url = ""
+# Gotify 应用 Token
+gotify_token = ""
+# 通知优先级（1-10）
+priority = 5
+
+# ══════════════════════════════════════════════════════════════════
+# 小红书（Xiaohongshu）配置
+# ══════════════════════════════════════════════════════════════════
+
+[xiaohongshu]
+# 是否启用小红书监控（需要额外安装 xhs 依赖）
+enabled = false
+
+[xiaohongshu.auth]
+# 小红书登录 Cookie（从浏览器中提取）
+cookie = ""
+# Cookie 过期时间（Unix 时间戳，0 表示未知）
+expires_at = 0
+
+[xiaohongshu.monitor]
+# 监控模式：api / rss
+mode = "api"
+# 检查间隔（分钟）
+interval_minutes = 10
+
+# 每个 [[xiaohongshu.subscriptions]] 代表一个订阅的用户
+[[xiaohongshu.subscriptions]]
+user_id = ""
+name = ""
+
+[xiaohongshu.notification]
+enabled = true
+gotify_url = ""
+gotify_token = ""
+priority = 5
+
+# ══════════════════════════════════════════════════════════════════
+# 微博（Weibo）配置
+# ══════════════════════════════════════════════════════════════════
+
+[weibo]
+# 是否启用微博监控
+enabled = false
+
+[weibo.auth]
+# 微博登录 Cookie（从浏览器中提取）
+cookie = ""
+# Cookie 过期时间（Unix 时间戳，0 表示未知）
+expires_at = 0
+
+[weibo.monitor]
+# 监控模式：api / rss
+mode = "api"
+# 检查间隔（分钟）
+interval_minutes = 10
+
+# 每个 [[weibo.subscriptions]] 代表一个订阅的用户
+[[weibo.subscriptions]]
+user_id = ""
+name = ""
+
+[weibo.notification]
+enabled = true
+gotify_url = ""
+gotify_token = ""
+priority = 5
