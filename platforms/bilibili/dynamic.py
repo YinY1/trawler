@@ -68,6 +68,7 @@ def _parse_dynamic(card: dict, uid: int) -> Optional[DynamicInfo]:
     card_str = card.get("card", "{}")
     if isinstance(card_str, str):
         import json
+
         try:
             card_data = json.loads(card_str)
         except json.JSONDecodeError:

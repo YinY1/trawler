@@ -93,9 +93,12 @@ async def download_video(
         "yt-dlp",
         "--no-warnings",
         "--no-check-certificates",
-        "-f", config.download.format,
-        "-o", str(download_dir / "%(title).100s.%(ext)s"),
-        "--print-after-finalize", "filepath:%(filepath)s",
+        "-f",
+        config.download.format,
+        "-o",
+        str(download_dir / "%(title).100s.%(ext)s"),
+        "--print-after-finalize",
+        "filepath:%(filepath)s",
     ]
 
     # 限制下载速度（可选）
@@ -152,7 +155,7 @@ async def download_video(
     filepath: Optional[Path] = None
     for line in stdout_text.splitlines():
         if line.startswith("filepath:"):
-            fp = line[len("filepath:"):].strip()
+            fp = line[len("filepath:") :].strip()
             if fp:
                 filepath = Path(fp)
                 break

@@ -35,9 +35,7 @@ def _get_pipeline() -> Any:
         from modelscope.pipelines import pipeline
         from modelscope.utils.constant import Tasks
 
-        _model_cache[cache_key] = pipeline(
-            Tasks.auto_speech_recognition, model="iic/SenseVoiceSmall"
-        )
+        _model_cache[cache_key] = pipeline(Tasks.auto_speech_recognition, model="iic/SenseVoiceSmall")
         console.log("[bold green]SenseVoiceSmall 模型加载完成[/]")
     return _model_cache[cache_key]
 
@@ -54,19 +52,21 @@ def _extract_audio(filepath: Path, output_path: Path) -> None:
     """
     cmd = [
         "ffmpeg",
-        "-i", str(filepath),
-        "-ar", "16000",
-        "-ac", "1",
-        "-f", "wav",
+        "-i",
+        str(filepath),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-f",
+        "wav",
         str(output_path),
         "-y",
     ]
     console.log(f"[dim]执行 FFmpeg: {' '.join(cmd)}[/]")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(
-            f"FFmpeg 音频提取失败 (返回码 {result.returncode}): {result.stderr}"
-        )
+        raise RuntimeError(f"FFmpeg 音频提取失败 (返回码 {result.returncode}): {result.stderr}")
 
 
 def _get_audio_duration(wav_path: Path) -> float:
@@ -82,9 +82,12 @@ def _get_audio_duration(wav_path: Path) -> float:
     """
     cmd = [
         "ffprobe",
-        "-v", "quiet",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
+        "-v",
+        "quiet",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
         str(wav_path),
     ]
     try:
@@ -107,11 +110,13 @@ def _traditional_to_simplified(text: str) -> str:
     """
     try:
         from opencc import OpenCC
+
         cc = OpenCC("t2s")
         return cc.convert(text)
     except ImportError:
         try:
             from opencc_python_reimplemented import OpenCC
+
             cc = OpenCC("t2s")
             return cc.convert(text)
         except ImportError:
@@ -161,16 +166,12 @@ def _save_transcript(
         "text": text,
         "segments": segments,
     }
-    json_path.write_text(
-        json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    json_path.write_text(json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return txt_path, json_path
 
 
-def _split_into_segments(
-    text: str, duration_seconds: float, min_segment_chars: int = 50
-) -> list[dict[str, Any]]:
+def _split_into_segments(text: str, duration_seconds: float, min_segment_chars: int = 50) -> list[dict[str, Any]]:
     """将文本按标点分段并估算时间戳
 
     Args:
@@ -306,10 +307,7 @@ def transcribe_file(
             output_dir=output_dir,
         )
 
-        console.log(
-            f"[bold green]转写完成: {title} "
-            f"(时长 {duration:.1f}s, 文本 {len(text)} 字)[/]"
-        )
+        console.log(f"[bold green]转写完成: {title} (时长 {duration:.1f}s, 文本 {len(text)} 字)[/]")
 
         return TranscriptResult(
             success=True,

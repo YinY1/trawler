@@ -10,6 +10,7 @@ from pathlib import Path
 
 # ── 认证续期配置 ──────────────────────────────────────────────
 
+
 @dataclass
 class RenewalConfig:
     min_interval_hours: int = 24
@@ -23,6 +24,7 @@ class AuthGlobalConfig:
 
 
 # ── 平台认证凭证 ──────────────────────────────────────────────
+
 
 @dataclass
 class BilibiliAuth:
@@ -48,9 +50,11 @@ class WeiboAuth:
 
 # ── 下载配置 ──────────────────────────────────────────────────
 
+
 @dataclass
 class DownloadConfig:
     """媒体下载配置"""
+
     dir: str = "./downloads"
     quality: str = "worst"
     format: str = "bestaudio/worst"
@@ -59,9 +63,11 @@ class DownloadConfig:
 
 # ── 转写配置 ──────────────────────────────────────────────────
 
+
 @dataclass
 class TranscribeConfig:
     """转写引擎配置"""
+
     model: str = "base"
     language: str = "zh"
     output_dir: str = "./transcripts"
@@ -70,17 +76,20 @@ class TranscribeConfig:
 
 # ── 监控配置（各平台独立）──────────────────────────────────────
 
+
 @dataclass
 class BilibiliMonitorConfig:
     mode: str = "rss"
     interval_minutes: int = 3
     watch_dynamic: bool = True
     max_videos_per_check: int = 10
-    rsshub_instances: list[str] = field(default_factory=lambda: [
-        "https://rsshub.yfi.moe",
-        "https://rsshub.liumingye.cn",
-        "https://rss.shab.fun",
-    ])
+    rsshub_instances: list[str] = field(
+        default_factory=lambda: [
+            "https://rsshub.yfi.moe",
+            "https://rsshub.liumingye.cn",
+            "https://rss.shab.fun",
+        ]
+    )
 
 
 @dataclass
@@ -97,9 +106,11 @@ class WeiboMonitorConfig:
 
 # ── AI 分析配置 ───────────────────────────────────────────────
 
+
 @dataclass
 class AnalysisConfig:
     """AI 分析配置"""
+
     enabled: bool = True
     provider: str = "codebuddy"
     api_base: str = ""
@@ -109,9 +120,11 @@ class AnalysisConfig:
 
 # ── 推送配置 ──────────────────────────────────────────────────
 
+
 @dataclass
 class NotificationConfig:
     """通知推送配置"""
+
     enabled: bool = True
     gotify_url: str = ""
     gotify_token: str = ""
@@ -119,6 +132,7 @@ class NotificationConfig:
 
 
 # ── 订阅条目 ──────────────────────────────────────────────────
+
 
 @dataclass
 class BiliSubscription:
@@ -133,6 +147,7 @@ class UserSubscription:
 
 
 # ── 平台配置 ──────────────────────────────────────────────────
+
 
 @dataclass
 class BilibiliConfig:
@@ -162,6 +177,7 @@ class WeiboConfig:
 
 # ── 顶层配置 ──────────────────────────────────────────────────
 
+
 @dataclass
 class GeneralConfig:
     data_dir: str = "./data"
@@ -170,6 +186,7 @@ class GeneralConfig:
 @dataclass
 class Config:
     """Trawler 全局配置"""
+
     general: GeneralConfig = field(default_factory=GeneralConfig)
     auth: AuthGlobalConfig = field(default_factory=AuthGlobalConfig)
     download: DownloadConfig = field(default_factory=DownloadConfig)
@@ -181,6 +198,7 @@ class Config:
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────
+
 
 def _dict_to_dataclass(cls, data: dict):
     """Recursively convert dict to dataclass, ignoring unknown fields."""
@@ -240,7 +258,10 @@ def _parse_config(raw: dict) -> Config:
         noti = _dict_to_dataclass(NotificationConfig, xhs.get("notification", {}))
         cfg.xiaohongshu = XhsConfig(
             enabled=xhs.get("enabled", False),
-            auth=auth, monitor=monitor, subscriptions=subs, notification=noti,
+            auth=auth,
+            monitor=monitor,
+            subscriptions=subs,
+            notification=noti,
         )
 
     # weibo
@@ -251,7 +272,10 @@ def _parse_config(raw: dict) -> Config:
         noti = _dict_to_dataclass(NotificationConfig, wb.get("notification", {}))
         cfg.weibo = WeiboConfig(
             enabled=wb.get("enabled", False),
-            auth=auth, monitor=monitor, subscriptions=subs, notification=noti,
+            auth=auth,
+            monitor=monitor,
+            subscriptions=subs,
+            notification=noti,
         )
 
     return cfg
@@ -288,6 +312,7 @@ def load_config(path: str | Path = "config.toml") -> Config:
     yaml_path = p.with_suffix(".yaml")
     if yaml_path.exists():
         import warnings
+
         warnings.warn(
             f"检测到旧的配置文件 {yaml_path}，但新版使用 TOML 格式。\n"
             f"请参考 config.toml.example 创建 {path} 并迁移配置。",

@@ -202,17 +202,11 @@ class TestBaseAuthenticator:
         cls = _make_dummy_authenticator()
         auth = cls()
 
-        qr_result = QRCodeResult(
-            qr_url="https://example.com/qr", qr_key="key1", expires_in=180
-        )
+        qr_result = QRCodeResult(qr_url="https://example.com/qr", qr_key="key1", expires_in=180)
         auth.generate_qr_code = AsyncMock(return_value=qr_result)  # type: ignore[assignment]
 
-        waiting_status = AuthStatus(
-            success=False, status=QRStatus.WAITING, message="waiting"
-        )
-        success_status = AuthStatus(
-            success=True, status=QRStatus.SUCCESS, message="OK"
-        )
+        waiting_status = AuthStatus(success=False, status=QRStatus.WAITING, message="waiting")
+        success_status = AuthStatus(success=True, status=QRStatus.SUCCESS, message="OK")
         auth.poll_qr_status = AsyncMock(  # type: ignore[assignment]
             side_effect=[waiting_status, success_status]
         )
@@ -234,20 +228,12 @@ class TestBaseAuthenticator:
         cls = _make_dummy_authenticator()
         auth = cls()
 
-        qr_result = QRCodeResult(
-            qr_url="https://example.com/qr", qr_key="key1", expires_in=180
-        )
+        qr_result = QRCodeResult(qr_url="https://example.com/qr", qr_key="key1", expires_in=180)
         auth.generate_qr_code = AsyncMock(return_value=qr_result)  # type: ignore[assignment]
 
-        waiting_status = AuthStatus(
-            success=False, status=QRStatus.WAITING, message="waiting"
-        )
-        scanned_status = AuthStatus(
-            success=False, status=QRStatus.SCANNED, message="scanned"
-        )
-        success_status = AuthStatus(
-            success=True, status=QRStatus.SUCCESS, message="OK"
-        )
+        waiting_status = AuthStatus(success=False, status=QRStatus.WAITING, message="waiting")
+        scanned_status = AuthStatus(success=False, status=QRStatus.SCANNED, message="scanned")
+        success_status = AuthStatus(success=True, status=QRStatus.SUCCESS, message="OK")
         auth.poll_qr_status = AsyncMock(  # type: ignore[assignment]
             side_effect=[waiting_status, scanned_status, success_status]
         )
@@ -273,14 +259,10 @@ class TestBaseAuthenticator:
         cls = _make_dummy_authenticator()
         auth = cls()
 
-        qr_result = QRCodeResult(
-            qr_url="https://example.com/qr", qr_key="key1", expires_in=180
-        )
+        qr_result = QRCodeResult(qr_url="https://example.com/qr", qr_key="key1", expires_in=180)
         auth.generate_qr_code = AsyncMock(return_value=qr_result)  # type: ignore[assignment]
 
-        expired_status = AuthStatus(
-            success=False, status=QRStatus.EXPIRED, message="expired"
-        )
+        expired_status = AuthStatus(success=False, status=QRStatus.EXPIRED, message="expired")
         auth.poll_qr_status = AsyncMock(return_value=expired_status)  # type: ignore[assignment]
 
         with pytest.raises(QRExpiredError, match="二维码已过期"):
@@ -292,15 +274,11 @@ class TestBaseAuthenticator:
         auth = cls()
 
         # Use a very short expiry to trigger timeout quickly
-        qr_result = QRCodeResult(
-            qr_url="https://example.com/qr", qr_key="key1", expires_in=0
-        )
+        qr_result = QRCodeResult(qr_url="https://example.com/qr", qr_key="key1", expires_in=0)
         auth.generate_qr_code = AsyncMock(return_value=qr_result)  # type: ignore[assignment]
 
         # Always return WAITING so the loop exhausts the deadline
-        waiting_status = AuthStatus(
-            success=False, status=QRStatus.WAITING, message="waiting"
-        )
+        waiting_status = AuthStatus(success=False, status=QRStatus.WAITING, message="waiting")
         auth.poll_qr_status = AsyncMock(return_value=waiting_status)  # type: ignore[assignment]
 
         # Speed up: mock asyncio.sleep to avoid actual waiting

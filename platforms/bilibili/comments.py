@@ -97,12 +97,14 @@ async def fetch_comment_highlights(
             if not content:
                 continue
 
-            highlights.append(CommentHighlight(
-                content=content,
-                user_name=user_name,
-                is_up_owner=is_up,
-                like_count=like_count,
-            ))
+            highlights.append(
+                CommentHighlight(
+                    content=content,
+                    user_name=user_name,
+                    is_up_owner=is_up,
+                    like_count=like_count,
+                )
+            )
 
         # 检查是否还有更多页
         page_info = resp.get("page", {})
