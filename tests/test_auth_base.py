@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import enum
-import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,8 +11,8 @@ from shared.auth.base import (
     BaseAuthenticator,
     NetworkError,
     PlatformTokens,
-    QRExpiredError,
     QRCodeResult,
+    QRExpiredError,
     QRStatus,
     RefreshFailedError,
     TokenInvalidError,

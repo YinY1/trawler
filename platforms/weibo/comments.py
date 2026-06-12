@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -44,8 +45,6 @@ def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> We
             return None
 
         # 去除 HTML 标签
-        import re
-
         content = re.sub(r"<[^>]+>", "", content)
         content = content.strip()
         if not content:
@@ -108,11 +107,14 @@ async def fetch_weibo_comment_highlights(
     session = await get_session()
 
     try:
-        mock_resp = await session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT))
-        if mock_resp.status != 200:
-            logger.debug("[评论] API 返回状态码: %s, post_id: %s", mock_resp.status, post_id)
-            return []
-        data = await mock_resp.json(content_type=None)
+        resp = await session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT))
+        try:
+            if resp.status != 200:
+                logger.debug("[评论] API 返回状态码: %s, post_id: %s", resp.status, post_id)
+                return []
+            data = await resp.json()
+        finally:
+            resp.close()
 
         if not data.get("ok"):
             logger.debug("[评论] API 失败: %s, post_id: %s", data.get("msg", "unknown"), post_id)

@@ -95,16 +95,19 @@ class WeiboAuthenticator(BaseAuthenticator):
             headers={"User-Agent": _get_user_agent()},
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
-        if resp.status != 200:
-            raise RuntimeError(f"生成二维码失败，状态码: {resp.status}")
-        data = await resp.json()
+        try:
+            if resp.status != 200:
+                raise RuntimeError(f"生成二维码失败，状态码: {resp.status}")
+            data = await resp.json()
+        finally:
+            resp.close()
 
         qrid = data.get("data", {}).get("qrid", "")
         if not qrid:
             raise RuntimeError("生成二维码失败：未获取到 qrid")
 
-        # 构造可直接用于 QR 显示的 URL
-        qr_url = "https://passport.weibo.com/sso/v2/qrcode/image?entry=miniblog&size=180"
+        # 构造登录 URL，手机微博 App 扫描此 URL 后触发登录流程
+        qr_url = f"https://passport.weibo.com/sso/v2/qrcode/login?entry=miniblog&qrid={qrid}"
         return QRCodeResult(qr_url=qr_url, qr_key=qrid, expires_in=WEIBO_POLL_TIMEOUT)
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
@@ -115,10 +118,13 @@ class WeiboAuthenticator(BaseAuthenticator):
             headers={"User-Agent": _get_user_agent()},
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
-        if resp.status != 200:
-            logger.warning("轮询二维码状态失败，状态码: %s", resp.status)
-            return AuthStatus(success=False, status=QRStatus.WAITING, message="请求失败")
-        data = await resp.json()
+        try:
+            if resp.status != 200:
+                logger.warning("轮询二维码状态失败，状态码: %s", resp.status)
+                return AuthStatus(success=False, status=QRStatus.WAITING, message="请求失败")
+            data = await resp.json()
+        finally:
+            resp.close()
 
         status_code = data.get("data", {}).get("status", 0)
         status = _QR_STATUS_MAP.get(status_code, QRStatus.WAITING)
@@ -145,7 +151,10 @@ class WeiboAuthenticator(BaseAuthenticator):
             headers={"User-Agent": _get_user_agent()},
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
-        data = await resp.json()
+        try:
+            data = await resp.json()
+        finally:
+            resp.close()
         status_code = data.get("data", {}).get("status", 0)
 
         if status_code != 3:
@@ -157,7 +166,10 @@ class WeiboAuthenticator(BaseAuthenticator):
             headers={"User-Agent": _get_user_agent()},
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
-        set_cookie = resp2.headers.get("Set-Cookie", "")
+        try:
+            set_cookie = resp2.headers.get("Set-Cookie", "")
+        finally:
+            resp2.close()
 
         if not set_cookie:
             raise RefreshFailedError("未获取到 Cookie 响应头")
@@ -192,9 +204,12 @@ class WeiboAuthenticator(BaseAuthenticator):
                 timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
                 allow_redirects=False,
             )
-            if resp.status != 200:
-                return tokens
-            set_cookie = resp.headers.get("Set-Cookie", "")
+            try:
+                if resp.status != 200:
+                    return tokens
+                set_cookie = resp.headers.get("Set-Cookie", "")
+            finally:
+                resp.close()
 
             if set_cookie:
                 new_cookies = _parse_weibo_cookies(set_cookie)
@@ -230,7 +245,10 @@ class WeiboAuthenticator(BaseAuthenticator):
                 timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
                 allow_redirects=False,
             )
-            return resp.status == 200
+            try:
+                return resp.status == 200
+            finally:
+                resp.close()
         except Exception:
             return False
 

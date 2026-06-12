@@ -6,10 +6,9 @@ import logging
 import re
 from typing import Optional
 
+from platforms.bilibili.monitor import SubscriptionStore
 from shared.config import Config
 from shared.protocols import DynamicInfo
-
-from platforms.bilibili.monitor import SubscriptionStore
 
 logger = logging.getLogger(__name__)
 

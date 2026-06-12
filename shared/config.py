@@ -7,7 +7,6 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-
 # ── 认证续期配置 ──────────────────────────────────────────────
 
 

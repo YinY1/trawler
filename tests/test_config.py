@@ -1,33 +1,29 @@
 """Tests for shared/config.py — TOML-based configuration"""
 
-import os
-import pytest
-from pathlib import Path
 
 from shared.config import (
-    Config,
-    GeneralConfig,
-    AuthGlobalConfig,
-    RenewalConfig,
-    BilibiliAuth,
-    XhsAuth,
-    WeiboAuth,
-    DownloadConfig,
-    TranscribeConfig,
-    BilibiliMonitorConfig,
-    XhsMonitorConfig,
-    WeiboMonitorConfig,
     AnalysisConfig,
-    NotificationConfig,
-    BiliSubscription,
-    UserSubscription,
+    AuthGlobalConfig,
+    BilibiliAuth,
     BilibiliConfig,
-    XhsConfig,
+    BilibiliMonitorConfig,
+    BiliSubscription,
+    Config,
+    DownloadConfig,
+    GeneralConfig,
+    NotificationConfig,
+    RenewalConfig,
+    TranscribeConfig,
+    UserSubscription,
+    WeiboAuth,
     WeiboConfig,
-    load_config,
+    WeiboMonitorConfig,
+    XhsAuth,
+    XhsConfig,
+    XhsMonitorConfig,
     _dict_to_dataclass,
+    load_config,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────
 

@@ -46,10 +46,13 @@ async def _download_file(url: str, dest: Path) -> bool:
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         resp = await session.get(url, timeout=aiohttp.ClientTimeout(total=WEIBO_DOWNLOAD_TIMEOUT))
-        if resp.status != 200:
-            logger.debug("下载文件失败，状态码: %s, URL: %s", resp.status, url)
-            return False
-        content = await resp.read()
+        try:
+            if resp.status != 200:
+                logger.debug("下载文件失败，状态码: %s, URL: %s", resp.status, url)
+                return False
+            content = await resp.read()
+        finally:
+            resp.close()
         dest.write_bytes(content)
         return True
     except Exception as e:

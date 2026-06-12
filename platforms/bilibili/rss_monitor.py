@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,6 @@ from typing import Optional
 
 import aiohttp
 import feedparser
-import logging
 
 from platforms.bilibili.monitor import SubscriptionStore
 from shared.config import Config

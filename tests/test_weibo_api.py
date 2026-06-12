@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from platforms.weibo.api import (
-    WeiboApiClient,
     _parse_mobile_post,
     _parse_pc_post,
     fetch_user_posts_mobile,
@@ -19,21 +18,6 @@ from platforms.weibo.api import (
 
 def _make_cookie_str() -> str:
     return "SUB=fake_sub; SUBP=fake_subp; WBPSESS=fake_wbpsess; SSOLoginState=123"
-
-
-# ── WeiboApiClient ────────────────────────────────────────
-
-
-class TestWeiboApiClient:
-    def test_init_stores_cookies(self):
-        client = WeiboApiClient("SUB=abc")
-        assert client._cookie == "SUB=abc"
-        assert "User-Agent" in client._headers
-
-    def test_headers_contain_cookie(self):
-        client = WeiboApiClient("SUB=abc")
-        assert client._headers["Cookie"] == "SUB=abc"
-        assert "weibo.com" in client._headers.get("Referer", "")
 
 
 # ── fetch_user_posts_mobile ───────────────────────────────

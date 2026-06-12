@@ -52,21 +52,6 @@ _CHINESE_TIME_RE = re.compile(
 )
 
 
-class WeiboApiClient:
-    """微博 API 客户端（带 Cookie 的 HTTP 会话）"""
-
-    def __init__(self, cookie: str, user_agent: str = _DEFAULT_UA) -> None:
-        self._cookie = cookie
-        self._headers: dict[str, str] = {
-            "User-Agent": user_agent,
-            "Referer": "https://weibo.com/",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        }
-        if cookie:
-            self._headers["Cookie"] = cookie
-
-
 # ── 公共辅助函数 ──────────────────────────────────────────
 
 

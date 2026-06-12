@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import subprocess
 from collections import Counter
-from dataclasses import dataclass
 
 from rich.console import Console
 

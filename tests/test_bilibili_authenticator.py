@@ -9,14 +9,12 @@ import pytest
 
 from platforms.bilibili.auth import BilibiliAuthenticator, get_credential
 from shared.auth.base import (
-    AuthStatus,
     PlatformTokens,
     QRCodeResult,
     QRStatus,
     RefreshFailedError,
 )
 from shared.config import BilibiliAuth, BilibiliConfig, Config
-
 
 # ── Fixtures ──────────────────────────────────────────────────
 

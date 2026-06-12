@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
 import aiohttp
 from rich.console import Console
-import logging
 
 from platforms.xiaohongshu.auth import (
     XHS_BASE_URL,
