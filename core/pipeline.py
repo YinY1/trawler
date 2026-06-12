@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +36,9 @@ from shared.protocols import (
     ParsedNote,
     TranscriptResult,
     VideoInfo,
+    WeiboCommentHighlight,
+    WeiboDownloadResult,
+    WeiboPost,
     XhsCommentHighlight,
     XhsDownloadResult,
 )
@@ -45,31 +47,39 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 # ── B站 ───────────────────────────────────────────────────
-from platforms.bilibili.monitor import SubscriptionStore, check_new_videos  # noqa: E402
-from platforms.bilibili.rss_monitor import RSSAllFailedError, RSSMonitor  # noqa: E402
-from platforms.bilibili.dynamic import check_new_dynamics  # noqa: E402
-from platforms.bilibili.comments import fetch_comment_highlights  # noqa: E402
-
-# ── 下载 ──────────────────────────────────────────────────
-from shared.downloader import download_video  # noqa: E402
+from core.notifier import notify_dynamic, notify_new_video, notify_new_weibo_post, notify_new_xhs_note  # noqa: E402
+from core.summarizer import extract_keywords, generate_summary  # noqa: E402
 
 # ── 核心处理 ──────────────────────────────────────────────
-from core.transcriber import transcribe_file_async, cleanup_media  # noqa: E402
-from core.summarizer import generate_summary, extract_keywords  # noqa: E402
-from core.notifier import notify_new_video, notify_new_xhs_note, notify_dynamic  # noqa: E402
-from shared.http import close_session  # noqa: E402
+from core.transcriber import cleanup_media, transcribe_file_async  # noqa: E402
+from platforms.bilibili.comments import fetch_comment_highlights  # noqa: E402
+from platforms.bilibili.dynamic import check_new_dynamics  # noqa: E402
+from platforms.bilibili.monitor import SubscriptionStore, check_new_videos  # noqa: E402
+from platforms.bilibili.rss_monitor import RSSAllFailedError, RSSMonitor  # noqa: E402
+from platforms.weibo.comments import fetch_weibo_comment_highlights  # noqa: E402
+from platforms.weibo.downloader import download_weibo_media  # noqa: E402
+
+# ── 微博 ──────────────────────────────────────────────────
+from platforms.weibo.monitor import (  # noqa: E402
+    WeiboSubscriptionStore,
+    check_new_weibo_posts,
+)
+from platforms.weibo.parser import parse_weibo_post  # noqa: E402
+from platforms.xiaohongshu.comments import fetch_xhs_comment_highlights  # noqa: E402
+from platforms.xiaohongshu.downloader import (  # noqa: E402
+    download_note,
+)
 
 # ── 小红书 ────────────────────────────────────────────────
 from platforms.xiaohongshu.monitor import (  # noqa: E402
     XhsSubscriptionStore,
     check_new_notes,
 )
-from platforms.xiaohongshu.downloader import (  # noqa: E402
-    download_note,
-)
 from platforms.xiaohongshu.parser import parse_note_content  # noqa: E402
-from platforms.xiaohongshu.comments import fetch_xhs_comment_highlights  # noqa: E402
 
+# ── 下载 ──────────────────────────────────────────────────
+from shared.downloader import download_video  # noqa: E402
+from shared.http import close_session  # noqa: E402
 
 # ── 统计 ──────────────────────────────────────────────────
 
@@ -87,26 +97,27 @@ class _Stats:
         self.notes_processed: int = 0
         self.notes_succeeded: int = 0
         self.notes_failed: int = 0
+        self.weibo_posts_processed: int = 0
+        self.weibo_posts_succeeded: int = 0
+        self.weibo_posts_failed: int = 0
 
     def report(self) -> str:
         lines: list[str] = []
         if self.videos_processed:
             lines.append(
-                f"  视频: {self.videos_processed} 处理, "
-                f"{self.videos_succeeded} 成功, "
-                f"{self.videos_failed} 失败"
+                f"  视频: {self.videos_processed} 处理, {self.videos_succeeded} 成功, {self.videos_failed} 失败"
             )
         if self.dynamics_processed:
             lines.append(
-                f"  动态: {self.dynamics_processed} 处理, "
-                f"{self.dynamics_succeeded} 成功, "
-                f"{self.dynamics_failed} 失败"
+                f"  动态: {self.dynamics_processed} 处理, {self.dynamics_succeeded} 成功, {self.dynamics_failed} 失败"
             )
         if self.notes_processed:
+            lines.append(f"  笔记: {self.notes_processed} 处理, {self.notes_succeeded} 成功, {self.notes_failed} 失败")
+        if self.weibo_posts_processed:
             lines.append(
-                f"  笔记: {self.notes_processed} 处理, "
-                f"{self.notes_succeeded} 成功, "
-                f"{self.notes_failed} 失败"
+                f"  微博: {self.weibo_posts_processed} 处理, "
+                f"{self.weibo_posts_succeeded} 成功, "
+                f"{self.weibo_posts_failed} 失败"
             )
         return "\n".join(lines) if lines else "  无内容需要处理"
 
@@ -160,19 +171,17 @@ async def run_bili_check_once(config: Config) -> None:
             for sub in config.bilibili.subscriptions:
                 try:
                     videos, _ok = await rss_monitor.check_up(
-                        uid=sub.uid, name=sub.name, store=store,
+                        uid=sub.uid,
+                        name=sub.name,
+                        store=store,
                     )
                     new_videos.extend(videos)
                 except RSSAllFailedError:
                     raise  # 向上传递
                 except Exception as exc:
-                    console.print(
-                        f"[yellow]⚠️  RSS 检查 {sub.name}({sub.uid}) 失败: {exc}[/yellow]"
-                    )
+                    console.print(f"[yellow]⚠️  RSS 检查 {sub.name}({sub.uid}) 失败: {exc}[/yellow]")
         except RSSAllFailedError as exc:
-            console.print(
-                f"[yellow]⚠️  RSS 全部失败，降级到 API 模式: {exc}[/yellow]"
-            )
+            console.print(f"[yellow]⚠️  RSS 全部失败，降级到 API 模式: {exc}[/yellow]")
             logger.warning("RSS all failed, falling back to API: %s", exc)
             new_videos = await _api_check(config, store)
     else:
@@ -207,7 +216,9 @@ async def run_bili_check_once(config: Config) -> None:
         for sub in config.bilibili.subscriptions:
             try:
                 new_dynamics = await check_new_dynamics(
-                    uid=sub.uid, config=config, store=store,
+                    uid=sub.uid,
+                    config=config,
+                    store=store,
                 )
                 for dyn in new_dynamics:
                     _run_stats.dynamics_processed += 1
@@ -216,17 +227,15 @@ async def run_bili_check_once(config: Config) -> None:
                         _run_stats.dynamics_succeeded += 1
                     except Exception as exc:
                         _run_stats.dynamics_failed += 1
-                        console.print(
-                            f"[red]✗ 处理动态失败: {exc}[/red]"
-                        )
+                        console.print(f"[red]✗ 处理动态失败: {exc}[/red]")
                         logger.exception("Failed to process dynamic")
             except Exception as exc:
-                console.print(
-                    f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 动态失败: {exc}[/yellow]"
-                )
+                console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 动态失败: {exc}[/yellow]")
                 logger.warning(
                     "Failed to check dynamics for %s(%s): %s",
-                    sub.name, sub.uid, exc,
+                    sub.name,
+                    sub.uid,
+                    exc,
                 )
 
     # 持久化 Store（所有视频/动态处理完成后统一保存）
@@ -242,12 +251,8 @@ async def _api_check(config: Config, store: SubscriptionStore) -> list[VideoInfo
             new = await check_new_videos(uid=sub.uid, config=config, store=store)
             all_new.extend(new)
         except Exception as exc:
-            console.print(
-                f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 失败: {exc}[/yellow]"
-            )
-            logger.warning(
-                "API check failed for %s(%s): %s", sub.name, sub.uid, exc
-            )
+            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 失败: {exc}[/yellow]")
+            logger.warning("API check failed for %s(%s): %s", sub.name, sub.uid, exc)
     return all_new
 
 
@@ -335,7 +340,10 @@ async def process_video(
     keywords: list[str] = []
     try:
         keywords = extract_keywords(
-            text=summary_text, title=title, author=author, config=config,
+            text=summary_text,
+            title=title,
+            author=author,
+            config=config,
         )
     except Exception as exc:
         console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/yellow]")
@@ -401,9 +409,7 @@ async def process_dynamic(
                     store=store,
                 )
             except Exception as exc:
-                console.print(
-                    f"[red]✗ 动态关联视频处理失败: {exc}[/red]"
-                )
+                console.print(f"[red]✗ 动态关联视频处理失败: {exc}[/red]")
                 logger.exception(
                     "Linked video process failed for dynamic %s",
                     dynamic_info.dynamic_id,
@@ -449,7 +455,10 @@ async def run_xhs_check_once(config: Config) -> None:
     for sub in config.xiaohongshu.subscriptions:
         try:
             new_notes = await check_new_notes(
-                user_id=sub.user_id, name=sub.name, config=config, store=store,
+                user_id=sub.user_id,
+                name=sub.name,
+                config=config,
+                store=store,
             )
             for note in new_notes:
                 _run_stats.notes_processed += 1
@@ -458,17 +467,11 @@ async def run_xhs_check_once(config: Config) -> None:
                     _run_stats.notes_succeeded += 1
                 except Exception as exc:
                     _run_stats.notes_failed += 1
-                    console.print(
-                        f"[red]✗ 处理笔记 {note.note_id} 失败: {exc}[/red]"
-                    )
+                    console.print(f"[red]✗ 处理笔记 {note.note_id} 失败: {exc}[/red]")
                     logger.exception("Failed to process note %s", note.note_id)
         except Exception as exc:
-            console.print(
-                f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/yellow]"
-            )
-            logger.warning(
-                "XHS check failed for %s(%s): %s", sub.name, sub.user_id, exc
-            )
+            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/yellow]")
+            logger.warning("XHS check failed for %s(%s): %s", sub.name, sub.user_id, exc)
 
     # 持久化 Store（所有笔记处理完成后统一保存）
     store.save()
@@ -565,7 +568,10 @@ async def process_xhs_note(
     keywords: list[str] = []
     try:
         keywords = extract_keywords(
-            text=summary_text, title=note.title, author=note.author, config=config,
+            text=summary_text,
+            title=note.title,
+            author=note.author,
+            config=config,
         )
     except Exception as exc:
         console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/yellow]")
@@ -601,6 +607,155 @@ async def process_xhs_note(
 
 
 # ═══════════════════════════════════════════════════════════
+# 微博完整流程
+# ═══════════════════════════════════════════════════════════
+
+
+async def run_weibo_check_once(config: Config) -> None:
+    """微博完整检查流程"""
+    global _run_stats  # noqa: PLW0603
+    assert _run_stats is not None  # 由 run_check_once 初始化
+
+    store = WeiboSubscriptionStore("data")
+
+    console.print("[cyan]🔍 检查微博新帖子…[/cyan]")
+
+    for sub in config.weibo.subscriptions:
+        try:
+            new_posts = await check_new_weibo_posts(
+                user_id=sub.user_id,
+                name=sub.name,
+                config=config,
+                store=store,
+            )
+            for post in new_posts:
+                _run_stats.weibo_posts_processed += 1
+                try:
+                    await process_weibo_post(post, config, store)
+                    _run_stats.weibo_posts_succeeded += 1
+                except Exception as exc:
+                    _run_stats.weibo_posts_failed += 1
+                    console.print(f"[red]✗ 处理微博 {post.post_id} 失败: {exc}[/red]")
+                    logger.exception("Failed to process weibo post %s", post.post_id)
+        except Exception as exc:
+            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/yellow]")
+            logger.warning("Weibo check failed for %s(%s): %s", sub.name, sub.user_id, exc)
+
+    # 持久化 Store
+    store.save()
+    console.print("[green]✓ 微博检查完成[/green]")
+
+
+# ═══════════════════════════════════════════════════════════
+# 微博帖子处理流水线
+# ═══════════════════════════════════════════════════════════
+
+
+async def process_weibo_post(
+    post: WeiboPost,
+    config: Config,
+    store: WeiboSubscriptionStore,
+) -> None:
+    """处理单个微博帖子的完整流水线"""
+    display_title = post.clean_text[:50] if post.clean_text else post.post_id
+    console.print(f"[bold yellow]▶ 处理微博[/bold yellow] {display_title} ({post.post_id})")
+
+    # Step 1: 下载媒体
+    dl_result: WeiboDownloadResult | None = None
+    try:
+        console.print("  [dim]⬇ 下载图片…[/dim]")
+        dl_result = await download_weibo_media(post=post, config=config)
+    except Exception as exc:
+        console.print(f"  [red]✗ 下载失败: {exc}[/red]")
+        logger.exception("Weibo download failed for %s", post.post_id)
+        store.mark_known_weibo_post(post)
+        return
+
+    if not dl_result.success:
+        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/yellow]")
+        store.mark_known_weibo_post(post)
+        return
+
+    # Step 2: 解析内容
+    parsed: dict = {}
+    try:
+        console.print("  [dim]📄 解析内容…[/dim]")
+        parsed = parse_weibo_post(post=post, download_result=dl_result)
+    except Exception as exc:
+        console.print(f"  [red]✗ 内容解析失败: {exc}[/red]")
+        logger.exception("Weibo parse failed for %s", post.post_id)
+
+    # Step 3: 评论亮点
+    highlights: list[WeiboCommentHighlight] = []
+    try:
+        console.print("  [dim]💬 获取评论亮点…[/dim]")
+        highlights = await fetch_weibo_comment_highlights(
+            post_id=post.post_id,
+            config=config,
+            author_user_id=post.user_id,
+        )
+    except Exception as exc:
+        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/yellow]")
+        logger.warning("Weibo comment highlights failed for %s: %s", post.post_id, exc)
+
+    # Step 4: 生成摘要
+    summary_text: str = ""
+    content_text = parsed.get("text", "") or post.clean_text or ""
+
+    try:
+        console.print("  [dim]🤖 生成摘要…[/dim]")
+        summary_text, _source, _is_ai = generate_summary(
+            source_id=post.post_id,
+            title=display_title,
+            author=post.author,
+            text=content_text,
+            config=config,
+        )
+    except Exception as exc:
+        console.print(f"  [red]✗ 摘要生成失败: {exc}[/red]")
+        logger.exception("Weibo summary failed for %s", post.post_id)
+
+    # Step 5: 提取关键词
+    keywords: list[str] = []
+    topics = parsed.get("topics", [])
+    try:
+        keywords = extract_keywords(
+            text=summary_text,
+            title=display_title,
+            author=post.author,
+            config=config,
+        )
+        # 合并话题标签
+        if topics:
+            keywords = list(dict.fromkeys(topics + keywords))  # 去重保序
+    except Exception as exc:
+        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/yellow]")
+        logger.warning("Weibo keywords failed for %s: %s", post.post_id, exc)
+        keywords = topics  # 降级：使用话题标签
+
+    # Step 6: 通知推送
+    try:
+        comment_md = _format_comment_highlights(highlights)
+        await notify_new_weibo_post(
+            post_id=post.post_id,
+            title=display_title,
+            author=post.author,
+            summary=summary_text,
+            keywords=keywords,
+            comment_highlights=comment_md,
+            weibo_noti_config=config.weibo.notification,
+        )
+    except Exception as exc:
+        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/yellow]")
+        logger.warning("Weibo notify failed for %s: %s", post.post_id, exc)
+
+    # Step 7: 标记已知
+    store.mark_known_weibo_post(post)
+
+    console.print("  [green]✓ 微博处理完成[/green]")
+
+
+# ═══════════════════════════════════════════════════════════
 # 统一入口
 # ═══════════════════════════════════════════════════════════
 
@@ -610,7 +765,7 @@ async def run_check_once(config: Config, platform: str = "all") -> None:
 
     Args:
         config: 全局配置
-        platform: "all" | "bili" | "xhs"
+        platform: "all" | "bili" | "xhs" | "weibo"
     """
     global _run_stats  # noqa: PLW0603
     _run_stats = _Stats()
@@ -624,6 +779,9 @@ async def run_check_once(config: Config, platform: str = "all") -> None:
 
     if platform in ("all", "xhs") and config.xiaohongshu.enabled:
         await run_xhs_check_once(config)
+
+    if platform in ("all", "weibo") and config.weibo.enabled:
+        await run_weibo_check_once(config)
 
     # 打印统计
     console.print()

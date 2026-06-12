@@ -11,10 +11,10 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from shared.auth import get_authenticator, update_auth_section, QRExpiredError
+from core.pipeline import run_check_once
+from shared.auth import QRExpiredError, get_authenticator, update_auth_section
 from shared.auth.base import PlatformTokens
 from shared.config import load_config
-from core.pipeline import run_check_once
 
 console = Console()
 
@@ -34,18 +34,25 @@ def cli() -> None:
 )
 def login(platform: str) -> None:
     """二维码扫码登录"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
+    )
 
-    if platform in ("xhs", "weibo"):
+    if platform == "xhs":
         console.print(f"[yellow]{platform} 登录功能将在后续版本支持[/yellow]")
         return
 
     try:
         authenticator = get_authenticator(platform)
         tokens = asyncio.run(authenticator.qr_login())
-        auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
-        # ac_time_value is stored separately (not in PlatformTokens)
-        if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
+        # Weibo stores cookies as a single semicolon-delimited string
+        if platform == "weibo":
+            cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
+            auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
+        else:
+            auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
+        # ac_time_value is stored separately (not in PlatformTokens) — only for bilibili
+        if platform == "bili" and hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
             auth_dict["ac_time_value"] = authenticator._last_ac_time_value
         update_auth_section(platform, auth_dict)
         console.print(f"[green]✓ {platform} 登录成功，凭证已保存[/green]")
@@ -66,7 +73,9 @@ def token() -> None:
 @token.command("status")
 def token_status() -> None:
     """查看各平台 token 状态"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
+    )
     config = load_config("config.toml")
 
     table = Table(title="Token 状态")
@@ -89,7 +98,11 @@ def token_status() -> None:
         else:
             remaining = auth.expires_at - now
             days = int(remaining // 86400)
-            table.add_row(name, f"[green]有效[/green] (剩余 {days} 天)", time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)))
+            table.add_row(
+                name,
+                f"[green]有效[/green] (剩余 {days} 天)",
+                time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)),
+            )
 
     console.print(table)
 
@@ -103,7 +116,9 @@ def token_status() -> None:
 )
 def token_refresh(platform: str) -> None:
     """手动续期 token"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
+    )
 
     config = load_config("config.toml")
 
@@ -112,35 +127,64 @@ def token_refresh(platform: str) -> None:
         if auth.expires_at <= 0 or auth.expires_at < time.time():
             console.print("[red]✗ Token 已过期或未配置，请先执行 trawler login --platform bili[/red]")
             sys.exit(1)
-    elif platform in ("xhs", "weibo"):
+        try:
+            authenticator = get_authenticator(platform)
+            bili_auth = config.bilibili.auth
+            current_tokens = PlatformTokens(
+                platform=platform,
+                cookies={
+                    "SESSDATA": bili_auth.sessdata,
+                    "bili_jct": bili_auth.bili_jct,
+                    "buvid3": bili_auth.buvid3,
+                    "DedeUserID": bili_auth.dedeuserid,
+                },
+                obtained_at=time.time(),
+                expires_at=bili_auth.expires_at,
+            )
+            tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
+            auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
+            # ac_time_value is stored separately (not in PlatformTokens)
+            if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
+                auth_dict["ac_time_value"] = authenticator._last_ac_time_value
+            update_auth_section(platform, auth_dict)
+            console.print(f"[green]✓ {platform} Token 续期成功[/green]")
+        except Exception as exc:
+            console.print(f"[red]✗ 续期失败: {exc}[/red]")
+            sys.exit(1)
+
+    elif platform == "weibo":
+        auth = config.weibo.auth
+        if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
+            console.print("[red]✗ 未配置微博 Cookie 或已过期，请先执行 trawler login --platform weibo[/red]")
+            sys.exit(1)
+        try:
+            from platforms.weibo.auth import WeiboAuthenticator
+
+            authenticator = WeiboAuthenticator()
+            # Parse single cookie string into individual keys
+            cookie_dict: dict[str, str] = {}
+            for part in auth.cookie.split(";"):
+                if "=" in part:
+                    k, v = part.strip().split("=", 1)
+                    cookie_dict[k] = v
+            current_tokens = PlatformTokens(
+                platform="weibo",
+                cookies=cookie_dict,
+                obtained_at=time.time(),
+                expires_at=auth.expires_at,
+            )
+            tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
+            cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
+            auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
+            update_auth_section(platform, auth_dict)
+            console.print("[green]✓ weibo Token 续期成功[/green]")
+        except Exception as exc:
+            console.print(f"[red]✗ 续期失败: {exc}[/red]")
+            sys.exit(1)
+
+    elif platform == "xhs":
         console.print(f"[yellow]{platform} 续期功能将在后续版本支持[/yellow]")
         return
-
-    try:
-        authenticator = get_authenticator(platform)
-        # Build PlatformTokens with actual cookies from config (not empty)
-        bili_auth = config.bilibili.auth
-        current_tokens = PlatformTokens(
-            platform=platform,
-            cookies={
-                "SESSDATA": bili_auth.sessdata,
-                "bili_jct": bili_auth.bili_jct,
-                "buvid3": bili_auth.buvid3,
-                "DedeUserID": bili_auth.dedeuserid,
-            },
-            obtained_at=time.time(),
-            expires_at=bili_auth.expires_at,
-        )
-        tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
-        auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
-        # ac_time_value is stored separately (not in PlatformTokens)
-        if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-            auth_dict["ac_time_value"] = authenticator._last_ac_time_value
-        update_auth_section(platform, auth_dict)
-        console.print(f"[green]✓ {platform} Token 续期成功[/green]")
-    except Exception as exc:
-        console.print(f"[red]✗ 续期失败: {exc}[/red]")
-        sys.exit(1)
 
 
 @cli.command()
