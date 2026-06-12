@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from typing import Any
-
-import logging
 
 from rich.console import Console
 
@@ -21,9 +20,7 @@ XHS_BASE_URL = "https://www.xiaohongshu.com"
 
 # 常用浏览器 User-Agent
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
 
 
@@ -47,9 +44,7 @@ def get_xhs_cookie(config: Config) -> str:
         return cookie.strip()
 
     logger.warning("未配置小红书 Cookie，API 请求可能失败")
-    console.print(
-        "[yellow]⚠ 未配置小红书 Cookie，请在 config.toml 或环境变量 XHS_COOKIE 中设置[/yellow]"
-    )
+    console.print("[yellow]⚠ 未配置小红书 Cookie，请在 config.toml 或环境变量 XHS_COOKIE 中设置[/yellow]")
     return ""
 
 

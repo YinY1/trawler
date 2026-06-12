@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Optional
 
 import aiohttp
 from rich.console import Console
@@ -17,6 +16,7 @@ console = Console()
 
 
 # ── 底层 Gotify 接口 ─────────────────────────────────────────────
+
 
 async def send_gotify(
     title: str,
@@ -70,21 +70,13 @@ async def send_gotify(
             return True
 
         except asyncio.TimeoutError:
-            console.log(
-                f"[yellow]Gotify 请求超时 (尝试 {attempt}/{max_retries})[/]"
-            )
+            console.log(f"[yellow]Gotify 请求超时 (尝试 {attempt}/{max_retries})[/]")
         except aiohttp.ClientConnectionError:
-            console.log(
-                f"[yellow]Gotify 连接失败 (尝试 {attempt}/{max_retries})[/]"
-            )
+            console.log(f"[yellow]Gotify 连接失败 (尝试 {attempt}/{max_retries})[/]")
         except aiohttp.ClientResponseError as e:
-            console.log(
-                f"[yellow]Gotify HTTP 错误 (尝试 {attempt}/{max_retries}): {e}[/]"
-            )
+            console.log(f"[yellow]Gotify HTTP 错误 (尝试 {attempt}/{max_retries}): {e}[/]")
         except Exception as e:
-            console.log(
-                f"[yellow]Gotify 发送异常 (尝试 {attempt}/{max_retries}): {e}[/]"
-            )
+            console.log(f"[yellow]Gotify 发送异常 (尝试 {attempt}/{max_retries}): {e}[/]")
 
         # 指数退避：1s, 2s, 4s
         if attempt < max_retries:
@@ -97,6 +89,7 @@ async def send_gotify(
 
 
 # ── B 站视频通知 ─────────────────────────────────────────────────
+
 
 async def notify_new_video(
     bvid: str,
@@ -154,11 +147,13 @@ async def notify_new_video(
     ]
 
     if comment_highlights:
-        parts.extend([
-            "",
-            "**评论区补充:**",
-            comment_highlights,
-        ])
+        parts.extend(
+            [
+                "",
+                "**评论区补充:**",
+                comment_highlights,
+            ]
+        )
 
     message = "\n".join(parts)
     return await send_gotify(
@@ -169,6 +164,7 @@ async def notify_new_video(
 
 
 # ── 小红书笔记通知 ───────────────────────────────────────────────
+
 
 async def notify_new_xhs_note(
     note_id: str,
@@ -224,11 +220,13 @@ async def notify_new_xhs_note(
     ]
 
     if comment_highlights:
-        parts.extend([
-            "",
-            "**评论区补充:**",
-            comment_highlights,
-        ])
+        parts.extend(
+            [
+                "",
+                "**评论区补充:**",
+                comment_highlights,
+            ]
+        )
 
     message = "\n".join(parts)
     return await send_gotify(
@@ -239,6 +237,7 @@ async def notify_new_xhs_note(
 
 
 # ── 动态通知 ─────────────────────────────────────────────────────
+
 
 async def notify_dynamic(
     dynamic_info: dict[str, str],
@@ -277,12 +276,14 @@ async def notify_dynamic(
         link_text = dynamic_id if dynamic_id else "查看详情"
         parts.append(f"**链接:** [{link_text}]({url})")
 
-    parts.extend([
-        "",
-        "---",
-        "",
-        content,
-    ])
+    parts.extend(
+        [
+            "",
+            "---",
+            "",
+            content,
+        ]
+    )
 
     message = "\n".join(parts)
     title = f"📢 {user} 的{dynamic_type}"
@@ -293,4 +294,77 @@ async def notify_dynamic(
         title=title,
         message=message,
         config=config,
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+
+
+async def notify_new_weibo_post(
+    post_id: str,
+    title: str,
+    author: str,
+    summary: str,
+    keywords: list[str],
+    comment_highlights: str | None = None,
+    weibo_noti_config: NotificationConfig | None = None,
+    *,
+    gotify_url: str = "",
+    gotify_token: str = "",
+) -> bool:
+    """发送微博新帖子通知。
+
+    构造 Markdown 格式的通知消息，包含帖子和 AI 摘要。
+
+    Args:
+        post_id: 微博帖子 ID
+        title: 帖子标题/摘要
+        author: 作者名称
+        summary: AI 摘要文本
+        keywords: 关键词列表
+        comment_highlights: 评论区精选内容（可选）
+        weibo_noti_config: 微博通知配置
+        gotify_url: Gotify URL（备选参数）
+        gotify_token: Gotify Token（备选参数）
+
+    Returns:
+        是否发送成功
+    """
+    if weibo_noti_config is None:
+        weibo_noti_config = NotificationConfig(
+            enabled=True,
+            gotify_url=gotify_url,
+            gotify_token=gotify_token,
+        )
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    keywords_str = "；".join(keywords) if keywords else "无"
+    post_url = f"https://weibo.com/{post_id}"
+
+    parts: list[str] = [
+        f"**作者:** {author}",
+        f"**链接:** [{post_id}]({post_url})",
+        f"**发布时间:** {now}",
+        f"**关键词:** {keywords_str}",
+        "",
+        "---",
+        "",
+        "**详情:**",
+        summary,
+    ]
+
+    if comment_highlights:
+        parts.extend(
+            [
+                "",
+                "**评论区补充:**",
+                comment_highlights,
+            ]
+        )
+
+    message = "\n".join(parts)
+    return await send_gotify(
+        title=f"🐦 {title}",
+        message=message,
+        config=weibo_noti_config,
     )

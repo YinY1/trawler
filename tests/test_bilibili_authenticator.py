@@ -9,14 +9,12 @@ import pytest
 
 from platforms.bilibili.auth import BilibiliAuthenticator, get_credential
 from shared.auth.base import (
-    AuthStatus,
     PlatformTokens,
     QRCodeResult,
     QRStatus,
     RefreshFailedError,
 )
 from shared.config import BilibiliAuth, BilibiliConfig, Config
-
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -50,9 +48,7 @@ def _sample_tokens(**cookie_overrides) -> PlatformTokens:
 
 class TestGetCredential:
     def test_returns_credential_when_configured(self):
-        cfg = _make_config(
-            sessdata="s", bili_jct="j", buvid3="b3", dedeuserid="du"
-        )
+        cfg = _make_config(sessdata="s", bili_jct="j", buvid3="b3", dedeuserid="du")
         cred = get_credential(cfg)
         assert cred.sessdata == "s"
         assert cred.bili_jct == "j"
@@ -97,9 +93,7 @@ class TestPollQrStatus:
 
         auth = BilibiliAuthenticator()
         mock_qr = MagicMock()
-        mock_qr.check_state = AsyncMock(
-            return_value=login_v2.QrCodeLoginEvents.SCAN
-        )
+        mock_qr.check_state = AsyncMock(return_value=login_v2.QrCodeLoginEvents.SCAN)
         with patch.object(auth, "_get_qr_login", return_value=mock_qr):
             status = await auth.poll_qr_status("k")
         assert status.status == QRStatus.WAITING
@@ -111,9 +105,7 @@ class TestPollQrStatus:
 
         auth = BilibiliAuthenticator()
         mock_qr = MagicMock()
-        mock_qr.check_state = AsyncMock(
-            return_value=login_v2.QrCodeLoginEvents.CONF
-        )
+        mock_qr.check_state = AsyncMock(return_value=login_v2.QrCodeLoginEvents.CONF)
         with patch.object(auth, "_get_qr_login", return_value=mock_qr):
             status = await auth.poll_qr_status("k")
         assert status.status == QRStatus.SCANNED
@@ -125,9 +117,7 @@ class TestPollQrStatus:
 
         auth = BilibiliAuthenticator()
         mock_qr = MagicMock()
-        mock_qr.check_state = AsyncMock(
-            return_value=login_v2.QrCodeLoginEvents.DONE
-        )
+        mock_qr.check_state = AsyncMock(return_value=login_v2.QrCodeLoginEvents.DONE)
         with patch.object(auth, "_get_qr_login", return_value=mock_qr):
             status = await auth.poll_qr_status("k")
         assert status.status == QRStatus.SUCCESS
@@ -139,9 +129,7 @@ class TestPollQrStatus:
 
         auth = BilibiliAuthenticator()
         mock_qr = MagicMock()
-        mock_qr.check_state = AsyncMock(
-            return_value=login_v2.QrCodeLoginEvents.TIMEOUT
-        )
+        mock_qr.check_state = AsyncMock(return_value=login_v2.QrCodeLoginEvents.TIMEOUT)
         with patch.object(auth, "_get_qr_login", return_value=mock_qr):
             status = await auth.poll_qr_status("k")
         assert status.status == QRStatus.EXPIRED
@@ -158,9 +146,7 @@ class TestGetTokens:
 
         auth = BilibiliAuthenticator()
         mock_qr = MagicMock()
-        mock_qr.check_state = AsyncMock(
-            return_value=login_v2.QrCodeLoginEvents.DONE
-        )
+        mock_qr.check_state = AsyncMock(return_value=login_v2.QrCodeLoginEvents.DONE)
         mock_cred = MagicMock()
         mock_cred.sessdata = "SD"
         mock_cred.bili_jct = "BJ"
@@ -185,9 +171,7 @@ class TestGetTokens:
 
         auth = BilibiliAuthenticator()
         mock_qr = MagicMock()
-        mock_qr.check_state = AsyncMock(
-            return_value=login_v2.QrCodeLoginEvents.SCAN
-        )
+        mock_qr.check_state = AsyncMock(return_value=login_v2.QrCodeLoginEvents.SCAN)
         with patch.object(auth, "_get_qr_login", return_value=mock_qr):
             with pytest.raises(RefreshFailedError):
                 await auth.get_tokens("k")

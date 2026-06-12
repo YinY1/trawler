@@ -34,6 +34,7 @@ class SubscriptionStore(JsonSetStore):
         try:
             text = self._path.read_text(encoding="utf-8")
             import json
+
             data = json.loads(text)
             # 兼容旧格式 {"bvids": [...]}
             if isinstance(data, dict) and "bvids" in data:

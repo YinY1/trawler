@@ -78,9 +78,7 @@ class BaseAuthenticator(ABC):
     def supports_refresh(self) -> bool:
         return False
 
-    async def qr_login(
-        self, on_status: Callable[[AuthStatus], None] | None = None
-    ) -> PlatformTokens:
+    async def qr_login(self, on_status: Callable[[AuthStatus], None] | None = None) -> PlatformTokens:
         # Lazy import to avoid circular dependency with qr_display
         from shared.auth.qr_display import display_qr_in_terminal
 

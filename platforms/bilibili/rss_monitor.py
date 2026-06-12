@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,6 @@ from typing import Optional
 
 import aiohttp
 import feedparser
-import logging
 
 from platforms.bilibili.monitor import SubscriptionStore
 from shared.config import Config
@@ -97,9 +97,15 @@ def _save_health(data: dict[str, InstanceHealth]) -> None:
     """持久化健康度数据到磁盘。"""
     try:
         _HEALTH_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {k: {"success_count": v.success_count, "fail_count": v.fail_count,
-                       "last_success": v.last_success, "avg_response_time": v.avg_response_time}
-                   for k, v in data.items()}
+        payload = {
+            k: {
+                "success_count": v.success_count,
+                "fail_count": v.fail_count,
+                "last_success": v.last_success,
+                "avg_response_time": v.avg_response_time,
+            }
+            for k, v in data.items()
+        }
         _HEALTH_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as e:
         logger.error(f"保存 instance_health.json 失败: {e}")
@@ -116,6 +122,7 @@ def _parse_rss_video(entry: dict) -> Optional[VideoInfo]:
         link = entry.get("link", "")
         if "bilibili.com/video/" in link:
             import re
+
             match = re.search(r"(BV[\w]+)", link)
             if match:
                 bvid = match.group(1)

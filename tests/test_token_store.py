@@ -46,10 +46,14 @@ class TestUpdateAuthSection:
         cfg = tmp_path / "config.toml"
         cfg.write_text(SAMPLE_TOML, encoding="utf-8")
 
-        update_auth_section(cfg, "bilibili", {
-            "sessdata": "new_sess",
-            "bili_jct": "new_jct",
-        })
+        update_auth_section(
+            cfg,
+            "bilibili",
+            {
+                "sessdata": "new_sess",
+                "bili_jct": "new_jct",
+            },
+        )
 
         data = tomllib.load(cfg.open("rb"))
         assert data["bilibili"]["auth"]["sessdata"] == "new_sess"
@@ -79,9 +83,13 @@ class TestUpdateAuthSection:
         cfg = tmp_path / "config.toml"
         cfg.write_text(SAMPLE_TOML, encoding="utf-8")
 
-        update_auth_section(cfg, "bilibili", {
-            "ac_time_value": "new_ac_time",
-        })
+        update_auth_section(
+            cfg,
+            "bilibili",
+            {
+                "ac_time_value": "new_ac_time",
+            },
+        )
 
         data = tomllib.load(cfg.open("rb"))
         assert data["bilibili"]["auth"]["ac_time_value"] == "new_ac_time"

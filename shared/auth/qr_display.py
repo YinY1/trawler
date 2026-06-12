@@ -17,9 +17,7 @@ def _render_qr_matrix(url: str) -> str:
     qr.add_data(url)
     qr.make(fit=True)
     matrix = qr.get_matrix()
-    return "\n".join(
-        "".join(_FULL if cell else _EMPTY for cell in row) for row in matrix
-    )
+    return "\n".join("".join(_FULL if cell else _EMPTY for cell in row) for row in matrix)
 
 
 def display_qr_in_terminal(url: str) -> None:

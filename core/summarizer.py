@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import subprocess
 from collections import Counter
-from dataclasses import dataclass
 
 from rich.console import Console
 
@@ -35,6 +34,7 @@ _KEYWORDS_PROMPT_TEMPLATE = """\
 
 
 # ── CodeBuddy Provider ───────────────────────────────────────────
+
 
 class CodeBuddyProvider:
     """CodeBuddy CLI 提供商
@@ -79,9 +79,7 @@ class CodeBuddyProvider:
             raise RuntimeError("codebuddy 命令未找到，请确保已安装")
 
         if result.returncode != 0:
-            raise RuntimeError(
-                f"CodeBuddy 调用失败 (返回码 {result.returncode}): {result.stderr}"
-            )
+            raise RuntimeError(f"CodeBuddy 调用失败 (返回码 {result.returncode}): {result.stderr}")
 
         output = result.stdout.strip()
         if not output:
@@ -91,6 +89,7 @@ class CodeBuddyProvider:
 
 
 # ── OpenAI 兼容 Provider ─────────────────────────────────────────
+
 
 class OpenAIProvider:
     """OpenAI 兼容 API 提供商
@@ -145,9 +144,7 @@ class OpenAIProvider:
         console.log(f"[dim]调用 OpenAI 兼容 API (model={self.model_name})...[/]")
 
         try:
-            response = requests.post(
-                url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT
-            )
+            response = requests.post(url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT)
         except requests.Timeout:
             raise RuntimeError(f"OpenAI API 调用超时 ({LLM_API_TIMEOUT}s)")
         except requests.ConnectionError:
@@ -156,9 +153,7 @@ class OpenAIProvider:
         try:
             response.raise_for_status()
         except requests.HTTPError:
-            raise RuntimeError(
-                f"API 返回错误 ({response.status_code}): {response.text[:200]}"
-            )
+            raise RuntimeError(f"API 返回错误 ({response.status_code}): {response.text[:200]}")
 
         data = response.json()
         try:
@@ -168,6 +163,7 @@ class OpenAIProvider:
 
 
 # ── 本地降级 Provider ────────────────────────────────────────────
+
 
 class LocalFallbackProvider:
     """本地提取式摘要提供商
@@ -181,14 +177,81 @@ class LocalFallbackProvider:
 
     # 中文停用词（高频但无实际意义的词）
     _STOP_WORDS: set[str] = {
-        "的", "了", "是", "在", "我", "有", "和", "就", "不", "人",
-        "都", "一", "一个", "上", "也", "很", "到", "说", "要", "去",
-        "你", "会", "着", "没有", "看", "好", "自己", "这", "他", "她",
-        "它", "们", "那", "这个", "那个", "什么", "怎么", "如何", "可以",
-        "但是", "因为", "所以", "如果", "虽然", "而且", "或者", "以及",
-        "还", "把", "被", "让", "给", "从", "对", "比", "跟", "与",
-        "为", "等", "能", "才", "更", "最", "已经", "可能", "应该",
-        "需要", "这些", "那些", "之", "其", "此", "该", "每", "各",
+        "的",
+        "了",
+        "是",
+        "在",
+        "我",
+        "有",
+        "和",
+        "就",
+        "不",
+        "人",
+        "都",
+        "一",
+        "一个",
+        "上",
+        "也",
+        "很",
+        "到",
+        "说",
+        "要",
+        "去",
+        "你",
+        "会",
+        "着",
+        "没有",
+        "看",
+        "好",
+        "自己",
+        "这",
+        "他",
+        "她",
+        "它",
+        "们",
+        "那",
+        "这个",
+        "那个",
+        "什么",
+        "怎么",
+        "如何",
+        "可以",
+        "但是",
+        "因为",
+        "所以",
+        "如果",
+        "虽然",
+        "而且",
+        "或者",
+        "以及",
+        "还",
+        "把",
+        "被",
+        "让",
+        "给",
+        "从",
+        "对",
+        "比",
+        "跟",
+        "与",
+        "为",
+        "等",
+        "能",
+        "才",
+        "更",
+        "最",
+        "已经",
+        "可能",
+        "应该",
+        "需要",
+        "这些",
+        "那些",
+        "之",
+        "其",
+        "此",
+        "该",
+        "每",
+        "各",
     }
 
     # 分句标点
@@ -244,9 +307,7 @@ class LocalFallbackProvider:
 
         # 按 score 降序排列，取 top_n
         scored_sentences.sort(key=lambda x: x[2], reverse=True)
-        top_sentences = sorted(
-            scored_sentences[:top_n], key=lambda x: x[0]
-        )
+        top_sentences = sorted(scored_sentences[:top_n], key=lambda x: x[0])
 
         summary = "。".join(s[1] for s in top_sentences)
         if not summary.endswith(("。", "！", "？", "；")):
@@ -292,9 +353,7 @@ class LocalFallbackProvider:
 
         return Counter(ngrams)
 
-    def _score_sentence(
-        self, sentence: str, word_freq: Counter[str]
-    ) -> float:
+    def _score_sentence(self, sentence: str, word_freq: Counter[str]) -> float:
         """计算句子的关键词得分
 
         Args:
@@ -319,6 +378,7 @@ class LocalFallbackProvider:
 
 
 # ── 公共接口 ─────────────────────────────────────────────────────
+
 
 def _create_provider(config: AnalysisConfig) -> LLMProvider:
     """根据配置创建 LLM 提供商
@@ -379,9 +439,7 @@ def generate_summary(
     if not config.analysis.enabled:
         console.log("[dim]AI 分析已禁用，使用本地摘要[/]")
         fallback = LocalFallbackProvider()
-        prompt = _SUMMARY_PROMPT_TEMPLATE.format(
-            title=title, author=author, text=text
-        )
+        prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
         return fallback.generate(prompt), "local", False
 
     if not text.strip():
@@ -390,24 +448,17 @@ def generate_summary(
     # 尝试 AI 生成
     try:
         provider = _create_provider(config.analysis)
-        prompt = _SUMMARY_PROMPT_TEMPLATE.format(
-            title=title, author=author, text=text
-        )
+        prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
         summary = provider.generate(prompt)
         console.log(f"[bold green]AI 摘要生成成功: {source_id}[/]")
         return summary, config.analysis.provider, True
 
     except Exception as e:
-        console.log(
-            f"[yellow]AI 摘要生成失败 ({config.analysis.provider}): {e}，"
-            f"降级到本地摘要[/]"
-        )
+        console.log(f"[yellow]AI 摘要生成失败 ({config.analysis.provider}): {e}，降级到本地摘要[/]")
 
     # 降级到本地摘要
     fallback = LocalFallbackProvider()
-    prompt = _SUMMARY_PROMPT_TEMPLATE.format(
-        title=title, author=author, text=text
-    )
+    prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
     summary = fallback.generate(prompt)
     return summary, "local-fallback", False
 
@@ -435,9 +486,7 @@ def extract_keywords(
     if config and config.analysis.enabled:
         try:
             provider = _create_provider(config.analysis)
-            prompt = _KEYWORDS_PROMPT_TEMPLATE.format(
-                title=title, author=author, text=text
-            )
+            prompt = _KEYWORDS_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
             result = provider.generate(prompt)
             # 解析关键词（支持中英文分号、逗号、换行分隔）
             keywords = re.split(r"[；;，,\n]+", result)
@@ -451,9 +500,7 @@ def extract_keywords(
     return _extract_keywords_local(text, title)
 
 
-def _extract_keywords_local(
-    text: str, title: str, top_n: int = 5
-) -> list[str]:
+def _extract_keywords_local(text: str, title: str, top_n: int = 5) -> list[str]:
     """基于词频的本地关键词提取
 
     使用简单的 n-gram 频率统计提取关键词。

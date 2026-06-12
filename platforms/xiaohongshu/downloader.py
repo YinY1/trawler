@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -9,7 +10,6 @@ from urllib.parse import urljoin
 
 import aiohttp
 from rich.console import Console
-import logging
 
 from platforms.xiaohongshu.auth import (
     XHS_BASE_URL,

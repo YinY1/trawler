@@ -6,10 +6,9 @@ import logging
 import re
 from typing import Optional
 
+from platforms.bilibili.monitor import SubscriptionStore
 from shared.config import Config
 from shared.protocols import DynamicInfo
-
-from platforms.bilibili.monitor import SubscriptionStore
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +67,7 @@ def _parse_dynamic(card: dict, uid: int) -> Optional[DynamicInfo]:
     card_str = card.get("card", "{}")
     if isinstance(card_str, str):
         import json
+
         try:
             card_data = json.loads(card_str)
         except json.JSONDecodeError:

@@ -1,33 +1,28 @@
 """Tests for shared/config.py — TOML-based configuration"""
 
-import os
-import pytest
-from pathlib import Path
-
 from shared.config import (
-    Config,
-    GeneralConfig,
-    AuthGlobalConfig,
-    RenewalConfig,
-    BilibiliAuth,
-    XhsAuth,
-    WeiboAuth,
-    DownloadConfig,
-    TranscribeConfig,
-    BilibiliMonitorConfig,
-    XhsMonitorConfig,
-    WeiboMonitorConfig,
     AnalysisConfig,
-    NotificationConfig,
-    BiliSubscription,
-    UserSubscription,
+    AuthGlobalConfig,
+    BilibiliAuth,
     BilibiliConfig,
-    XhsConfig,
+    BilibiliMonitorConfig,
+    BiliSubscription,
+    Config,
+    DownloadConfig,
+    GeneralConfig,
+    NotificationConfig,
+    RenewalConfig,
+    TranscribeConfig,
+    UserSubscription,
+    WeiboAuth,
     WeiboConfig,
-    load_config,
+    WeiboMonitorConfig,
+    XhsAuth,
+    XhsConfig,
+    XhsMonitorConfig,
     _dict_to_dataclass,
+    load_config,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -139,6 +134,7 @@ name = "博主B"
 
 # ── 1. Missing file → returns Config() defaults ───────────────
 
+
 class TestMissingFile:
     def test_missing_file_returns_defaults(self, tmp_path):
         cfg = load_config(tmp_path / "nonexistent.toml")
@@ -165,6 +161,7 @@ class TestMissingFile:
 
 # ── 2. Empty TOML file → returns Config() defaults ────────────
 
+
 class TestEmptyToml:
     def test_empty_file_returns_defaults(self, tmp_path):
         p = tmp_path / "config.toml"
@@ -174,6 +171,7 @@ class TestEmptyToml:
 
 
 # ── 3. Full TOML config ───────────────────────────────────────
+
 
 class TestFullToml:
     def test_general(self, tmp_path):
@@ -286,6 +284,7 @@ class TestFullToml:
 
 # ── 4. Minimal TOML ──────────────────────────────────────────
 
+
 class TestMinimalToml:
     def test_only_sessdata_set(self, tmp_path):
         p = tmp_path / "config.toml"
@@ -307,6 +306,7 @@ class TestMinimalToml:
 
 
 # ── 5. Env var overrides ──────────────────────────────────────
+
 
 class TestEnvOverrides:
     def test_trawler_gotify_url(self, tmp_path, monkeypatch):
@@ -377,6 +377,7 @@ class TestEnvOverrides:
 
 
 # ── 6. Dataclass defaults verification ────────────────────────
+
 
 class TestDataclassDefaults:
     def test_renewal_config_defaults(self):
@@ -506,6 +507,7 @@ class TestDataclassDefaults:
 
 # ── 7. _dict_to_dataclass tests ───────────────────────────────
 
+
 class TestDictToDataclass:
     def test_simple_conversion(self):
         data = {"dir": "/tmp", "quality": "best"}
@@ -538,6 +540,7 @@ class TestDictToDataclass:
 
 
 # ── 8. Default path is config.toml ────────────────────────────
+
 
 class TestDefaultPath:
     def test_load_config_default_path_is_toml(self, tmp_path, monkeypatch):

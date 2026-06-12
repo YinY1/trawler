@@ -96,6 +96,51 @@ class XhsCommentHighlight:
 
 
 # ═══════════════════════════════════════════════════════════
+# 微博数据模型
+# ═══════════════════════════════════════════════════════════
+
+
+@dataclass
+class WeiboPost:
+    """微博帖子元信息"""
+
+    post_id: str
+    text: str
+    clean_text: str
+    author: str
+    user_id: str
+    pubdate: int  # Unix 时间戳
+    image_urls: list[str] = field(default_factory=list)
+    reposts_count: int = 0
+    comments_count: int = 0
+    likes_count: int = 0
+    is_original: bool = True
+    reposted_post: Optional[WeiboPost] = None  # 转发时可嵌套
+
+
+@dataclass
+class WeiboCommentHighlight:
+    """微博评论亮点"""
+
+    content: str
+    user_name: str
+    is_author: bool
+    like_count: int
+
+
+@dataclass
+class WeiboDownloadResult:
+    """微博帖子下载结果"""
+
+    success: bool
+    source_id: str  # post_id
+    title: str
+    text: str = ""
+    image_paths: list[Path] = field(default_factory=list)
+    error: Optional[str] = None
+
+
+# ═══════════════════════════════════════════════════════════
 # 下载结果模型
 # ═══════════════════════════════════════════════════════════
 

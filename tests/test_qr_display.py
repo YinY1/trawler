@@ -32,6 +32,7 @@ class TestRenderQrMatrix:
 class TestDisplayQrInTerminal:
     def test_prints_to_stdout(self, capsys: object) -> None:
         from typing import cast
+
         from _pytest.capture import CaptureFixture
 
         capsys = cast(CaptureFixture[str], capsys)
@@ -42,6 +43,7 @@ class TestDisplayQrInTerminal:
 
     def test_output_includes_url(self, capsys: object) -> None:
         from typing import cast
+
         from _pytest.capture import CaptureFixture
 
         capsys = cast(CaptureFixture[str], capsys)
@@ -52,6 +54,7 @@ class TestDisplayQrInTerminal:
 
     def test_url_appears_below_qr(self, capsys: object) -> None:
         from typing import cast
+
         from _pytest.capture import CaptureFixture
 
         capsys = cast(CaptureFixture[str], capsys)
