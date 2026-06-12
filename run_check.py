@@ -39,7 +39,7 @@ def login(platform: str) -> None:
     )
 
     if platform == "xhs":
-        console.print(f"[yellow]{platform} 登录功能将在后续版本支持[/yellow]")
+        console.print(f"[yellow]{platform} 登录功能将在后续版本支持[/]")
         return
 
     try:
@@ -55,12 +55,12 @@ def login(platform: str) -> None:
         if platform == "bili" and hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
             auth_dict["ac_time_value"] = authenticator._last_ac_time_value
         update_auth_section(platform, auth_dict)
-        console.print(f"[green]✓ {platform} 登录成功，凭证已保存[/green]")
+        console.print(f"[green]✓ {platform} 登录成功，凭证已保存[/]")
     except QRExpiredError:
-        console.print("[red]✗ 二维码已过期，请重试[/red]")
+        console.print("[red]✗ 二维码已过期，请重试[/]")
         sys.exit(1)
     except Exception as exc:
-        console.print(f"[red]✗ 登录失败: {exc}[/red]")
+        console.print(f"[red]✗ 登录失败: {exc}[/]")
         sys.exit(1)
 
 
@@ -92,15 +92,15 @@ def token_status() -> None:
 
     for name, auth in platforms:
         if auth.expires_at <= 0:
-            table.add_row(name, "[dim]未配置[/dim]", "-")
+            table.add_row(name, "[dim]未配置[/]", "-")
         elif auth.expires_at < now:
-            table.add_row(name, "[red]已过期[/red]", time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)))
+            table.add_row(name, "[red]已过期[/]", time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)))
         else:
             remaining = auth.expires_at - now
             days = int(remaining // 86400)
             table.add_row(
                 name,
-                f"[green]有效[/green] (剩余 {days} 天)",
+                f"[green]有效[/] (剩余 {days} 天)",
                 time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)),
             )
 
@@ -125,7 +125,7 @@ def token_refresh(platform: str) -> None:
     if platform == "bili":
         auth = config.bilibili.auth
         if auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ Token 已过期或未配置，请先执行 trawler login --platform bili[/red]")
+            console.print("[red]✗ Token 已过期或未配置，请先执行 trawler login --platform bili[/]")
             sys.exit(1)
         try:
             authenticator = get_authenticator(platform)
@@ -147,15 +147,15 @@ def token_refresh(platform: str) -> None:
             if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
                 auth_dict["ac_time_value"] = authenticator._last_ac_time_value
             update_auth_section(platform, auth_dict)
-            console.print(f"[green]✓ {platform} Token 续期成功[/green]")
+            console.print(f"[green]✓ {platform} Token 续期成功[/]")
         except Exception as exc:
-            console.print(f"[red]✗ 续期失败: {exc}[/red]")
+            console.print(f"[red]✗ 续期失败: {exc}[/]")
             sys.exit(1)
 
     elif platform == "weibo":
         auth = config.weibo.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ 未配置微博 Cookie 或已过期，请先执行 trawler login --platform weibo[/red]")
+            console.print("[red]✗ 未配置微博 Cookie 或已过期，请先执行 trawler login --platform weibo[/]")
             sys.exit(1)
         try:
             from platforms.weibo.auth import WeiboAuthenticator
@@ -177,13 +177,13 @@ def token_refresh(platform: str) -> None:
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
             update_auth_section(platform, auth_dict)
-            console.print("[green]✓ weibo Token 续期成功[/green]")
+            console.print("[green]✓ weibo Token 续期成功[/]")
         except Exception as exc:
-            console.print(f"[red]✗ 续期失败: {exc}[/red]")
+            console.print(f"[red]✗ 续期失败: {exc}[/]")
             sys.exit(1)
 
     elif platform == "xhs":
-        console.print(f"[yellow]{platform} 续期功能将在后续版本支持[/yellow]")
+        console.print(f"[yellow]{platform} 续期功能将在后续版本支持[/]")
         return
 
 
@@ -212,19 +212,19 @@ def check(platform: str, config_path: str, verbose: bool) -> None:
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
     if verbose:
-        console.print("[dim]调试模式已启用[/dim]")
+        console.print("[dim]调试模式已启用[/]")
     try:
         config = load_config(config_path)
     except Exception as exc:
-        console.print(f"[red]✗ 配置加载失败: {exc}[/red]")
+        console.print(f"[red]✗ 配置加载失败: {exc}[/]")
         sys.exit(1)
     try:
         asyncio.run(run_check_once(config, platform))
     except KeyboardInterrupt:
-        console.print("\n[yellow]已中断[/yellow]")
+        console.print("\n[yellow]已中断[/]")
         sys.exit(130)
     except Exception as exc:
-        console.print(f"[red]✗ 运行出错: {exc}[/red]")
+        console.print(f"[red]✗ 运行出错: {exc}[/]")
         if verbose:
             console.print_exception()
         sys.exit(1)

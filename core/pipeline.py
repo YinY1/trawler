@@ -166,7 +166,7 @@ async def run_bili_check_once(config: Config) -> None:
 
     if config.bilibili.monitor.mode == "rss":
         try:
-            console.print("[cyan]🔍 使用 RSS 模式检查新视频…[/cyan]")
+            console.print("[cyan]🔍 使用 RSS 模式检查新视频…[/]")
             rss_monitor = RSSMonitor(config)
             for sub in config.bilibili.subscriptions:
                 try:
@@ -179,13 +179,13 @@ async def run_bili_check_once(config: Config) -> None:
                 except RSSAllFailedError:
                     raise  # 向上传递
                 except Exception as exc:
-                    console.print(f"[yellow]⚠️  RSS 检查 {sub.name}({sub.uid}) 失败: {exc}[/yellow]")
+                    console.print(f"[yellow]⚠️  RSS 检查 {sub.name}({sub.uid}) 失败: {exc}[/]")
         except RSSAllFailedError as exc:
-            console.print(f"[yellow]⚠️  RSS 全部失败，降级到 API 模式: {exc}[/yellow]")
+            console.print(f"[yellow]⚠️  RSS 全部失败，降级到 API 模式: {exc}[/]")
             logger.warning("RSS all failed, falling back to API: %s", exc)
             new_videos = await _api_check(config, store)
     else:
-        console.print("[cyan]🔍 使用 API 模式检查新视频…[/cyan]")
+        console.print("[cyan]🔍 使用 API 模式检查新视频…[/]")
         new_videos = await _api_check(config, store)
 
     # ── 2. 处理新视频 ──────────────────────────────────────
@@ -207,12 +207,12 @@ async def run_bili_check_once(config: Config) -> None:
             _run_stats.videos_succeeded += 1
         except Exception as exc:
             _run_stats.videos_failed += 1
-            console.print(f"[red]✗ 处理视频 {video.bvid} 失败: {exc}[/red]")
+            console.print(f"[red]✗ 处理视频 {video.bvid} 失败: {exc}[/]")
             logger.exception("Failed to process video %s", video.bvid)
 
     # ── 3. 检查新动态 ──────────────────────────────────────
     if config.bilibili.monitor.watch_dynamic:
-        console.print("[cyan]🔍 检查新动态…[/cyan]")
+        console.print("[cyan]🔍 检查新动态…[/]")
         for sub in config.bilibili.subscriptions:
             try:
                 new_dynamics = await check_new_dynamics(
@@ -227,10 +227,10 @@ async def run_bili_check_once(config: Config) -> None:
                         _run_stats.dynamics_succeeded += 1
                     except Exception as exc:
                         _run_stats.dynamics_failed += 1
-                        console.print(f"[red]✗ 处理动态失败: {exc}[/red]")
+                        console.print(f"[red]✗ 处理动态失败: {exc}[/]")
                         logger.exception("Failed to process dynamic")
             except Exception as exc:
-                console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 动态失败: {exc}[/yellow]")
+                console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 动态失败: {exc}[/]")
                 logger.warning(
                     "Failed to check dynamics for %s(%s): %s",
                     sub.name,
@@ -240,7 +240,7 @@ async def run_bili_check_once(config: Config) -> None:
 
     # 持久化 Store（所有视频/动态处理完成后统一保存）
     store.save()
-    console.print("[green]✓ B站检查完成[/green]")
+    console.print("[green]✓ B站检查完成[/]")
 
 
 async def _api_check(config: Config, store: SubscriptionStore) -> list[VideoInfo]:
@@ -251,7 +251,7 @@ async def _api_check(config: Config, store: SubscriptionStore) -> list[VideoInfo
             new = await check_new_videos(uid=sub.uid, config=config, store=store)
             all_new.extend(new)
         except Exception as exc:
-            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 失败: {exc}[/yellow]")
+            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 失败: {exc}[/]")
             logger.warning("API check failed for %s(%s): %s", sub.name, sub.uid, exc)
     return all_new
 
@@ -272,33 +272,33 @@ async def process_video(
     store: SubscriptionStore,
 ) -> None:
     """处理单个 B站视频的完整流水线"""
-    console.print(f"[bold blue]▶ 处理视频[/bold blue] {title} ({bvid})")
+    console.print(f"[bold blue]▶ 处理视频[/] {title} ({bvid})")
 
     # Step 1: 下载
     dl_result: DownloadResult | None = None
     try:
-        console.print("  [dim]⬇ 下载中…[/dim]")
+        console.print("  [dim]⬇ 下载中…[/]")
         dl_result = await download_video(bvid=bvid, config=config)
     except Exception as exc:
-        console.print(f"  [red]✗ 下载失败: {exc}[/red]")
+        console.print(f"  [red]✗ 下载失败: {exc}[/]")
         logger.exception("Download failed for %s", bvid)
         # 下载失败仍标记为已知，避免重复尝试
         store.mark_known(bvid)
         return
 
     if not dl_result.success:
-        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/yellow]")
+        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/]")
         store.mark_known(bvid)
         return
 
     # Step 2: 转写
     transcript: TranscriptResult | None = None
     try:
-        console.print("  [dim]📝 转写中…[/dim]")
+        console.print("  [dim]📝 转写中…[/]")
         # filepath 可能为 None（下载成功但路径不确定）
         _fp = dl_result.filepath or Path()
         if not _fp.exists():
-            console.print("  [yellow]⚠️  下载文件路径无效，跳过转写[/yellow]")
+            console.print("  [yellow]⚠️  下载文件路径无效，跳过转写[/]")
         else:
             transcript = await transcribe_file_async(
                 filepath=_fp,
@@ -308,22 +308,22 @@ async def process_video(
                 author=author,
             )
     except Exception as exc:
-        console.print(f"  [red]✗ 转写失败: {exc}[/red]")
+        console.print(f"  [red]✗ 转写失败: {exc}[/]")
         logger.exception("Transcribe failed for %s", bvid)
 
     # Step 3: 评论亮点
     highlights: list[CommentHighlight] = []
     try:
-        console.print("  [dim]💬 获取评论亮点…[/dim]")
+        console.print("  [dim]💬 获取评论亮点…[/]")
         highlights = await fetch_comment_highlights(bvid=bvid, config=config)
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
         logger.warning("Comment highlights failed for %s: %s", bvid, exc)
 
     # Step 4: 生成摘要
     summary_text: str = ""
     try:
-        console.print("  [dim]🤖 生成摘要…[/dim]")
+        console.print("  [dim]🤖 生成摘要…[/]")
         transcript_text = transcript.text if transcript and transcript.success else ""
         summary_text, _source, _is_ai = generate_summary(
             source_id=bvid,
@@ -333,7 +333,7 @@ async def process_video(
             config=config,
         )
     except Exception as exc:
-        console.print(f"  [red]✗ 摘要生成失败: {exc}[/red]")
+        console.print(f"  [red]✗ 摘要生成失败: {exc}[/]")
         logger.exception("Summary failed for %s", bvid)
 
     # Step 5: 提取关键词
@@ -346,7 +346,7 @@ async def process_video(
             config=config,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/]")
         logger.warning("Keywords failed for %s: %s", bvid, exc)
 
     # Step 6: 通知推送
@@ -362,7 +362,7 @@ async def process_video(
             config=config.bilibili.notification,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/]")
         logger.warning("Notify failed for %s: %s", bvid, exc)
 
     # Step 7: 清理媒体
@@ -370,13 +370,13 @@ async def process_video(
         try:
             cleanup_media(filepath=dl_result.filepath, source_id=bvid)
         except Exception as exc:
-            console.print(f"  [yellow]⚠️  媒体清理失败: {exc}[/yellow]")
+            console.print(f"  [yellow]⚠️  媒体清理失败: {exc}[/]")
             logger.warning("Cleanup failed for %s: %s", bvid, exc)
 
     # Step 8: 标记已知
     store.mark_known(bvid)
 
-    console.print("  [green]✓ 视频处理完成[/green]")
+    console.print("  [green]✓ 视频处理完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -390,12 +390,12 @@ async def process_dynamic(
     store: SubscriptionStore,
 ) -> None:
     """处理单条 B站动态"""
-    console.print(f"[bold blue]▶ 处理动态[/bold blue] {dynamic_info.dynamic_id}")
+    console.print(f"[bold blue]▶ 处理动态[/] {dynamic_info.dynamic_id}")
 
     # 如果动态关联了视频，触发视频处理（跳过已处理的视频）
     if dynamic_info.linked_bvid:
         if store.is_known(dynamic_info.linked_bvid):
-            console.print(f"  [dim]关联视频 {dynamic_info.linked_bvid} 已处理过，跳过[/dim]")
+            console.print(f"  [dim]关联视频 {dynamic_info.linked_bvid} 已处理过，跳过[/]")
         else:
             try:
                 await process_video(
@@ -409,7 +409,7 @@ async def process_dynamic(
                     store=store,
                 )
             except Exception as exc:
-                console.print(f"[red]✗ 动态关联视频处理失败: {exc}[/red]")
+                console.print(f"[red]✗ 动态关联视频处理失败: {exc}[/]")
                 logger.exception(
                     "Linked video process failed for dynamic %s",
                     dynamic_info.dynamic_id,
@@ -428,14 +428,14 @@ async def process_dynamic(
             config=config.bilibili.notification,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  动态通知推送失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  动态通知推送失败: {exc}[/]")
         logger.warning("Dynamic notify failed for %s: %s", dynamic_info.dynamic_id, exc)
 
     # 标记动态已知
     dedup_key = f"dyn_{dynamic_info.dynamic_id}"
     store.mark_known(dedup_key)
 
-    console.print("  [green]✓ 动态处理完成[/green]")
+    console.print("  [green]✓ 动态处理完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -450,7 +450,7 @@ async def run_xhs_check_once(config: Config) -> None:
 
     store = XhsSubscriptionStore("data")
 
-    console.print("[cyan]🔍 检查小红书新笔记…[/cyan]")
+    console.print("[cyan]🔍 检查小红书新笔记…[/]")
 
     for sub in config.xiaohongshu.subscriptions:
         try:
@@ -467,15 +467,15 @@ async def run_xhs_check_once(config: Config) -> None:
                     _run_stats.notes_succeeded += 1
                 except Exception as exc:
                     _run_stats.notes_failed += 1
-                    console.print(f"[red]✗ 处理笔记 {note.note_id} 失败: {exc}[/red]")
+                    console.print(f"[red]✗ 处理笔记 {note.note_id} 失败: {exc}[/]")
                     logger.exception("Failed to process note %s", note.note_id)
         except Exception as exc:
-            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/yellow]")
+            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/]")
             logger.warning("XHS check failed for %s(%s): %s", sub.name, sub.user_id, exc)
 
     # 持久化 Store（所有笔记处理完成后统一保存）
     store.save()
-    console.print("[green]✓ 小红书检查完成[/green]")
+    console.print("[green]✓ 小红书检查完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -494,26 +494,26 @@ async def process_xhs_note(
     # Step 1: 下载
     dl_result: XhsDownloadResult | None = None
     try:
-        console.print("  [dim]⬇ 下载中…[/dim]")
+        console.print("  [dim]⬇ 下载中…[/]")
         dl_result = await download_note(note=note, config=config)
     except Exception as exc:
-        console.print(f"  [red]✗ 下载失败: {exc}[/red]")
+        console.print(f"  [red]✗ 下载失败: {exc}[/]")
         logger.exception("XHS download failed for %s", note.note_id)
         store.mark_known_note(note)
         return
 
     if not dl_result.success:
-        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/yellow]")
+        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/]")
         store.mark_known_note(note)
         return
 
     # Step 2: 解析笔记内容
     parsed: ParsedNote | None = None
     try:
-        console.print("  [dim]📄 解析内容…[/dim]")
+        console.print("  [dim]📄 解析内容…[/]")
         parsed = parse_note_content(note=note, download_result=dl_result)
     except Exception as exc:
-        console.print(f"  [red]✗ 内容解析失败: {exc}[/red]")
+        console.print(f"  [red]✗ 内容解析失败: {exc}[/]")
         logger.exception("XHS parse failed for %s", note.note_id)
 
     # Step 3: 视频笔记转写
@@ -523,7 +523,7 @@ async def process_xhs_note(
 
     if is_video and video_path and video_path.exists():
         try:
-            console.print("  [dim]📝 视频转写中…[/dim]")
+            console.print("  [dim]📝 视频转写中…[/]")
             transcript = await transcribe_file_async(
                 filepath=video_path,
                 config=config,
@@ -534,16 +534,16 @@ async def process_xhs_note(
             if transcript.success:
                 transcript_text = transcript.text
         except Exception as exc:
-            console.print(f"  [yellow]⚠️  视频转写失败: {exc}[/yellow]")
+            console.print(f"  [yellow]⚠️  视频转写失败: {exc}[/]")
             logger.warning("XHS transcribe failed for %s: %s", note.note_id, exc)
 
     # Step 4: 评论亮点
     highlights: list[XhsCommentHighlight] = []
     try:
-        console.print("  [dim]💬 获取评论亮点…[/dim]")
+        console.print("  [dim]💬 获取评论亮点…[/]")
         highlights = await fetch_xhs_comment_highlights(note_id=note.note_id, config=config)
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
         logger.warning("XHS comment highlights failed for %s: %s", note.note_id, exc)
 
     # Step 5: 生成摘要
@@ -552,7 +552,7 @@ async def process_xhs_note(
     combined = f"{content_text}\n{transcript_text}".strip()
 
     try:
-        console.print("  [dim]🤖 生成摘要…[/dim]")
+        console.print("  [dim]🤖 生成摘要…[/]")
         summary_text, _source, _is_ai = generate_summary(
             source_id=note.note_id,
             title=note.title,
@@ -561,7 +561,7 @@ async def process_xhs_note(
             config=config,
         )
     except Exception as exc:
-        console.print(f"  [red]✗ 摘要生成失败: {exc}[/red]")
+        console.print(f"  [red]✗ 摘要生成失败: {exc}[/]")
         logger.exception("XHS summary failed for %s", note.note_id)
 
     # Step 6: 提取关键词
@@ -574,7 +574,7 @@ async def process_xhs_note(
             config=config,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/]")
         logger.warning("XHS keywords failed for %s: %s", note.note_id, exc)
 
     # Step 7: 通知推送
@@ -590,7 +590,7 @@ async def process_xhs_note(
             xhs_noti_config=config.xiaohongshu.notification,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/]")
         logger.warning("XHS notify failed for %s: %s", note.note_id, exc)
 
     # Step 8: 标记已知 & 清理
@@ -600,10 +600,10 @@ async def process_xhs_note(
         try:
             cleanup_media(filepath=video_path, source_id=note.note_id)
         except Exception as exc:
-            console.print(f"  [yellow]⚠️  媒体清理失败: {exc}[/yellow]")
+            console.print(f"  [yellow]⚠️  媒体清理失败: {exc}[/]")
             logger.warning("XHS cleanup failed for %s: %s", note.note_id, exc)
 
-    console.print("  [green]✓ 笔记处理完成[/green]")
+    console.print("  [green]✓ 笔记处理完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -618,7 +618,7 @@ async def run_weibo_check_once(config: Config) -> None:
 
     store = WeiboSubscriptionStore("data")
 
-    console.print("[cyan]🔍 检查微博新帖子…[/cyan]")
+    console.print("[cyan]🔍 检查微博新帖子…[/]")
 
     for sub in config.weibo.subscriptions:
         try:
@@ -635,15 +635,15 @@ async def run_weibo_check_once(config: Config) -> None:
                     _run_stats.weibo_posts_succeeded += 1
                 except Exception as exc:
                     _run_stats.weibo_posts_failed += 1
-                    console.print(f"[red]✗ 处理微博 {post.post_id} 失败: {exc}[/red]")
+                    console.print(f"[red]✗ 处理微博 {post.post_id} 失败: {exc}[/]")
                     logger.exception("Failed to process weibo post %s", post.post_id)
         except Exception as exc:
-            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/yellow]")
+            console.print(f"[yellow]⚠️  检查 {sub.name}({sub.user_id}) 失败: {exc}[/]")
             logger.warning("Weibo check failed for %s(%s): %s", sub.name, sub.user_id, exc)
 
     # 持久化 Store
     store.save()
-    console.print("[green]✓ 微博检查完成[/green]")
+    console.print("[green]✓ 微博检查完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -658,44 +658,44 @@ async def process_weibo_post(
 ) -> None:
     """处理单个微博帖子的完整流水线"""
     display_title = post.clean_text[:50] if post.clean_text else post.post_id
-    console.print(f"[bold yellow]▶ 处理微博[/bold yellow] {display_title} ({post.post_id})")
+    console.print(f"[bold yellow]▶ 处理微博[/] {display_title} ({post.post_id})")
 
     # Step 1: 下载媒体
     dl_result: WeiboDownloadResult | None = None
     try:
-        console.print("  [dim]⬇ 下载图片…[/dim]")
+        console.print("  [dim]⬇ 下载图片…[/]")
         dl_result = await download_weibo_media(post=post, config=config)
     except Exception as exc:
-        console.print(f"  [red]✗ 下载失败: {exc}[/red]")
+        console.print(f"  [red]✗ 下载失败: {exc}[/]")
         logger.exception("Weibo download failed for %s", post.post_id)
         store.mark_known_weibo_post(post)
         return
 
     if not dl_result.success:
-        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/yellow]")
+        console.print(f"  [yellow]⚠️  下载未成功: {dl_result.error}[/]")
         store.mark_known_weibo_post(post)
         return
 
     # Step 2: 解析内容
     parsed: dict = {}
     try:
-        console.print("  [dim]📄 解析内容…[/dim]")
+        console.print("  [dim]📄 解析内容…[/]")
         parsed = parse_weibo_post(post=post, download_result=dl_result)
     except Exception as exc:
-        console.print(f"  [red]✗ 内容解析失败: {exc}[/red]")
+        console.print(f"  [red]✗ 内容解析失败: {exc}[/]")
         logger.exception("Weibo parse failed for %s", post.post_id)
 
     # Step 3: 评论亮点
     highlights: list[WeiboCommentHighlight] = []
     try:
-        console.print("  [dim]💬 获取评论亮点…[/dim]")
+        console.print("  [dim]💬 获取评论亮点…[/]")
         highlights = await fetch_weibo_comment_highlights(
             post_id=post.post_id,
             config=config,
             author_user_id=post.user_id,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
         logger.warning("Weibo comment highlights failed for %s: %s", post.post_id, exc)
 
     # Step 4: 生成摘要
@@ -703,7 +703,7 @@ async def process_weibo_post(
     content_text = parsed.get("text", "") or post.clean_text or ""
 
     try:
-        console.print("  [dim]🤖 生成摘要…[/dim]")
+        console.print("  [dim]🤖 生成摘要…[/]")
         summary_text, _source, _is_ai = generate_summary(
             source_id=post.post_id,
             title=display_title,
@@ -712,7 +712,7 @@ async def process_weibo_post(
             config=config,
         )
     except Exception as exc:
-        console.print(f"  [red]✗ 摘要生成失败: {exc}[/red]")
+        console.print(f"  [red]✗ 摘要生成失败: {exc}[/]")
         logger.exception("Weibo summary failed for %s", post.post_id)
 
     # Step 5: 提取关键词
@@ -729,7 +729,7 @@ async def process_weibo_post(
         if topics:
             keywords = list(dict.fromkeys(topics + keywords))  # 去重保序
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/]")
         logger.warning("Weibo keywords failed for %s: %s", post.post_id, exc)
         keywords = topics  # 降级：使用话题标签
 
@@ -746,13 +746,13 @@ async def process_weibo_post(
             weibo_noti_config=config.weibo.notification,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/yellow]")
+        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/]")
         logger.warning("Weibo notify failed for %s: %s", post.post_id, exc)
 
     # Step 7: 标记已知
     store.mark_known_weibo_post(post)
 
-    console.print("  [green]✓ 微博处理完成[/green]")
+    console.print("  [green]✓ 微博处理完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════

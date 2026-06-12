@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from shared.protocols import WeiboDownloadResult, WeiboPost
 
@@ -30,7 +31,7 @@ def _extract_topics(text: str) -> list[str]:
     return result
 
 
-def parse_weibo_post(post: WeiboPost, download_result: WeiboDownloadResult) -> dict:
+def parse_weibo_post(post: WeiboPost, download_result: WeiboDownloadResult) -> dict[str, Any]:
     """解析微博帖子，提取正文、话题标签。
 
     当前微博帖子结构简单（文本+图片），不需要复杂的 ParsedNote。

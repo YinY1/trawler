@@ -38,15 +38,15 @@ _QR_STATUS_MAP: dict[int, QRStatus] = {
 }
 
 
-def _parse_weibo_cookies(set_cookie_header: str) -> dict[str, str]:
+def _parse_weibo_cookies(set_cookie_header: str | list[str]) -> dict[str, str]:
     """从 Set-Cookie 响应头解析微博 Cookie 键值对。
 
-    微博的 Set-Cookie 头可能是逗号分隔的多个 cookie 条目。
-    SimpleCookie 无法直接解析这种格式，所以先按逗号拆分，
-    再逐条用 SimpleCookie 解析。
+    支持传入单个字符串（逗号分隔的多 cookie）或字符串列表
+    （每个元素一条 Set-Cookie）。每条 cookie 用 http.cookies.SimpleCookie
+    独立解析，避免值内逗号导致错误分割。
 
     Args:
-        set_cookie_header: 完整的 Set-Cookie 字符串
+        set_cookie_header: 完整的 Set-Cookie 字符串或列表
 
     Returns:
         Cookie 键值对字典
@@ -55,9 +55,23 @@ def _parse_weibo_cookies(set_cookie_header: str) -> dict[str, str]:
     if not set_cookie_header:
         return cookies
 
-    # 按逗号拆分为独立的 cookie 条目
-    for part in set_cookie_header.split(","):
-        part = part.strip()
+    # Normalize to list of individual cookie header strings
+    if isinstance(set_cookie_header, str):
+        # SimpleCookie can handle comma-separated multi-cookies
+        try:
+            sc = http.cookies.SimpleCookie(set_cookie_header)
+            for key, morsel in sc.items():
+                cookies[key] = morsel.value
+            return cookies
+        except http.cookies.CookieError:
+            # Fallback: split on ", " (comma+space) for simple cases
+            parts = [p.strip() for p in set_cookie_header.split(", ") if p.strip()]
+            if len(parts) <= 1:
+                return cookies
+            set_cookie_header = parts
+
+    # Each entry is a single Set-Cookie header
+    for part in set_cookie_header:
         if not part or "=" not in part:
             continue
         try:
@@ -65,7 +79,6 @@ def _parse_weibo_cookies(set_cookie_header: str) -> dict[str, str]:
             for key, morsel in sc.items():
                 cookies[key] = morsel.value
         except http.cookies.CookieError:
-            # 降级：手动解析
             kv = part.split("=", 1)
             if len(kv) == 2:
                 key = kv[0].strip()
@@ -167,7 +180,7 @@ class WeiboAuthenticator(BaseAuthenticator):
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
         try:
-            set_cookie = resp2.headers.get("Set-Cookie", "")
+            set_cookie = resp2.headers.getall("Set-Cookie", [])
         finally:
             resp2.close()
 
@@ -207,7 +220,7 @@ class WeiboAuthenticator(BaseAuthenticator):
             try:
                 if resp.status != 200:
                     return tokens
-                set_cookie = resp.headers.get("Set-Cookie", "")
+                set_cookie = resp.headers.getall("Set-Cookie", [])
             finally:
                 resp.close()
 

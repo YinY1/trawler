@@ -52,7 +52,7 @@ _CHINESE_TIME_RE = re.compile(
 )
 
 
-# ── 公共辅助函数 ──────────────────────────────────────────
+# ── ──
 
 
 def _clean_html(text: str) -> str:

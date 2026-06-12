@@ -11,9 +11,7 @@ XHS_DOWNLOAD_TIMEOUT = 120  # 小红书文件下载超时
 
 WEIBO_REQUEST_TIMEOUT = 15  # 微博 API 请求超时
 WEIBO_DOWNLOAD_TIMEOUT = 120  # 微博文件下载超时
-WEIBO_POLL_INTERVAL = 2  # 二维码轮询间隔（秒）
 WEIBO_POLL_TIMEOUT = 240  # 二维码轮询超时（秒）
-WEIBO_KEEPALIVE_INTERVAL = 6  # Cookie keepalive 间隔（小时）
 
 # 重试
 GOTIFY_MAX_RETRIES = 3  # Gotify 最大重试次数

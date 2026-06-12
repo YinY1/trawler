@@ -1,6 +1,5 @@
 """Tests for shared/config.py — TOML-based configuration"""
 
-
 from shared.config import (
     AnalysisConfig,
     AuthGlobalConfig,

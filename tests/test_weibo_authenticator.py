@@ -224,14 +224,14 @@ class TestGetTokens:
         auth = WeiboAuthenticator()
         mock_resp = MagicMock()
         mock_resp.status = 200
-        mock_resp.headers = {
-            "Set-Cookie": (
-                "SUB=fake_sub; Path=/; Domain=.weibo.com; HttpOnly, "
-                "SUBP=fake_subp; Path=/; Domain=.weibo.com, "
-                "WBPSESS=fake_wbpsess; Path=/; Domain=.weibo.com, "
-                "SSOLoginState=1735689600; Path=/; Domain=.weibo.com"
-            )
-        }
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.get.return_value = None  # default
+        mock_resp.headers.getall.return_value = [
+            "SUB=fake_sub; Path=/; Domain=.weibo.com; HttpOnly",
+            "SUBP=fake_subp; Path=/; Domain=.weibo.com",
+            "WBPSESS=fake_wbpsess; Path=/; Domain=.weibo.com",
+            "SSOLoginState=1735689600; Path=/; Domain=.weibo.com",
+        ]
 
         async def json_side() -> dict:
             return {"data": {"status": 3, "nickname": "测试用户"}}
@@ -274,7 +274,8 @@ class TestGetTokens:
         auth = WeiboAuthenticator()
         mock_resp = MagicMock()
         mock_resp.status = 200
-        mock_resp.headers = {}  # No Set-Cookie
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.getall.return_value = []  # No Set-Cookie
 
         async def json_side() -> dict:
             return {"data": {"status": 3}}
@@ -301,9 +302,11 @@ class TestRefreshTokens:
 
         mock_resp = MagicMock()
         mock_resp.status = 200
-        mock_resp.headers = {
-            "Set-Cookie": ("SUB=new_sub; Path=/; Domain=.weibo.com, SUBP=new_subp; Path=/; Domain=.weibo.com")
-        }
+        mock_resp.headers = MagicMock()
+        mock_resp.headers.getall.return_value = [
+            "SUB=new_sub; Path=/; Domain=.weibo.com",
+            "SUBP=new_subp; Path=/; Domain=.weibo.com",
+        ]
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
