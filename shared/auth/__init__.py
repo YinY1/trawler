@@ -31,6 +31,9 @@ __all__ = [
 ]
 
 
+_PLATFORM_TABLE = {"xhs": "xiaohongshu", "bili": "bilibili", "weibo": "weibo"}
+
+
 def get_authenticator(platform: str) -> BaseAuthenticator:
     """Factory: get platform authenticator instance."""
     if platform == "bili":
@@ -52,4 +55,5 @@ def update_auth_section(platform: str, auth_dict: dict, config_path: str = "conf
     """Update [platform.auth] section in config.toml."""
     from shared.auth.token_store import update_auth_section as _update
 
-    _update(config_path=config_path, platform=platform, auth_dict=auth_dict)
+    table = _PLATFORM_TABLE.get(platform, platform)
+    _update(config_path=config_path, platform=table, auth_dict=auth_dict)

@@ -16,7 +16,7 @@ from shared.auth.base import (
     RefreshFailedError,
 )
 
-# ── Fixtures ──
+# ── ──
 
 
 def _make_mock_response(status: int = 200, json_data: dict | None = None) -> MagicMock:
@@ -45,7 +45,7 @@ def _cookie_str() -> str:
     return "; ".join(f"{k}={v}" for k, v in _sample_cookies().items())
 
 
-# ── XhsAuthenticator.generate_qr_code ──
+# ── ──
 
 
 class TestGenerateQrCode:
@@ -101,7 +101,7 @@ class TestGenerateQrCode:
                 await auth.generate_qr_code()
 
 
-# ── XhsAuthenticator.poll_qr_status ──
+# ── ──
 
 
 class TestPollQrStatus:
@@ -207,7 +207,7 @@ class TestPollQrStatus:
         assert not status.success
 
 
-# ── XhsAuthenticator.get_tokens ──
+# ── ──
 
 
 class TestGetTokens:
@@ -240,7 +240,7 @@ class TestGetTokens:
             await auth.get_tokens("qr_abc")
 
 
-# ── XhsAuthenticator.refresh_tokens ──
+# ── ──
 
 
 class TestRefreshTokens:
@@ -282,7 +282,7 @@ class TestRefreshTokens:
         assert result is tokens
 
 
-# ── XhsAuthenticator.validate_tokens ──
+# ── ──
 
 
 class TestValidateTokens:
@@ -331,7 +331,7 @@ class TestValidateTokens:
         assert await auth.validate_tokens(tokens) is False
 
 
-# ── Inheritance ──
+# ── ──
 
 
 class TestIsAuthenticator:

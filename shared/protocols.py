@@ -176,6 +176,15 @@ class XhsDownloadResult:
     error: Optional[str] = None
 
 
+@dataclass
+class RenewalResult:
+    """Result of a token check-and-renew operation."""
+
+    platform: str
+    action: str  # "skipped" | "renewed" | "expired" | "not_configured"
+    message: str
+
+
 # ═══════════════════════════════════════════════════════════
 # 转写 & 解析结果模型
 # ═══════════════════════════════════════════════════════════

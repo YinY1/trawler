@@ -181,7 +181,7 @@ def token_refresh(platform: str) -> None:
     elif platform == "xhs":
         auth = config.xiaohongshu.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ 未配置小红书 Cookie 或已过期，请先执行 trawler login --platform xhs[/]")
+            console.print("[red]✗[/] 未配置小红书 Cookie 或已过期，请先执行 trawler login --platform xhs")
             sys.exit(1)
         try:
             from platforms.xiaohongshu.auth import XhsAuthenticator
@@ -202,9 +202,9 @@ def token_refresh(platform: str) -> None:
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
             update_auth_section(platform, auth_dict)
-            console.print("[green]✓ xhs Token 续期成功[/]")
+            console.print("[green]✓[/] xhs Token 续期成功")
         except Exception as exc:
-            console.print(f"[red]✗ 续期失败: {exc}[/]")
+            console.print(f"[red]✗[/] 续期失败: {exc}")
             sys.exit(1)
 
 
@@ -240,7 +240,7 @@ def check(platform: str, config_path: str, verbose: bool) -> None:
         console.print(f"[red]✗ 配置加载失败: {exc}[/]")
         sys.exit(1)
     try:
-        asyncio.run(run_check_once(config, platform))
+        asyncio.run(run_check_once(config, platform, config_path))
     except KeyboardInterrupt:
         console.print("\n[yellow]已中断[/]")
         sys.exit(130)

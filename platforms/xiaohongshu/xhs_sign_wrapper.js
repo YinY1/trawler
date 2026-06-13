@@ -4,7 +4,8 @@
  * Reads JSON from stdin: {"a1": "...", "data": {...}}
  * Writes JSON to stdout: {"xs": "...", "xt": ..., "xs_common": "..."}
  */
-const { get_request_headers_params } = require('./static/xhs_main_260411.js');
+const path = require('path');
+const { get_request_headers_params } = require(path.join(process.cwd(), 'static', 'xhs_main_260411.js'));
 
 const api = process.argv[2];
 const method = process.argv[3] || 'POST';

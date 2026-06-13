@@ -24,6 +24,7 @@ from shared.auth.base import (
     RefreshFailedError,
 )
 from shared.config import Config
+from shared.constants import XHS_REQUEST_TIMEOUT
 from shared.http import get_session
 
 logger = logging.getLogger("trawler.xiaohongshu.auth")
@@ -44,7 +45,6 @@ XHS_QR_STATUS_API = "/api/sns/web/v1/login/qrcode/status"
 XHS_SEC_SCRIPT_API = "/api/sec/v1/scripting"
 XHS_SEC_GID_API = "/api/sec/v1/shield/webprofile"
 XHS_AS_BASE = "https://as.xiaohongshu.com"
-XHS_REQUEST_TIMEOUT = 15
 _A1_CHARSET = "abcdefghijklmnopqrstuvwxyz1234567890"
 
 
@@ -224,7 +224,7 @@ def generate_web_id(a1: str) -> str:
     return hashlib.md5(a1.encode()).hexdigest()
 
 
-async def _fetch_sec_cookies(session, cookies: dict[str, str]) -> dict[str, str]:
+async def _fetch_sec_cookies(session: Any, cookies: dict[str, str]) -> dict[str, str]:
     """Fetch sec_poison_id and gid for initial cookies. Called before QR generation."""
     from platforms.xiaohongshu.signer import get_xhs_sign
 
@@ -304,14 +304,15 @@ class XhsAuthenticator(BaseAuthenticator):
         from platforms.xiaohongshu.signer import get_xhs_sign
 
         await self._ensure_session()
+        a1_val = generate_a1()
         self._init_cookies = {
             "abRequestId": str(uuid.uuid4()),
             "ets": str(int(time.time() * 1000)),
             "webBuild": "6.7.4",
             "xsecappid": "xhs-pc-web",
             "loadts": str(int(time.time() * 1000) + random.randint(50, 200)),
-            "a1": generate_a1(),
-            "webId": generate_web_id(generate_a1()),
+            "a1": a1_val,
+            "webId": generate_web_id(a1_val),
         }
         sec_cookies = await _fetch_sec_cookies(self._session, self._init_cookies)
         self._init_cookies.update(sec_cookies)
