@@ -1,5 +1,7 @@
 """Tests for shared/config.py — TOML-based configuration"""
 
+from __future__ import annotations
+
 from shared.config import (
     AnalysisConfig,
     AuthGlobalConfig,

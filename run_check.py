@@ -48,8 +48,9 @@ def login(platform: str) -> None:
         else:
             auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
         # ac_time_value is stored separately (not in PlatformTokens) — only for bilibili
-        if platform == "bili" and hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-            auth_dict["ac_time_value"] = authenticator._last_ac_time_value
+        ac_val = authenticator.ac_time_value
+        if platform == "bili" and ac_val:
+            auth_dict["ac_time_value"] = ac_val
         update_auth_section(platform, auth_dict)
         console.print(f"[green]✓ {platform} 登录成功，凭证已保存[/]")
     except QRExpiredError:
@@ -140,8 +141,9 @@ def token_refresh(platform: str) -> None:
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
             # ac_time_value is stored separately (not in PlatformTokens)
-            if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-                auth_dict["ac_time_value"] = authenticator._last_ac_time_value
+            ac_val = authenticator.ac_time_value
+            if ac_val:
+                auth_dict["ac_time_value"] = ac_val
             update_auth_section(platform, auth_dict)
             console.print(f"[green]✓ {platform} Token 续期成功[/]")
         except Exception as exc:

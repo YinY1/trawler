@@ -5,12 +5,16 @@ Python 3.12 trawler project. Overrides global rules where they conflict.
 ## Commands
 
 ```bash
-ruff check .                  # lint
-ruff format .                 # format
-pyright .                     # type check
-pytest -x                     # test (fail fast)
-trawler check --platform all # run locally
+uv venv --python 3.12                             # 创建虚拟环境（首次）
+uv pip install -e ".[dev]"                        # 安装依赖（含 dev，不含 xhs）
+uv run ruff check .                              # lint
+uv run ruff format .                             # format
+uv run pyright .                                 # type check
+uv run pytest -x                                 # test (fail fast)
+uv run trawler check --platform all              # run locally
 ```
+
+**所有 Python 环境操作必须通过 `uv`，禁止直接使用 `python3`、`pip`、`pip3` 等裸命令。**
 
 ## Architecture
 

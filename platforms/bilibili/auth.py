@@ -60,6 +60,10 @@ class BilibiliAuthenticator(BaseAuthenticator):
         self._qr_login: login_v2.QrCodeLogin | None = None
         self._last_ac_time_value: str = ""
 
+    @property
+    def ac_time_value(self) -> str | None:
+        return self._last_ac_time_value or None
+
     # ── 内部工具 ──────────────────────────────────────────
 
     def _get_qr_login(self) -> login_v2.QrCodeLogin:
@@ -174,7 +178,8 @@ class BilibiliAuthenticator(BaseAuthenticator):
         )
         try:
             return await cred.check_valid()
-        except Exception:
+        except Exception as e:
+            logger.warning("B站 token 有效性检查失败: %s", e)
             return False
 
     def supports_refresh(self) -> bool:

@@ -27,7 +27,17 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
+    "pyright>=1.1",
 ]
+
+[tool.uv]
+no-build-isolation-package = ["torch"]
+
+[tool.pyright]
+include = ["core", "shared", "platforms", "run_check.py"]
+exclude = ["vendor", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
 
 [project.scripts]
 trawler = "run_check:cli"

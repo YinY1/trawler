@@ -263,7 +263,8 @@ class WeiboAuthenticator(BaseAuthenticator):
                 return resp.status == 200
             finally:
                 resp.close()
-        except Exception:
+        except Exception as e:
+            logger.warning("微博 token 有效性检查失败: %s", e)
             return False
 
     @staticmethod
