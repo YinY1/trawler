@@ -1,9 +1,6 @@
 """流程编排模块 - 纯编排层，不包含业务逻辑
 
 所有跨模块调用严格匹配各模块的实际函数签名：
-- monitor.check_new_videos(uid, config, store)
-- rss_monitor.RSSMonitor(config).check_up(uid, name, store)
-- dynamic.check_new_dynamics(uid, config, store)
 - comments.fetch_comment_highlights(bvid, config)
 - downloader.download_video(bvid, config)
 - transcriber.transcribe_file(filepath, config, source_id, title, author)
@@ -13,20 +10,17 @@
 - notifier.notify_new_video(bvid, title, author, summary, keywords, comment_highlights, config)
 - notifier.notify_new_xhs_note(note_id, title, author, summary, keywords, comment_highlights, xhs_noti_config)
 - notifier.notify_dynamic(dynamic_info: dict, config: NotificationConfig) -> bool
-- xhs_monitor.check_new_notes(user_id, name, config, store)
-- xhs_downloader.download_note(note, config)
-- xhs_parser.parse_note_content(note, download_result)
-- xhs_comments.fetch_xhs_comment_highlights(note_id, config)
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from rich.console import Console
 
 from shared.config import Config
-from shared.protocols import Phase
+from shared.protocols import DynamicInfo, Phase
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -94,6 +88,80 @@ async def run_bili_check_once(config: Config, from_phase: Phase | None = None) -
     from core.engine import PipelineEngine
 
     await PipelineEngine.run_platform(config, "bili", from_phase=from_phase)
+
+    # ── B站动态（独立于 PipelineEngine，本次不迁移）──
+    if config.bilibili.monitor.watch_dynamic:
+        from platforms.bilibili.dynamic import check_new_dynamics
+        from shared.message_store import MessageStore
+
+        store = MessageStore(config.general.data_dir)
+        from core.notifier import notify_dynamic
+
+        console.print("[cyan]🔍 检查新动态…[/]")
+        for sub in config.bilibili.subscriptions:
+            try:
+                new_dynamics = await check_new_dynamics(
+                    uid=sub.uid,
+                    config=config,
+                    store=store,
+                )
+                for dyn in new_dynamics:
+                    _run_stats.dynamics_processed += 1  # type: ignore[union-attr]
+                    try:
+                        await process_dynamic(dyn, config, store)
+                        _run_stats.dynamics_succeeded += 1  # type: ignore[union-attr]
+                    except Exception as exc:
+                        _run_stats.dynamics_failed += 1  # type: ignore[union-attr]
+                        console.print(f"[red]✗ 处理动态失败: {exc}[/]")
+                        logger.exception("Failed to process dynamic")
+            except Exception as exc:
+                console.print(f"[yellow]⚠️  检查 {sub.name}({sub.uid}) 动态失败: {exc}[/]")
+                logger.warning("Failed to check dynamics for %s(%s): %s", sub.name, sub.uid, exc)
+
+        store.save()
+        console.print("[green]✓ B站动态检查完成[/]")
+
+
+# ═══════════════════════════════════════════════════════════
+# B站动态处理（独立于 PipelineEngine，保留旧接口）
+# ═══════════════════════════════════════════════════════════
+
+
+async def process_dynamic(
+    dynamic_info: DynamicInfo,
+    config: Config,
+    store: Any,
+) -> None:
+    """处理单条 B站动态（保留旧接口，后续迁移到 PipelineEngine）。"""
+    from core.notifier import notify_dynamic as _notify_dynamic
+
+    console.print(f"[bold blue]▶ 处理动态[/] {dynamic_info.dynamic_id}")
+
+    # 如果动态关联了视频，打印日志（视频由 PipelineEngine 统一处理）
+    if dynamic_info.linked_bvid:
+        console.print(f"  [dim]关联视频 {dynamic_info.linked_bvid} 由 PipelineEngine 处理[/]")
+
+    # 标记动态已知
+    if hasattr(store, "mark_known"):
+        store.mark_known(f"dyn_{dynamic_info.dynamic_id}")
+
+    # 通知推送
+    try:
+        await _notify_dynamic(
+            dynamic_info={
+                "user": dynamic_info.author,
+                "content": dynamic_info.content or dynamic_info.title,
+                "dynamic_id": dynamic_info.dynamic_id,
+                "type": "动态",
+                "url": dynamic_info.link,
+            },
+            config=config.bilibili.notification,
+        )
+    except Exception as exc:
+        console.print(f"  [yellow]⚠️  动态通知推送失败: {exc}[/]")
+        logger.warning("Dynamic notify failed for %s: %s", dynamic_info.dynamic_id, exc)
+
+    console.print("  [green]✓ 动态处理完成[/]")
 
 
 # ═══════════════════════════════════════════════════════════
