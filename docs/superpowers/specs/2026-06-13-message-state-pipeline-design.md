@@ -45,7 +45,6 @@ run_check.py           # + --from-phase CLI 参数
 class ContentType(Enum):
     VIDEO = auto()       # B站视频 / XHS视频笔记 — 完整四阶段
     TEXT = auto()        # 微博 / XHS图文笔记 — 两阶段（下载+推送）
-    DYNAMIC = auto()     # 预留：B站动态，本次不实现
 
 > **行为变更**: TEXT 类型不再生成 AI 摘要和关键词。用户要求文字类仅两阶段（下载+推送），当前 weibo 和 XHS 图文的摘要逻辑将被移除。如果后续需要摘要，可重新加入作为可选阶段。
 
@@ -295,15 +294,6 @@ async def run_bili_check_once(config: Config) -> None:
 - 阶段执行失败：`msg.error` 记录错误信息，`msg.phase` 不变
 - 每次 `run_check_once` 都重试所有失败消息
 - 不做指数退避，保持简单
-
-## B站动态（spec 预留）
-
-已预留 `ContentType.DYNAMIC`，但不包含在 `PHASE_FLOW` 中。后续实现步骤：
-
-1. 定义 `PHASE_FLOW[ContentType.DYNAMIC]` 的阶段路径
-2. 实现 B站动态的 detector（从现有 `check_new_dynamics` 改造）
-3. 注册各阶段 handler
-4. 核心引擎不需改动
 
 ## 向后兼容
 
