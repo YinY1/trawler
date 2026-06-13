@@ -63,7 +63,7 @@ async def fetch_comment_highlights(
         try:
             resp = await comment.get_comments(
                 oid=aid,
-                type_=comment.ResourceType.VIDEO,
+                type_=comment.CommentResourceType.VIDEO,
                 order=comment.OrderType.LIKE,
                 page_index=page,
                 credential=credential,

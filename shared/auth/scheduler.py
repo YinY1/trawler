@@ -131,10 +131,10 @@ def _tokens_to_auth_dict(platform: str, tokens: PlatformTokens, authenticator: A
 
     if platform == "bilibili":
         d = {
-            "sessdata": tokens.cookies.get("SESSDATA", ""),
+            "sessdata": tokens.cookies.get("sessdata", ""),
             "bili_jct": tokens.cookies.get("bili_jct", ""),
             "buvid3": tokens.cookies.get("buvid3", ""),
-            "dedeuserid": tokens.cookies.get("DedeUserID", ""),
+            "dedeuserid": tokens.cookies.get("dedeuserid", ""),
             "expires_at": tokens.expires_at,
         }
         if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
@@ -149,10 +149,10 @@ def _tokens_to_auth_dict(platform: str, tokens: PlatformTokens, authenticator: A
 def _update_config_memory(platform: str, config: Config, tokens: PlatformTokens, authenticator=None) -> None:
     """Update in-memory config with renewed tokens so current run uses fresh credentials."""
     if platform == "bilibili":
-        config.bilibili.auth.sessdata = tokens.cookies.get("SESSDATA", "")
+        config.bilibili.auth.sessdata = tokens.cookies.get("sessdata", "")
         config.bilibili.auth.bili_jct = tokens.cookies.get("bili_jct", "")
         config.bilibili.auth.buvid3 = tokens.cookies.get("buvid3", "")
-        config.bilibili.auth.dedeuserid = tokens.cookies.get("DedeUserID", "")
+        config.bilibili.auth.dedeuserid = tokens.cookies.get("dedeuserid", "")
         config.bilibili.auth.expires_at = tokens.expires_at
         if authenticator and hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
             config.bilibili.auth.ac_time_value = authenticator._last_ac_time_value

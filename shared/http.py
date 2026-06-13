@@ -14,7 +14,7 @@ async def get_session() -> aiohttp.ClientSession:
     """获取全局 aiohttp.ClientSession（懒创建，自动复用）。"""
     global _session
     if _session is None or _session.closed:
-        _session = aiohttp.ClientSession()
+        _session = aiohttp.ClientSession(trust_env=False)
     return _session
 
 

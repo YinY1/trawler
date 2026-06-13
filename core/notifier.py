@@ -281,7 +281,7 @@ async def notify_dynamic(
             "",
             "---",
             "",
-            content,
+            str(content),
         ]
     )
 

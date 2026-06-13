@@ -174,10 +174,10 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
             current_tokens = PlatformTokens(
                 platform=platform,
                 cookies={
-                    "SESSDATA": bili_auth.sessdata,
+                    "sessdata": bili_auth.sessdata,
                     "bili_jct": bili_auth.bili_jct,
                     "buvid3": bili_auth.buvid3 or "",
-                    "DedeUserID": bili_auth.dedeuserid or "",
+                    "dedeuserid": bili_auth.dedeuserid or "",
                 },
                 obtained_at=time.time(),
                 expires_at=bili_auth.expires_at,
