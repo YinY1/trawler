@@ -95,7 +95,6 @@ async def run_bili_check_once(config: Config, from_phase: Phase | None = None) -
         from shared.message_store import MessageStore
 
         store = MessageStore(config.general.data_dir)
-        from core.notifier import notify_dynamic
 
         console.print("[cyan]🔍 检查新动态…[/]")
         for sub in config.bilibili.subscriptions:
