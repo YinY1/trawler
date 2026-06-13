@@ -186,26 +186,26 @@ async def test_run_platform_detect_and_process(config: Config, tmp_path: Path) -
 
     detected = False
 
-    @PipelineEngine.register_detector("bili")
+    @PipelineEngine.register_detector("test_platform")
     async def bili_detector(cfg: Config, st: MessageStore) -> None:
         nonlocal detected  # noqa: F824
         detected = True
-        st.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+        st.add_new("test:001", "test_platform", ContentType.TEXT, 2000000000, "T", "A")
 
-    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    @PipelineEngine.register("test_platform", Phase.DOWNLOADED)
     async def dl(ctx: PhaseContext) -> bool:
         return True
 
-    @PipelineEngine.register("bili", Phase.PUSHED)
+    @PipelineEngine.register("test_platform", Phase.PUSHED)
     async def ps(ctx: PhaseContext) -> bool:
         return True
 
     config.general.data_dir = str(tmp_path)
-    await PipelineEngine.run_platform(config, "bili")
+    await PipelineEngine.run_platform(config, "test_platform")
 
     assert detected
     store2 = MessageStore(tmp_path)
-    assert store2.is_known("bili:BV1")
-    msg = store2.get_message("bili:BV1")
+    assert store2.is_known("test:001")
+    msg = store2.get_message("test:001")
     assert msg is not None
     assert msg.phase == Phase.PUSHED

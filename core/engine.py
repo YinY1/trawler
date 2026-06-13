@@ -5,10 +5,14 @@
 - 各平台在 ``handlers.py`` 中通过装饰器注册 handler
 - 跨平台共用 handler 使用 ``"*"`` 作为 platform 通配符
 - ``run_platform()`` 是统一入口：cleanup -> detect -> process
+
+重要：模块被导入时通过装饰器自动注册 handler。
+``run_platform()`` 在生产路径下运行时自动延迟导入对应 handler 模块。
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -29,10 +33,17 @@ class PipelineEngine:
     使用类变量注册表（允许跨模块导入时自动注册）：
     - ``_handlers``:  {(platform, phase): handler}
     - ``_detectors``: {platform: detector}
+
+    平台 handler 模块路径映射（供 ``run_platform()`` 延迟导入）。
     """
 
     _handlers: dict[tuple[str, Phase], PhaseHandler] = {}
     _detectors: dict[str, Callable[..., Awaitable[None]]] = {}
+    _HANDLER_MODULES: dict[str, str] = {
+        "bili": "platforms.bilibili.handlers",
+        "xhs": "platforms.xiaohongshu.handlers",
+        "weibo": "platforms.weibo.handlers",
+    }
 
     # ── 注册 ─────────────────────────────────────────────────
 
@@ -85,7 +96,7 @@ class PipelineEngine:
         """从当前 phase 开始逐阶段推进消息。
 
         每推进一个阶段立即 ``save()``，避免中途崩溃丢失进度。
-        未注册 handler 的阶段会被静默跳过（phase 仍推进）。
+        如果某阶段未注册 handler，记录错误并停止（不推进 phase）。
         """
         from shared.protocols import MessageRecord
 
@@ -99,11 +110,11 @@ class PipelineEngine:
             if handler is None:
                 handler = cls._handlers.get(("*", next_phase))
             if handler is None:
-                # 未注册 handler → 静默跳过，推进 phase
-                msg.phase = next_phase
-                store.mark_phase(msg.msg_id, next_phase)
+                logger.error("No handler for %s / %s — stopping", msg.platform, next_phase)
+                ctx.error = f"missing handler: {msg.platform}/{next_phase.name}"
+                store.mark_error(msg.msg_id, ctx.error)
                 store.save()
-                continue
+                break
 
             success = await handler(ctx)
             if not success:
@@ -134,6 +145,11 @@ class PipelineEngine:
 
         if from_phase is not None:
             store.reset_to_phase(from_phase, platform=platform)
+
+        # 延迟导入对应平台的 handler 模块（触发装饰器注册）
+        module_path = cls._HANDLER_MODULES.get(platform)
+        if module_path is not None:
+            importlib.import_module(module_path)
 
         detector = cls._detectors.get(platform)
         if detector is not None:
