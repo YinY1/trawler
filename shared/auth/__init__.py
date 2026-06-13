@@ -41,6 +41,10 @@ def get_authenticator(platform: str) -> BaseAuthenticator:
         from platforms.weibo.auth import WeiboAuthenticator
 
         return WeiboAuthenticator()
+    if platform == "xhs":
+        from platforms.xiaohongshu.auth import XhsAuthenticator
+
+        return XhsAuthenticator()
     raise ValueError(f"Unsupported platform: {platform}")
 
 

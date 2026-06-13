@@ -38,15 +38,11 @@ def login(platform: str) -> None:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
 
-    if platform == "xhs":
-        console.print(f"[yellow]{platform} 登录功能将在后续版本支持[/]")
-        return
-
     try:
         authenticator = get_authenticator(platform)
         tokens = asyncio.run(authenticator.qr_login())
         # Weibo stores cookies as a single semicolon-delimited string
-        if platform == "weibo":
+        if platform in ("weibo", "xhs"):
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
         else:
@@ -183,8 +179,33 @@ def token_refresh(platform: str) -> None:
             sys.exit(1)
 
     elif platform == "xhs":
-        console.print(f"[yellow]{platform} 续期功能将在后续版本支持[/]")
-        return
+        auth = config.xiaohongshu.auth
+        if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
+            console.print("[red]✗ 未配置小红书 Cookie 或已过期，请先执行 trawler login --platform xhs[/]")
+            sys.exit(1)
+        try:
+            from platforms.xiaohongshu.auth import XhsAuthenticator
+
+            authenticator = XhsAuthenticator()
+            cookie_dict: dict[str, str] = {}
+            for part in auth.cookie.split(";"):
+                if "=" in part:
+                    k, v = part.strip().split("=", 1)
+                    cookie_dict[k] = v
+            current_tokens = PlatformTokens(
+                platform="xhs",
+                cookies=cookie_dict,
+                obtained_at=time.time(),
+                expires_at=auth.expires_at,
+            )
+            tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
+            cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
+            auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
+            update_auth_section(platform, auth_dict)
+            console.print("[green]✓ xhs Token 续期成功[/]")
+        except Exception as exc:
+            console.print(f"[red]✗ 续期失败: {exc}[/]")
+            sys.exit(1)
 
 
 @cli.command()

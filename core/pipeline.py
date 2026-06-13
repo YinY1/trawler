@@ -775,12 +775,21 @@ async def run_check_once(config: Config, platform: str = "all") -> None:
     console.print()
 
     if platform in ("all", "bili"):
+        from shared.auth.scheduler import check_and_renew_tokens
+
+        await check_and_renew_tokens("bilibili", config)
         await run_bili_check_once(config)
 
     if platform in ("all", "xhs") and config.xiaohongshu.enabled:
+        from shared.auth.scheduler import check_and_renew_tokens
+
+        await check_and_renew_tokens("xhs", config)
         await run_xhs_check_once(config)
 
     if platform in ("all", "weibo") and config.weibo.enabled:
+        from shared.auth.scheduler import check_and_renew_tokens
+
+        await check_and_renew_tokens("weibo", config)
         await run_weibo_check_once(config)
 
     # 打印统计
