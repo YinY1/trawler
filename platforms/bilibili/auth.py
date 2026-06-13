@@ -185,23 +185,23 @@ class BilibiliAuthenticator(BaseAuthenticator):
     def supports_refresh(self) -> bool:
         return True
 
-    @staticmethod
-    def build_tokens_from_config(config: Config) -> PlatformTokens | None:
-        """Build PlatformTokens from config.bilibili.auth. Returns None if not configured."""
-        import time as _time
-        auth = config.bilibili.auth
-        if not auth.sessdata or not auth.bili_jct:
-            return None
-        if auth.expires_at <= 0:
-            return None
-        return PlatformTokens(
-            platform="bilibili",
-            cookies={
-                "SESSDATA": auth.sessdata,
-                "bili_jct": auth.bili_jct,
-                "buvid3": auth.buvid3 or "",
-                "DedeUserID": auth.dedeuserid or "",
-            },
-            obtained_at=_time.time(),
-            expires_at=auth.expires_at,
-        )
+
+def build_tokens_from_config(config: Config) -> PlatformTokens | None:
+    """Build PlatformTokens from config.bilibili.auth. Returns None if not configured."""
+    import time as _time
+    auth = config.bilibili.auth
+    if not auth.sessdata or not auth.bili_jct:
+        return None
+    if auth.expires_at <= 0:
+        return None
+    return PlatformTokens(
+        platform="bilibili",
+        cookies={
+            "SESSDATA": auth.sessdata,
+            "bili_jct": auth.bili_jct,
+            "buvid3": auth.buvid3 or "",
+            "DedeUserID": auth.dedeuserid or "",
+        },
+        obtained_at=_time.time(),
+        expires_at=auth.expires_at,
+    )

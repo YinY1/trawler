@@ -296,14 +296,15 @@ class XhsAuthenticator(BaseAuthenticator):
         self._init_cookies: dict[str, str] = {}
         self._qr_code: str = ""
 
-    async def _ensure_session(self) -> None:
+    async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = await get_session()
+        return self._session
 
     async def generate_qr_code(self) -> QRCodeResult:
         from platforms.xiaohongshu.signer import get_xhs_sign
 
-        await self._ensure_session()
+        session = await self._ensure_session()
         a1_val = generate_a1()
         self._init_cookies = {
             "abRequestId": str(uuid.uuid4()),
@@ -314,7 +315,7 @@ class XhsAuthenticator(BaseAuthenticator):
             "a1": a1_val,
             "webId": generate_web_id(a1_val),
         }
-        sec_cookies = await _fetch_sec_cookies(self._session, self._init_cookies)
+        sec_cookies = await _fetch_sec_cookies(session, self._init_cookies)
         self._init_cookies.update(sec_cookies)
         api = XHS_QR_CREATE_API
         data = {"qr_type": 1}
@@ -328,7 +329,7 @@ class XhsAuthenticator(BaseAuthenticator):
             "x-t": sign["xt"],
             "x-s-common": sign["xs_common"],
         }
-        async with self._session.post(
+        async with session.post(
             XHS_API_BASE + api,
             headers=headers,
             cookies=self._init_cookies,
@@ -353,7 +354,7 @@ class XhsAuthenticator(BaseAuthenticator):
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
         from platforms.xiaohongshu.signer import get_xhs_sign
 
-        await self._ensure_session()
+        session = await self._ensure_session()
         api = XHS_QR_CHECK_API
         data = {"qrId": qr_key, "code": self._qr_code}
         sign = get_xhs_sign(api, data, self._init_cookies.get("a1", ""), "POST")
@@ -366,7 +367,7 @@ class XhsAuthenticator(BaseAuthenticator):
             "x-t": sign["xt"],
             "x-s-common": sign["xs_common"],
         }
-        async with self._session.post(
+        async with session.post(
             XHS_API_BASE + api,
             headers=headers,
             cookies=self._init_cookies,
@@ -391,14 +392,14 @@ class XhsAuthenticator(BaseAuthenticator):
             3: "二维码已过期",
         }
         if qr_status == QRStatus.SUCCESS:
-            await self._fetch_login_info(qr_key)
+            await self._fetch_login_info(qr_key, session)
         return AuthStatus(
             success=qr_status == QRStatus.SUCCESS,
             status=qr_status,
             message=msg_map.get(status, f"未知状态: {status}"),
         )
 
-    async def _fetch_login_info(self, qr_key: str) -> None:
+    async def _fetch_login_info(self, qr_key: str, session: aiohttp.ClientSession) -> None:
         from platforms.xiaohongshu.signer import get_xhs_sign
 
         api = XHS_QR_STATUS_API
@@ -414,7 +415,7 @@ class XhsAuthenticator(BaseAuthenticator):
             "x-t": sign["xt"],
             "x-s-common": sign["xs_common"],
         }
-        async with self._session.get(
+        async with session.get(
             XHS_API_BASE + full_api,
             headers=headers,
             cookies=self._init_cookies,
@@ -444,10 +445,10 @@ class XhsAuthenticator(BaseAuthenticator):
         )
 
     async def refresh_tokens(self, tokens: PlatformTokens) -> PlatformTokens:
-        await self._ensure_session()
+        session = await self._ensure_session()
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         try:
-            async with self._session.get(
+            async with session.get(
                 XHS_HOME_URL,
                 headers={"User-Agent": DEFAULT_USER_AGENT, "Cookie": cookie_str},
                 timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
@@ -468,10 +469,10 @@ class XhsAuthenticator(BaseAuthenticator):
     async def validate_tokens(self, tokens: PlatformTokens) -> bool:
         if tokens.expires_at < time.time():
             return False
-        await self._ensure_session()
+        session = await self._ensure_session()
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         try:
-            async with self._session.get(
+            async with session.get(
                 XHS_HOME_URL,
                 headers={"User-Agent": DEFAULT_USER_AGENT, "Cookie": cookie_str},
                 timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
@@ -482,26 +483,26 @@ class XhsAuthenticator(BaseAuthenticator):
             logger.warning("小红书 token 有效性检查失败: %s", e)
             return False
 
-    @staticmethod
-    def build_tokens_from_config(config: Config) -> PlatformTokens | None:
-        """Build PlatformTokens from config.xiaohongshu.auth. Returns None if not configured."""
-        import time as _time
-        auth = config.xiaohongshu.auth
-        if not auth.cookie or auth.expires_at <= 0:
-            return None
-        cookie_dict: dict[str, str] = {}
-        for part in auth.cookie.split(";"):
-            if "=" in part:
-                k, v = part.strip().split("=", 1)
-                cookie_dict[k] = v
-        if not cookie_dict:
-            return None
-        return PlatformTokens(
-            platform="xhs",
-            cookies=cookie_dict,
-            obtained_at=_time.time(),
-            expires_at=auth.expires_at,
-        )
-
     def supports_refresh(self) -> bool:
         return True
+
+
+def build_tokens_from_config(config: Config) -> PlatformTokens | None:
+    """Build PlatformTokens from config.xiaohongshu.auth. Returns None if not configured."""
+    import time as _time
+    auth = config.xiaohongshu.auth
+    if not auth.cookie or auth.expires_at <= 0:
+        return None
+    cookie_dict: dict[str, str] = {}
+    for part in auth.cookie.split(";"):
+        if "=" in part:
+            k, v = part.strip().split("=", 1)
+            cookie_dict[k] = v
+    if not cookie_dict:
+        return None
+    return PlatformTokens(
+        platform="xhs",
+        cookies=cookie_dict,
+        obtained_at=_time.time(),
+        expires_at=auth.expires_at,
+    )

@@ -6,7 +6,8 @@ Python 3.12 trawler project. Overrides global rules where they conflict.
 
 ```bash
 uv venv --python 3.12                             # 创建虚拟环境（首次）
-uv pip install -e ".[dev]"                        # 安装依赖（含 dev，不含 xhs）
+uv pip install -e ".[dev]"                        # 安装依赖（含 dev，不含 xhs 和 transcribe）
+uv pip install -e ".[transcribe]"                 # 额外安装语音转写依赖（可选）
 uv run ruff check .                              # lint
 uv run ruff format .                             # format
 uv run pyright .                                 # type check

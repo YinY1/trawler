@@ -57,7 +57,7 @@ async def check_and_renew_tokens(platform: str, config: Config, config_path: str
     if authenticator is None:
         return RenewalResult(platform, "not_configured", f"{platform}: 平台未配置或凭证缺失")
 
-    tokens = authenticator.build_tokens_from_config(config)
+    tokens = _build_tokens_from_config(platform, config)
     if tokens is None:
         return RenewalResult(platform, "not_configured", f"{platform}: 凭证未配置")
 
@@ -88,10 +88,29 @@ async def check_and_renew_tokens(platform: str, config: Config, config_path: str
         return RenewalResult(platform, "expired", f"{platform}: token 续期失败 ({e})")
 
 
+def _build_tokens_from_config(platform: str, config: Config) -> PlatformTokens | None:
+    """Build PlatformTokens from config for the given platform."""
+    import importlib
+
+    module_map = {
+        "bilibili": "platforms.bilibili.auth",
+        "weibo": "platforms.weibo.auth",
+        "xhs": "platforms.xiaohongshu.auth",
+    }
+    module_name = module_map.get(platform)
+    if module_name is None:
+        return None
+    try:
+        mod = importlib.import_module(module_name)
+        return mod.build_tokens_from_config(config)
+    except (ImportError, AttributeError):
+        return None
+
+
 def _get_authenticator_for_platform(
     platform: str, config: Config, config_path: str = "config.toml"
 ) -> BaseAuthenticator | None:
-    """Get authenticator instance with build_tokens_from_config method."""
+    """Get authenticator instance for the given platform."""
     if platform == "bilibili":
         from platforms.bilibili.auth import BilibiliAuthenticator
 

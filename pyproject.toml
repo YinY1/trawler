@@ -12,16 +12,15 @@ dependencies = [
     "rich>=13.0",
     "qrcode>=7.4",
     "tomlkit>=0.13",
-    "modelscope>=1.14",
-    "funasr>=1.1",
-    "torch>=2.1",
-    "opencc-python-reimplemented>=0.1.7",
     "aiohttp>=3.9",
 ]
 
 [project.optional-dependencies]
 xhs = [
-    "XHS-Downloader>=1.0",
+    "xhs>=0.1.9",
+]
+transcribe = [
+    "faster-whisper>=1.1",
 ]
 dev = [
     "pytest>=8.0",
@@ -29,9 +28,6 @@ dev = [
     "ruff>=0.4",
     "pyright>=1.1",
 ]
-
-[tool.uv]
-no-build-isolation-package = ["torch"]
 
 [tool.pyright]
 include = ["core", "shared", "platforms", "run_check.py"]

@@ -94,13 +94,23 @@ def test_login_bili_success(mock_get_auth: MagicMock, mock_update: MagicMock, ru
     mock_update.assert_called_once()
 
 
-# ── 7. trawler login --platform xhs (not supported) ───────────
+# ── ──
 
 
-def test_login_xhs_not_supported(runner: CliRunner) -> None:
+@patch("run_check.update_auth_section")
+@patch("run_check.get_authenticator")
+def test_login_xhs_success(mock_get_auth: MagicMock, mock_update: MagicMock, runner: CliRunner) -> None:
+    mock_authenticator = MagicMock()
+    mock_tokens = MagicMock()
+    mock_tokens.cookies = {"a1": "abc123", "web_session": "xyz789"}
+    mock_tokens.expires_at = 1234567890.0
+    mock_authenticator.qr_login = AsyncMock(return_value=mock_tokens)
+    mock_get_auth.return_value = mock_authenticator
+
     result = runner.invoke(cli, ["login", "--platform", "xhs"])
     assert result.exit_code == 0
-    assert "后续版本支持" in result.output
+    assert "登录成功" in result.output
+    mock_update.assert_called_once()
 
 
 # ── 8. trawler token status ───────────────────────────────────
@@ -174,3 +184,36 @@ def test_token_refresh_bili_expired(mock_load_config: MagicMock, runner: CliRunn
     result = runner.invoke(cli, ["token", "refresh", "--platform", "bili"])
     assert result.exit_code == 1
     assert "请先执行 trawler login" in result.output
+
+
+# ── ──
+
+
+@patch("run_check._refresh_single_platform")
+@patch("run_check._is_platform_configured", return_value=True)
+@patch("run_check.load_config")
+def test_token_refresh_all(
+    mock_load_config: MagicMock,
+    mock_is_configured: MagicMock,
+    mock_refresh: MagicMock,
+    runner: CliRunner,
+) -> None:
+    mock_refresh.return_value = True
+    mock_load_config.return_value = MagicMock()
+
+    result = runner.invoke(cli, ["token", "refresh", "--all"])
+    assert result.exit_code == 0
+    assert mock_refresh.call_count == 3
+    assert mock_refresh.call_args_list[0][0][0] == "bili"
+    assert mock_refresh.call_args_list[1][0][0] == "xhs"
+    assert mock_refresh.call_args_list[2][0][0] == "weibo"
+
+
+# ── ──
+
+
+@patch("run_check.load_config")
+def test_token_refresh_no_target(mock_load_config: MagicMock, runner: CliRunner) -> None:
+    result = runner.invoke(cli, ["token", "refresh"])
+    assert result.exit_code == 1
+    assert "请指定" in result.output
