@@ -88,7 +88,7 @@ async def fetch_comment_highlights(
 
     credential = get_credential(config)
 
-    # ── 获取视频信息 ──────────────────────────────────────
+    # ── 获取视频信息 ──
     v = video.Video(bvid=bvid, credential=credential)
     try:
         info = await v.get_info()
@@ -102,7 +102,7 @@ async def fetch_comment_highlights(
         logger.error(f"视频 {bvid} 的 aid 为 0，无法获取评论")
         return []
 
-    # ── 分页抓取评论 ──────────────────────────────────────
+    # ── 分页抓取评论 ──
     highlights: list[CommentHighlight] = []
     seen_rpids: set[int] = set()
     page = 1

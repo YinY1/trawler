@@ -54,6 +54,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
     async def _get_http_session(self):
         from shared.http import get_session
+
         return await get_session()
 
     # ── BaseAuthenticator 接口 ────────────────────────────

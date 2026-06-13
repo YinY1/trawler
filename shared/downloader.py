@@ -172,6 +172,14 @@ async def _download_bili_video(
             error="无可用音频流",
         )
 
+    # 按配置选择音频流（按 bandwidth 排序）
+    quality = (config.download.quality or "").lower()
+    if quality in ("best", "bestaudio"):
+        audios.sort(key=lambda a: a.get("bandwidth", 0) or 0, reverse=True)
+    elif quality in ("worst", "worstaudio"):
+        audios.sort(key=lambda a: a.get("bandwidth", 0) or 0)
+    # 默认保持原序，取第一条
+
     audio_url = audios[0].get("baseUrl", "") or audios[0].get("url", "")
     if not audio_url:
         return DownloadResult(

@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import aiohttp
+from rich.console import Console
 
 from shared.auth.qr_display import display_qr_in_terminal
 
 OUT_DIR = Path("data") / "debug"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+console = Console()
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -21,13 +24,32 @@ UA = (
 POLL_INTERVAL = 2
 
 
-def save(name: str, data):
+def _mask(value: str, keep: int = 4) -> str:
+    """脱敏：保留前后 keep 位，中间用 * 代替。"""
+    if len(value) <= keep * 2:
+        return value[:keep] + "..." + value[-keep:]
+    return value[:keep] + "*" * (len(value) - keep * 2) + value[-keep:]
+
+
+def save(name: str, data: Any) -> None:
+    """将调试数据保存到 JSON 文件（脱敏后写入）。"""
+    # 脱敏敏感字段
+    sanitized = _sanitize(data)
     path = OUT_DIR / f"{name}.json"
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"  ✓ {path.name}")
+    path.write_text(json.dumps(sanitized, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"  [green]✓[/] {path.name}")
 
 
-def extract_set_cookies(resp) -> dict[str, str]:
+def _sanitize(obj: Any) -> Any:
+    """递归脱敏 refresh_token 和 cookie value。"""
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
+
+
+def extract_set_cookies(resp: aiohttp.ClientResponse) -> dict[str, str]:
     """从响应头提取所有 Set-Cookie name→value。"""
     cookies: dict[str, str] = {}
     for header in resp.headers.getall("set-cookie", []):
@@ -38,14 +60,14 @@ def extract_set_cookies(resp) -> dict[str, str]:
     return cookies
 
 
-async def main():
-    print("=== B站登录调试 - 纯手写 HTTP ===\n")
+async def main() -> None:
+    console.print("[bold]=== B站登录调试 - 纯手写 HTTP ===[/bold]\n")
 
     headers = {"User-Agent": UA, "Referer": "https://www.bilibili.com/"}
 
-    # ── 1. 申请二维码 ──────────────────────────────────────────
+    # ── 1. 申请二维码 ──
     async with aiohttp.ClientSession(headers=headers, trust_env=False) as s:
-        print("[1/4] 申请二维码...")
+        console.print("[1/4] [dim]申请二维码...[/dim]")
         async with s.get(
             "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
         ) as resp:
@@ -63,12 +85,12 @@ async def main():
             "generate_set_cookie": extract_set_cookies(resp),
         })
 
-        print(f"\n  QR key: {qr_key}")
+        console.print(f"\n  [dim]QR key:[/dim] {qr_key}")
         display_qr_in_terminal(qr_url)
-        print()
+        print()  # QR 码后换行（display 里用 print）
 
-        # ── 2. 轮询扫码状态 ──────────────────────────────────────
-        print("[2/4] 轮询扫码状态...\n")
+        # ── 2. 轮询扫码状态 ──
+        console.print("[2/4] [dim]轮询扫码状态...[/dim]\n")
         token = None
         for poll_num in range(1, 601):  # 最长等 20 分钟
             async with s.get(
@@ -90,14 +112,15 @@ async def main():
                     "body": body,
                 })
 
-                print(
+                rt_icon = "[green]✓[/]" if refresh_token else "[red]✗[/]"
+                console.print(
                     f"  [#{poll_num:03d}] code={code} msg={msg} "
-                    f"cookies={len(set_cookies)} refresh_token={'✓' if refresh_token else '✗'}"
+                    f"cookies={len(set_cookies)} refresh_token={rt_icon}"
                 )
 
                 if code == 0:
-                    # ── 3. 登录成功，拿 token ──────────────────────
-                    print("\n✓ 登录成功！")
+                    # ── 3. 登录成功，拿 token ──
+                    console.print("\n[green]✓ 登录成功！[/green]")
                     token = {
                         "refresh_token": refresh_token,
                         "url": data.get("url", ""),
@@ -108,16 +131,16 @@ async def main():
                     break
 
                 if code == 86038:
-                    print("✗ 二维码已过期")
+                    console.print("[red]✗ 二维码已过期[/red]")
                     break
                 # code=86090 = 已扫码未确认，继续
                 # code=86101 = 未扫码，继续
 
             await asyncio.sleep(POLL_INTERVAL)
 
-        # ── 4. 请求 redirect URL 拿完整 Cookie ─────────────────
+        # ── 4. 请求 redirect URL 拿完整 Cookie ──
         if token and token.get("url"):
-            print("\n[3/4] 请求 redirect URL...")
+            console.print("\n[3/4] [dim]请求 redirect URL...[/dim]")
             async with s.get(token["url"], allow_redirects=True) as resp:
                 redirect_cookies = extract_set_cookies(resp)
                 save("redirect", {
@@ -125,22 +148,22 @@ async def main():
                     "url": str(resp.url),
                     "set_cookie": redirect_cookies,
                 })
-                print(f"  status={resp.status} cookies={len(redirect_cookies)}")
-                # 合并到 credential
+                console.print(f"  status={resp.status} cookies={len(redirect_cookies)}")
                 token["redirect_set_cookie"] = redirect_cookies
                 save("credential", token)
 
-        print("\n[4/4] 汇总")
-        print(f"\n数据已保存到 {OUT_DIR}/")
+        console.print("\n[4/4] [dim]汇总[/dim]")
+        console.print(f"\n数据已保存到 [dim]{OUT_DIR}/[/dim]")
 
         if token:
             rt = token.get("refresh_token", "")
-            print(f"\nrefresh_token: {'✓ 非空' if rt else '✗ 空字符串'}")
-            print(f"Set-Cookie 总数: {len(token.get('set_cookie', {}))}")
             if rt:
-                print(f"  → {rt}")
+                console.print(f"\nrefresh_token: [green]✓ 非空[/green] ({_mask(rt)})")
+            else:
+                console.print("\nrefresh_token: [red]✗ 空字符串[/red]")
+            console.print(f"Set-Cookie 总数: {len(token.get('set_cookie', {}))}")
         else:
-            print("\n✗ 登录失败")
+            console.print("\n[red]✗ 登录失败[/red]")
 
 
 if __name__ == "__main__":

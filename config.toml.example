@@ -18,6 +18,8 @@ data_dir = "./data"
 min_interval_hours = 24
 # 距过期不到多少天时强制续期（即使 min_interval 未到）
 force_before_days = 7
+# 距上次刷新尝试超过此小时数也触发续期
+max_interval_hours = 24
 # 后台检查续期的时间间隔（小时）
 check_interval_hours = 6
 
@@ -68,6 +70,8 @@ bili_jct = ""
 buvid3 = ""
 dedeuserid = ""
 ac_time_value = ""
+# 上次刷新尝试的时间戳（Unix 时间戳，0 表示未尝试过）
+last_refresh_at = 0
 # 登录过期时间（Unix 时间戳，0 表示未知）
 expires_at = 0
 
