@@ -17,6 +17,7 @@ from shared.auth.base import (
     QRStatus,
     RefreshFailedError,
 )
+from shared.config import Config
 from shared.constants import WEIBO_POLL_TIMEOUT, WEIBO_REQUEST_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -264,6 +265,27 @@ class WeiboAuthenticator(BaseAuthenticator):
                 resp.close()
         except Exception:
             return False
+
+    @staticmethod
+    def build_tokens_from_config(config: Config) -> PlatformTokens | None:
+        """Build PlatformTokens from config.weibo.auth. Returns None if not configured."""
+        import time as _time
+        auth = config.weibo.auth
+        if not auth.cookie or auth.expires_at <= 0:
+            return None
+        cookie_dict: dict[str, str] = {}
+        for part in auth.cookie.split(";"):
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                cookie_dict[k] = v
+        if not cookie_dict:
+            return None
+        return PlatformTokens(
+            platform="weibo",
+            cookies=cookie_dict,
+            obtained_at=_time.time(),
+            expires_at=auth.expires_at,
+        )
 
     def supports_refresh(self) -> bool:
         return True

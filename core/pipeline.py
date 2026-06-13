@@ -760,12 +760,13 @@ async def process_weibo_post(
 # ═══════════════════════════════════════════════════════════
 
 
-async def run_check_once(config: Config, platform: str = "all") -> None:
+async def run_check_once(config: Config, platform: str = "all", config_path: str = "config.toml") -> None:
     """统一检查入口
 
     Args:
         config: 全局配置
         platform: "all" | "bili" | "xhs" | "weibo"
+        config_path: 配置文件路径，用于 token 续期后的磁盘写入
     """
     global _run_stats  # noqa: PLW0603
     _run_stats = _Stats()
@@ -775,12 +776,21 @@ async def run_check_once(config: Config, platform: str = "all") -> None:
     console.print()
 
     if platform in ("all", "bili"):
+        from shared.auth.scheduler import check_and_renew_tokens
+
+        await check_and_renew_tokens("bilibili", config, config_path)
         await run_bili_check_once(config)
 
     if platform in ("all", "xhs") and config.xiaohongshu.enabled:
+        from shared.auth.scheduler import check_and_renew_tokens
+
+        await check_and_renew_tokens("xhs", config, config_path)
         await run_xhs_check_once(config)
 
     if platform in ("all", "weibo") and config.weibo.enabled:
+        from shared.auth.scheduler import check_and_renew_tokens
+
+        await check_and_renew_tokens("weibo", config, config_path)
         await run_weibo_check_once(config)
 
     # 打印统计
