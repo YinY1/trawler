@@ -15,6 +15,7 @@ class RenewalConfig:
     min_interval_hours: int = 24
     force_before_days: int = 7
     check_interval_hours: int = 6
+    max_interval_hours: int = 24  # 距上次刷新尝试超过此小时数也触发刷新
 
 
 @dataclass
@@ -33,6 +34,7 @@ class BilibiliAuth:
     dedeuserid: str = ""
     ac_time_value: str = ""
     expires_at: float = 0.0
+    last_refresh_at: float = 0.0  # 上次刷新尝试的时间戳
 
 
 @dataclass

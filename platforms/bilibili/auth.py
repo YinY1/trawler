@@ -11,7 +11,6 @@ from shared.auth.base import (
     PlatformTokens,
     QRCodeResult,
     QRStatus,
-    RefreshFailedError,
 )
 from shared.config import Config
 
@@ -148,13 +147,15 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
     async def refresh_tokens(self, tokens: PlatformTokens) -> PlatformTokens:
         import bilibili_api
+        from bilibili_api.exceptions import CookiesRefreshException
 
         from shared.config import load_config
 
         cfg = load_config(self._config_path)
         ac_time_value = cfg.bilibili.auth.ac_time_value
         if not ac_time_value:
-            raise RefreshFailedError("缺少 ac_time_value，无法续期，请重新扫码登录")
+            logger.warning("缺少 ac_time_value，跳过 token 续期（二维码未提供 refresh_token?）")
+            return tokens
 
         cred = bilibili_api.Credential(
             sessdata=tokens.cookies.get("sessdata", ""),
@@ -168,7 +169,14 @@ class BilibiliAuthenticator(BaseAuthenticator):
         if not need:
             return tokens
 
-        await cred.refresh()  # in-place mutation
+        try:
+            await cred.refresh()  # in-place mutation
+        except CookiesRefreshException as e:
+            logger.warning("Token 续期被 B 站拒绝（correspondPath 过期?）: %s", e)
+            return tokens
+        except Exception as e:
+            logger.warning("Token 续期异常: %s", e)
+            return tokens
 
         now = time.time()
         cookies: dict[str, str] = {}
@@ -178,11 +186,9 @@ class BilibiliAuthenticator(BaseAuthenticator):
             cookies["bili_jct"] = cred.bili_jct
         if cred.dedeuserid:
             cookies["dedeuserid"] = cred.dedeuserid
-        # 确保 buvid3 始终有值
         buvid3 = cred.buvid3 or tokens.cookies.get("buvid3", "") or (await bilibili_api.get_buvid())[0]
         cookies["buvid3"] = buvid3
 
-        # 保留 ac_time_value 供下次续期
         self._last_ac_time_value = cred.ac_time_value or ac_time_value
 
         return PlatformTokens(
