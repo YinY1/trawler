@@ -85,8 +85,8 @@ class BaseAuthenticator(ABC):
 
     @staticmethod
     def build_tokens_from_config(config: Any) -> PlatformTokens | None:
-        """Build PlatformTokens from platform config. Returns None if not configured."""
-        return None
+        """Build PlatformTokens from platform config. Subclasses must override."""
+        raise NotImplementedError(f"{__name__}.build_tokens_from_config must be overridden by subclass")
 
     async def qr_login(self, on_status: Callable[[AuthStatus], None] | None = None) -> PlatformTokens:
         # Lazy import to avoid circular dependency with qr_display

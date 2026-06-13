@@ -37,9 +37,11 @@ class SubscriptionStore(JsonSetStore):
             data = json.loads(text)
             # 兼容旧格式 {"bvids": [...]}
             if isinstance(data, dict) and "bvids" in data:
-                return set(data["bvids"])
+                bvids = data["bvids"]
+                if isinstance(bvids, list):
+                    return {str(v) for v in bvids if isinstance(v, str)}
             return super()._load()
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             logger.warning("已知视频加载失败: %s", self._path, exc_info=True)
             return set()
 
