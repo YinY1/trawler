@@ -1,6 +1,6 @@
-"""faster-whisper 语音转写模块 - 将音视频文件转写为文本"""
-
 from __future__ import annotations
+
+"""faster-whisper 语音转写模块 - 将音视频文件转写为文本"""
 
 import json
 import subprocess
