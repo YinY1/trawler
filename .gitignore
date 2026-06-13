@@ -30,5 +30,12 @@ Thumbs.db
 .serena/
 data/
 
+# Configuration (contains credentials)
+config.toml
+
+# Debug artifacts
+transcripts/
+downloads/
+
 # Git worktrees
 .worktrees/

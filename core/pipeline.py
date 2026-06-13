@@ -153,8 +153,27 @@ def _format_comment_highlights(highlights: list[Any]) -> str:
         content = getattr(h, "content", "")
         like = getattr(h, "like_count", 0)
         is_author = getattr(h, "is_up_owner", False) or getattr(h, "is_author", False)
-        tag = " (UP主)" if is_author else ""
-        parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
+        is_pinned = getattr(h, "is_pinned", False)
+        reply_to = getattr(h, "reply_to", "")
+        parent_content = getattr(h, "parent_content", "")
+
+        tags: list[str] = []
+        if is_author:
+            tags.append("UP主")
+        if is_pinned:
+            tags.append("置顶")
+        tag = f" ({', '.join(tags)})" if tags else ""
+
+        # 对话链路：UP主回复了某人
+        if reply_to and parent_content:
+            parts.append(
+                f"- **{reply_to}**:\n"
+                f"  > {parent_content}\n"
+                f"  **{name}**{tag} (👍{like}):\n"
+                f"  {content}"
+            )
+        else:
+            parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
     return "\n".join(parts)
 
 

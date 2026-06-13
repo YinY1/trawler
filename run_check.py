@@ -118,7 +118,13 @@ def token_status() -> None:
     default=False,
     help="续期所有已配置平台",
 )
-def token_refresh(platform: str | None, refresh_all: bool) -> None:
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="强制刷新（跳过续期检查，直接调用刷新接口）",
+)
+def token_refresh(platform: str | None, refresh_all: bool, force: bool) -> None:
     """手动续期 token"""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
@@ -127,7 +133,7 @@ def token_refresh(platform: str | None, refresh_all: bool) -> None:
     config = load_config("config.toml")
 
     if refresh_all:
-        targets = [p for p in ["bili", "xhs", "weibo"] if _is_platform_configured(p, config)]
+        targets = [p for p in ["bili", "xhs", "weibo"] if _is_platform_configured(p, config, force)]
     elif platform:
         targets = [platform]
     else:
@@ -136,28 +142,40 @@ def token_refresh(platform: str | None, refresh_all: bool) -> None:
 
     any_failure = False
     for plat in targets:
-        if not _refresh_single_platform(plat, config):
+        if not _refresh_single_platform(plat, config, force):
             any_failure = True
 
     if any_failure:
         sys.exit(1)
 
 
-def _is_platform_configured(platform: str, config: Config) -> bool:
-    """Check if a platform has auth credentials configured."""
+def _is_platform_configured(platform: str, config: Config, force: bool = False) -> bool:
+    """Check if a platform has auth credentials configured.
+
+    When force=True, skips the expiry check (still requires credentials to exist).
+    """
     if platform == "bili":
-        return (
-            bool(config.bilibili.auth.sessdata and config.bilibili.auth.bili_jct)
-            and config.bilibili.auth.expires_at > time.time()
-        )
+        if not (config.bilibili.auth.sessdata and config.bilibili.auth.bili_jct):
+            return False
+        if force:
+            return True
+        return config.bilibili.auth.expires_at > time.time()
     elif platform == "weibo":
-        return bool(config.weibo.auth.cookie and config.weibo.auth.expires_at > time.time())
+        if not config.weibo.auth.cookie:
+            return False
+        if force:
+            return True
+        return config.weibo.auth.expires_at > time.time()
     elif platform == "xhs":
-        return bool(config.xiaohongshu.auth.cookie and config.xiaohongshu.auth.expires_at > time.time())
+        if not config.xiaohongshu.auth.cookie:
+            return False
+        if force:
+            return True
+        return config.xiaohongshu.auth.expires_at > time.time()
     return False
 
 
-def _refresh_single_platform(platform: str, config: Config) -> bool:
+def _refresh_single_platform(platform: str, config: Config, force: bool = False) -> bool:
     """Refresh tokens for a single platform. Returns True on success, False on failure.
 
     This function does not call sys.exit(), allowing callers like --all to continue
@@ -165,7 +183,7 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
     """
     if platform == "bili":
         auth = config.bilibili.auth
-        if auth.expires_at <= 0 or auth.expires_at < time.time():
+        if not force and (auth.expires_at <= 0 or auth.expires_at < time.time()):
             console.print("[red]✗[/] Token 已过期或未配置，请先执行 trawler login --platform bili")
             return False
         try:
@@ -174,10 +192,10 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
             current_tokens = PlatformTokens(
                 platform=platform,
                 cookies={
-                    "SESSDATA": bili_auth.sessdata,
+                    "sessdata": bili_auth.sessdata,
                     "bili_jct": bili_auth.bili_jct,
                     "buvid3": bili_auth.buvid3 or "",
-                    "DedeUserID": bili_auth.dedeuserid or "",
+                    "dedeuserid": bili_auth.dedeuserid or "",
                 },
                 obtained_at=time.time(),
                 expires_at=bili_auth.expires_at,

@@ -10,8 +10,9 @@ class TestRenderQrMatrix:
 
     def test_contains_unicode_block_chars(self) -> None:
         result = _render_qr_matrix("https://example.com")
-        assert "▓" in result
-        assert "░" in result
+        assert "█" in result
+        assert "▀" in result
+        assert "▄" in result
 
     def test_multiline_output(self) -> None:
         result = _render_qr_matrix("https://example.com")
@@ -38,8 +39,9 @@ class TestDisplayQrInTerminal:
         capsys = cast(CaptureFixture[str], capsys)
         display_qr_in_terminal("https://example.com/qr")
         captured = capsys.readouterr()
-        assert "▓" in captured.out
-        assert "░" in captured.out
+        assert "█" in captured.out
+        assert "▀" in captured.out
+        assert "▄" in captured.out
 
     def test_output_includes_url(self, capsys: object) -> None:
         from typing import cast
@@ -61,7 +63,7 @@ class TestDisplayQrInTerminal:
         url = "https://example.com/qr"
         display_qr_in_terminal(url)
         captured = capsys.readouterr()
-        qr_pos = captured.out.index("▓")
+        qr_pos = captured.out.index("█")
         url_pos = captured.out.index(url)
         assert url_pos > qr_pos, "URL should appear after the QR rendering"
 

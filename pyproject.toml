@@ -38,6 +38,9 @@ typeCheckingMode = "basic"
 [project.scripts]
 trawler = "run_check:cli"
 
+[tool.setuptools]
+py-modules = ["run_check"]
+
 [tool.setuptools.packages.find]
 exclude = ["data*", "docs*", "vendor*", "tests*"]
 

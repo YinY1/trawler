@@ -1,21 +1,17 @@
-"""yt-dlp 下载封装 - 支持视频/音频下载，处理各类失败情况"""
+"""B站视频下载 - 使用 bilibili_api 绕过 yt-dlp 的 412 错误"""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
+import tempfile
 from pathlib import Path
 from typing import Optional
 
-from rich.console import Console
-
 from shared.config import Config
-from shared.constants import DOWNLOAD_TIMEOUT
 from shared.protocols import DownloadResult
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 # ── 永久性失败关键词 ─────────────────────────────────────
@@ -59,16 +55,206 @@ def _classify_error(error_msg: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _write_bili_cookies(config: Config) -> Optional[Path]:
+    """将 B站 登录凭证写入临时 Netscape cookie 文件。"""
+    auth = config.bilibili.auth
+    if not auth.sessdata or not auth.bili_jct:
+        return None
+
+    # Netscape cookie format
+    cookie_lines = [
+        "# Netscape HTTP Cookie File",
+        ".bilibili.com\tTRUE\t/\tTRUE\t1735689600\tsessdata\t" + auth.sessdata,
+        ".bilibili.com\tTRUE\t/\tTRUE\t1735689600\tbili_jct\t" + auth.bili_jct,
+    ]
+    if auth.buvid3:
+        cookie_lines.append(".bilibili.com\tTRUE\t/\tTRUE\t1735689600\tbuvid3\t" + auth.buvid3)
+    if auth.dedeuserid:
+        cookie_lines.append(".bilibili.com\tTRUE\t/\tTRUE\t1735689600\tdedeuserid\t" + auth.dedeuserid)
+
+    fp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, prefix="bili_cookies_")
+    fp.write("\n".join(cookie_lines) + "\n")
+    fp.close()
+    return Path(fp.name)
+
+
+# ── B站 URL 工具 ──────────────────────────────────────────
+
+
+def _is_bili_url(url: str) -> bool:
+    """检测是否为 B站 链接"""
+    return "bilibili.com" in url
+
+
+def _extract_bvid(url: str) -> str | None:
+    """从 URL 中提取 BVID"""
+    m = re.search(r"(BV[\w]+)", url)
+    return m.group(1) if m else None
+
+
+# ── B站 API 下载 (绕过 yt-dlp 412 错误) ─────────────────────
+
+
+async def _download_bili_video(
+    bvid: str,
+    config: Config,
+    download_dir: Path,
+    display_name: str,
+) -> DownloadResult:
+    """使用 bilibili_api 获取直链下载 B站 音频，绕过 yt-dlp 的 HTTP 412 错误。"""
+    import aiohttp
+
+    auth = config.bilibili.auth
+    if not auth.sessdata or not auth.bili_jct:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error="B站未配置登录凭证",
+        )
+
+    from bilibili_api import Credential, video
+
+    cred = Credential(
+        sessdata=auth.sessdata,
+        bili_jct=auth.bili_jct,
+        buvid3=auth.buvid3 or "",
+        dedeuserid=auth.dedeuserid or "",
+    )
+
+    v = video.Video(bvid=bvid, credential=cred)
+
+    try:
+        info = await v.get_info()
+    except Exception as e:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error=f"获取视频信息失败: {e}",
+        )
+
+    pages = info.get("pages", [])
+    if not pages:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error="无法获取视频页面信息",
+        )
+
+    cid = pages[0].get("cid")
+    if not cid:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error="无法获取视频 CID",
+        )
+
+    try:
+        urls = await v.get_download_url(cid=cid)
+    except Exception as e:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error=f"获取下载地址失败: {e}",
+        )
+
+    dash = urls.get("dash", {})
+    audios = dash.get("audio", [])
+    if not audios:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error="无可用音频流",
+        )
+
+    # 按配置选择音频流（按 bandwidth 排序）
+    quality = (config.download.quality or "").lower()
+    if quality in ("best", "bestaudio"):
+        audios.sort(key=lambda a: a.get("bandwidth", 0) or 0, reverse=True)
+    elif quality in ("worst", "worstaudio"):
+        audios.sort(key=lambda a: a.get("bandwidth", 0) or 0)
+    # 默认保持原序，取第一条
+
+    audio_url = audios[0].get("baseUrl", "") or audios[0].get("url", "")
+    if not audio_url:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error="音频 URL 为空",
+        )
+
+    # ── 下载音频 ──
+    filepath = download_dir / f"{display_name[:80]}.m4a"
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            " AppleWebKit/537.36 (KHTML, like Gecko)"
+            " Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.bilibili.com/",
+    }
+
+    try:
+        async with aiohttp.ClientSession(trust_env=False) as session:
+            async with session.get(
+                audio_url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=600),
+            ) as resp:
+                if resp.status != 200:
+                    return DownloadResult(
+                        success=False,
+                        source_id=bvid,
+                        title=display_name,
+                        error=f"下载失败 HTTP {resp.status}",
+                    )
+                with open(filepath, "wb") as f:
+                    while True:
+                        chunk = await resp.content.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+    except Exception as e:
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error=str(e),
+        )
+
+    if filepath.exists():
+        logger.info(f"下载完成: {display_name} -> {filepath.name}")
+    else:
+        logger.warning(f"下载可能成功但未找到文件: {display_name} ({bvid})")
+
+    return DownloadResult(
+        success=True,
+        source_id=bvid,
+        title=display_name,
+        filepath=filepath,
+    )
+
+
+# ── 公开接口 ─────────────────────────────────────────────────
+
+
 async def download_video(
     bvid: str,
     config: Config,
     *,
     title: str = "",
 ) -> DownloadResult:
-    """使用 yt-dlp 下载 B 站视频。
+    """下载 B 站视频音频。
 
-    优先下载音频（匹配 config.download.format），保存到 config.download.dir。
-    支持传入 Cookie 文件用于需要登录的视频。
+    使用 bilibili_api 获取直接下载地址，绕过 yt-dlp 的 HTTP 412 错误。
+    保存到 config.download.dir。
 
     Args:
         bvid: 视频 BV 号
@@ -81,109 +267,10 @@ async def download_video(
     Raises:
         无 - 所有异常均被捕获并体现在 DownloadResult 中
     """
-    url = f"https://www.bilibili.com/video/{bvid}"
     download_dir = Path(config.download.dir)
     download_dir.mkdir(parents=True, exist_ok=True)
 
     display_name = title or bvid
     logger.info(f"开始下载: {display_name} ({bvid})")
 
-    # 构建 yt-dlp 参数
-    cmd = [
-        "yt-dlp",
-        "--no-warnings",
-        "--no-check-certificates",
-        "-f",
-        config.download.format,
-        "-o",
-        str(download_dir / "%(title).100s.%(ext)s"),
-        "--print-after-finalize",
-        "filepath:%(filepath)s",
-    ]
-
-    # 限制下载速度（可选）
-    cmd.append(url)
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=DOWNLOAD_TIMEOUT,  # 10 分钟超时
-        )
-    except asyncio.TimeoutError:
-        logger.error(f"下载超时: {display_name} ({bvid})")
-        return DownloadResult(
-            success=False,
-            source_id=bvid,
-            title=display_name,
-            error=f"下载超时 ({DOWNLOAD_TIMEOUT}s)",
-        )
-    except Exception as e:
-        logger.error(f"下载进程异常: {display_name} ({bvid}): {e}")
-        return DownloadResult(
-            success=False,
-            source_id=bvid,
-            title=display_name,
-            error=str(e),
-        )
-
-    stdout_text = stdout.decode("utf-8", errors="replace").strip()
-    stderr_text = stderr.decode("utf-8", errors="replace").strip()
-
-    if proc.returncode != 0:
-        error_msg = stderr_text or stdout_text or f"exit code {proc.returncode}"
-        is_limited, note = _classify_error(error_msg)
-        logger.error(f"下载失败: {display_name} ({bvid}): {error_msg[:200]}")
-
-        if is_limited:
-            logger.info(f"标记为永久性访问限制: {note}")
-
-        return DownloadResult(
-            success=False,
-            source_id=bvid,
-            title=display_name,
-            error=error_msg[:500],
-            access_limited=is_limited,
-            access_note=note,
-        )
-
-    # 解析输出获取文件路径
-    filepath: Optional[Path] = None
-    for line in stdout_text.splitlines():
-        if line.startswith("filepath:"):
-            fp = line[len("filepath:") :].strip()
-            if fp:
-                filepath = Path(fp)
-                break
-
-    # 如果 yt-dlp 没有输出 filepath，尝试在下载目录查找
-    if filepath is None or not filepath.exists():
-        # 查找最近修改的文件
-        try:
-            files = sorted(
-                download_dir.iterdir(),
-                key=lambda f: f.stat().st_mtime,
-                reverse=True,
-            )
-            for f in files:
-                if f.is_file() and not f.name.startswith("."):
-                    filepath = f
-                    break
-        except OSError:
-            pass
-
-    if filepath and filepath.exists():
-        logger.info(f"下载完成: {display_name} -> {filepath.name}")
-    else:
-        logger.warning(f"下载可能成功但未找到文件: {display_name} ({bvid})")
-
-    return DownloadResult(
-        success=True,
-        source_id=bvid,
-        title=display_name,
-        filepath=filepath,
-    )
+    return await _download_bili_video(bvid, config, download_dir, display_name)

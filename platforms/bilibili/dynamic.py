@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Optional
 
 from platforms.bilibili.monitor import SubscriptionStore
@@ -11,6 +10,13 @@ from shared.config import Config
 from shared.protocols import DynamicInfo
 
 logger = logging.getLogger(__name__)
+
+_DYNAMIC_TYPE_MAP = {
+    "DYNAMIC_TYPE_AV": 8,
+    "DYNAMIC_TYPE_WORD": 4,
+    "DYNAMIC_TYPE_DRAW": 2,
+    "DYNAMIC_TYPE_FORWARD": 1,
+}
 
 
 async def _fetch_user_dynamics(
@@ -29,51 +35,52 @@ async def _fetch_user_dynamics(
         动态信息字典列表
     """
     from bilibili_api import dynamic
+    from bilibili_api.dynamic import DynamicType
 
     try:
-        resp = await dynamic.get_user_dynamics(uid=uid, credential=credential)
+        resp = await dynamic.get_dynamic_page_info(
+            credential=credential,
+            _type=DynamicType.ALL,
+            host_mid=uid,
+        )
     except Exception as e:
         logger.error(f"获取 UP 主 {uid} 动态失败: {e}")
         return []
 
-    if not resp or "cards" not in resp:
+    if not resp or "items" not in resp:
         return []
 
-    cards = resp.get("cards", [])
-    return cards[:max_count]
+    items = resp.get("items", [])
+    return items[:max_count]
 
 
-def _extract_bvid(text: str) -> str:
-    """从文本中提取 BV 号。"""
-    match = re.search(r"(BV[\w]+)", text)
-    return match.group(1) if match else ""
-
-
-def _parse_dynamic(card: dict, uid: int) -> Optional[DynamicInfo]:
+def _parse_dynamic(item: dict, uid: int) -> Optional[DynamicInfo]:
     """解析单条动态。
 
     支持多种动态类型: DYNAMIC_TYPE_AV (视频), DYNAMIC_TYPE_WORD (纯文字),
     DYNAMIC_TYPE_DRAW (图文), DYNAMIC_TYPE_FORWARD (转发) 等。
     """
-    desc = card.get("desc", {})
-    dynamic_id = str(desc.get("dynamic_id", ""))
+    dynamic_id = item.get("id_str", "")
     if not dynamic_id:
         return None
 
-    author = desc.get("user_profile", {}).get("info", {}).get("uname", "")
-    timestamp = desc.get("timestamp", 0)
-    dynamic_type = desc.get("type", 0)
+    modules = item.get("modules", {})
 
-    card_str = card.get("card", "{}")
-    if isinstance(card_str, str):
-        import json
+    # ── 作者信息 ──
+    author_module = modules.get("module_author", {})
+    author = author_module.get("name", "")
+    timestamp = author_module.get("pub_ts", 0)
 
-        try:
-            card_data = json.loads(card_str)
-        except json.JSONDecodeError:
-            card_data = {}
-    else:
-        card_data = card_str
+    # ── 动态类型 ──
+    dynamic_type_str = item.get("type", "")
+    dynamic_type = _DYNAMIC_TYPE_MAP.get(dynamic_type_str, 0)
+
+    # ── 动态内容 ──
+    dynamic_module = modules.get("module_dynamic", {})
+    desc_text = dynamic_module.get("desc")
+    if desc_text is None:
+        desc_text = ""
+    major = dynamic_module.get("major") or {}
 
     title = ""
     content = ""
@@ -82,42 +89,41 @@ def _parse_dynamic(card: dict, uid: int) -> Optional[DynamicInfo]:
 
     # 类型 8: 视频
     if dynamic_type == 8:
-        title = card_data.get("title", "")
-        content = card_data.get("desc", "")
-        pic = card_data.get("pic", "")
-        if pic:
-            image_urls.append(pic)
-        # 提取 BV 号
-        bvid = desc.get("bvid", "") or card_data.get("bvid", "")
-        if bvid:
-            linked_bvid = bvid
-        else:
-            # 尝试从短链接中提取
-            linked_bvid = _extract_bvid(card_data.get("short_link_v2", ""))
+        archive = major.get("archive", {})
+        if archive:
+            title = archive.get("title", "")
+            bvid = archive.get("bvid", "")
+            if bvid:
+                linked_bvid = bvid
+        content = desc_text
 
     # 类型 4: 纯文字
     elif dynamic_type == 4:
-        content = card_data.get("item", {}).get("content", "")
+        content = desc_text
 
     # 类型 2: 图文
     elif dynamic_type == 2:
-        item = card_data.get("item", {})
-        title = item.get("title", "")
-        content = item.get("description", "")
-        image_urls = [img.get("img_src", "") for img in item.get("pictures", []) if img.get("img_src")]
+        draw = major.get("draw", {})
+        if draw:
+            title = draw.get("title", "")
+            if not title:
+                title = draw.get("desc", "")
+            items_list = draw.get("items", [])
+            image_urls = [img.get("src", "") for img in items_list if img.get("src")]
+        content = desc_text
 
     # 类型 1: 转发
     elif dynamic_type == 1:
-        content = card_data.get("item", {}).get("content", "")
-        # 尝试从原始动态提取 BV 号
-        origin_str = card_data.get("origin", "{}")
-        if isinstance(origin_str, str):
-            linked_bvid = _extract_bvid(origin_str)
+        content = desc_text
+        orig = item.get("orig")
+        if orig:
+            orig_major = orig.get("modules", {}).get("module_dynamic", {}).get("major") or {}
+            orig_archive = orig_major.get("archive", {})
+            if orig_archive.get("bvid"):
+                linked_bvid = orig_archive["bvid"]
 
     else:
-        # 通用回退: 尝试提取标题和内容
-        title = card_data.get("title", "")
-        content = card_data.get("desc", "") or card_data.get("item", {}).get("content", "")
+        content = desc_text
 
     link = f"https://t.bilibili.com/{dynamic_id}"
 
