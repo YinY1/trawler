@@ -433,8 +433,9 @@ class XhsAuthenticator(BaseAuthenticator):
         cookie_keys = ["a1", "web_session", "webId", "gid", "sec_poison_id"]
         cookies = {}
         for k in cookie_keys:
-            if k in self._init_cookies:
-                cookies[k] = self._init_cookies[k]
+            v = self._init_cookies.get(k)
+            if v is not None:
+                cookies[k] = v
         return PlatformTokens(
             platform="xhs",
             cookies=cookies,
@@ -477,7 +478,8 @@ class XhsAuthenticator(BaseAuthenticator):
                 allow_redirects=False,
             ) as resp:
                 return resp.status == 200
-        except Exception:
+        except Exception as e:
+            logger.warning("小红书 token 有效性检查失败: %s", e)
             return False
 
     @staticmethod

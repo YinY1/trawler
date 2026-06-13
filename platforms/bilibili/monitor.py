@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import bilibili_api
@@ -33,14 +34,13 @@ class SubscriptionStore(JsonSetStore):
             return set()
         try:
             text = self._path.read_text(encoding="utf-8")
-            import json
-
             data = json.loads(text)
             # 兼容旧格式 {"bvids": [...]}
             if isinstance(data, dict) and "bvids" in data:
                 return set(data["bvids"])
             return super()._load()
-        except Exception:
+        except (OSError, json.JSONDecodeError):
+            logger.warning("已知视频加载失败: %s", self._path, exc_info=True)
             return set()
 
     def mark_known_video(self, video: VideoInfo) -> None:

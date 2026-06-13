@@ -5,7 +5,7 @@ import enum
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -77,6 +77,16 @@ class BaseAuthenticator(ABC):
 
     def supports_refresh(self) -> bool:
         return False
+
+    @property
+    def ac_time_value(self) -> str | None:
+        """Platform-specific additional auth value (e.g. B站 ac_time_value). Returns None by default."""
+        return None
+
+    @staticmethod
+    def build_tokens_from_config(config: Any) -> PlatformTokens | None:
+        """Build PlatformTokens from platform config. Returns None if not configured."""
+        return None
 
     async def qr_login(self, on_status: Callable[[AuthStatus], None] | None = None) -> PlatformTokens:
         # Lazy import to avoid circular dependency with qr_display

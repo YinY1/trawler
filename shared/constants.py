@@ -1,5 +1,7 @@
 """Trawler 全局常量"""
 
+from __future__ import annotations
+
 # 超时（秒）
 DOWNLOAD_TIMEOUT = 600  # yt-dlp 下载超时
 CODEBUDDY_TIMEOUT = 120  # CodeBuddy CLI 超时

@@ -296,7 +296,10 @@ async def process_video(
     try:
         console.print("  [dim]📝 转写中…[/]")
         # filepath 可能为 None（下载成功但路径不确定）
-        _fp = dl_result.filepath or Path()
+        if dl_result.filepath is None:
+            _fp = Path()
+        else:
+            _fp = dl_result.filepath
         if not _fp.exists():
             console.print("  [yellow]⚠️  下载文件路径无效，跳过转写[/]")
         else:

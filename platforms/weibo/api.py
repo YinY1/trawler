@@ -223,8 +223,8 @@ def _parse_pc_post(raw: dict[str, Any]) -> WeiboPost | None:
         pic_infos = raw.get("pic_infos", {})
         if isinstance(pic_ids, list) and pic_ids:
             for pid in pic_ids:
-                if isinstance(pic_infos, dict) and pid in pic_infos:
-                    info = pic_infos[pid]
+                info = pic_infos.get(pid) if isinstance(pic_infos, dict) else None
+                if info is not None:
                     if isinstance(info, dict):
                         url = info.get("original", {}).get("url", "") or info.get("large", {}).get("url", "")
                         if url:
