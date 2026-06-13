@@ -14,7 +14,7 @@ from rich.table import Table
 from core.pipeline import run_check_once
 from shared.auth import QRExpiredError, get_authenticator, update_auth_section
 from shared.auth.base import PlatformTokens
-from shared.config import load_config
+from shared.config import Config, load_config
 
 console = Console()
 
@@ -108,22 +108,51 @@ def token_status() -> None:
 @click.option(
     "--platform",
     type=click.Choice(["bili", "xhs", "weibo"]),
-    required=True,
+    default=None,
     help="续期的平台",
 )
-def token_refresh(platform: str) -> None:
+@click.option(
+    "--all",
+    "refresh_all",
+    is_flag=True,
+    default=False,
+    help="续期所有已配置平台",
+)
+def token_refresh(platform: str | None, refresh_all: bool) -> None:
     """手动续期 token"""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
 
-    config = load_config("config.toml")
+    if refresh_all:
+        targets = ["bili", "xhs", "weibo"]
+    elif platform:
+        targets = [platform]
+    else:
+        console.print("[red]✗ 请指定 --platform 或 --all[/]")
+        sys.exit(1)
 
+    config = load_config("config.toml")
+    any_failure = False
+    for plat in targets:
+        if not _refresh_single_platform(plat, config):
+            any_failure = True
+
+    if not refresh_all and any_failure:
+        sys.exit(1)
+
+
+def _refresh_single_platform(platform: str, config: Config) -> bool:
+    """Refresh tokens for a single platform. Returns True on success, False on failure.
+
+    This function does not call sys.exit(), allowing callers like --all to continue
+    processing remaining platforms even if one fails.
+    """
     if platform == "bili":
         auth = config.bilibili.auth
         if auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ Token 已过期或未配置，请先执行 trawler login --platform bili[/]")
-            sys.exit(1)
+            console.print("[red]✗ bili Token 已过期或未配置，请先执行 trawler login --platform bili[/]")
+            return False
         try:
             authenticator = get_authenticator(platform)
             bili_auth = config.bilibili.auth
@@ -132,34 +161,33 @@ def token_refresh(platform: str) -> None:
                 cookies={
                     "SESSDATA": bili_auth.sessdata,
                     "bili_jct": bili_auth.bili_jct,
-                    "buvid3": bili_auth.buvid3,
-                    "DedeUserID": bili_auth.dedeuserid,
+                    "buvid3": bili_auth.buvid3 or "",
+                    "DedeUserID": bili_auth.dedeuserid or "",
                 },
                 obtained_at=time.time(),
                 expires_at=bili_auth.expires_at,
             )
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
-            # ac_time_value is stored separately (not in PlatformTokens)
             ac_val = authenticator.ac_time_value
             if ac_val:
                 auth_dict["ac_time_value"] = ac_val
             update_auth_section(platform, auth_dict)
-            console.print(f"[green]✓ {platform} Token 续期成功[/]")
+            console.print("[green]✓ bili Token 续期成功[/]")
+            return True
         except Exception as exc:
-            console.print(f"[red]✗ 续期失败: {exc}[/]")
-            sys.exit(1)
+            console.print(f"[red]✗ bili 续期失败: {exc}[/]")
+            return False
 
     elif platform == "weibo":
         auth = config.weibo.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ 未配置微博 Cookie 或已过期，请先执行 trawler login --platform weibo[/]")
-            sys.exit(1)
+            console.print("[red]✗ weibo 未配置 Cookie 或已过期，请先执行 trawler login --platform weibo[/]")
+            return False
         try:
             from platforms.weibo.auth import WeiboAuthenticator
 
             authenticator = WeiboAuthenticator()
-            # Parse single cookie string into individual keys
             cookie_dict: dict[str, str] = {}
             for part in auth.cookie.split(";"):
                 if "=" in part:
@@ -174,17 +202,18 @@ def token_refresh(platform: str) -> None:
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
-            update_auth_section(platform, auth_dict)
+            update_auth_section("weibo", auth_dict)
             console.print("[green]✓ weibo Token 续期成功[/]")
+            return True
         except Exception as exc:
-            console.print(f"[red]✗ 续期失败: {exc}[/]")
-            sys.exit(1)
+            console.print(f"[red]✗ weibo 续期失败: {exc}[/]")
+            return False
 
     elif platform == "xhs":
         auth = config.xiaohongshu.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗[/] 未配置小红书 Cookie 或已过期，请先执行 trawler login --platform xhs")
-            sys.exit(1)
+            console.print("[red]✗ xhs 未配置 Cookie 或已过期，请先执行 trawler login --platform xhs[/]")
+            return False
         try:
             from platforms.xiaohongshu.auth import XhsAuthenticator
 
@@ -203,11 +232,16 @@ def token_refresh(platform: str) -> None:
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
-            update_auth_section(platform, auth_dict)
-            console.print("[green]✓[/] xhs Token 续期成功")
+            update_auth_section("xhs", auth_dict)
+            console.print("[green]✓ xhs Token 续期成功[/]")
+            return True
         except Exception as exc:
-            console.print(f"[red]✗[/] 续期失败: {exc}")
-            sys.exit(1)
+            console.print(f"[red]✗ xhs 续期失败: {exc}[/]")
+            return False
+
+    else:
+        console.print(f"[red]✗ 未知平台: {platform}[/]")
+        return False
 
 
 @cli.command()

@@ -51,7 +51,16 @@ from core.notifier import notify_dynamic, notify_new_video, notify_new_weibo_pos
 from core.summarizer import extract_keywords, generate_summary  # noqa: E402
 
 # ── 核心处理 ──────────────────────────────────────────────
-from core.transcriber import cleanup_media, transcribe_file_async  # noqa: E402
+try:
+    from core.transcriber import cleanup_media, transcribe_file_async  # noqa: E402
+except ImportError:
+    from typing import Any
+
+    async def transcribe_file_async(*args: Any, **kwargs: Any) -> Any:  # noqa: E402
+        raise ImportError("transcribe dependencies not installed. Run: uv pip install -e '.[transcribe]'")
+
+    def cleanup_media(*args: Any, **kwargs: Any) -> None:  # noqa: E402
+        pass
 from platforms.bilibili.comments import fetch_comment_highlights  # noqa: E402
 from platforms.bilibili.dynamic import check_new_dynamics  # noqa: E402
 from platforms.bilibili.monitor import SubscriptionStore, check_new_videos  # noqa: E402

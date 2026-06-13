@@ -1,13 +1,12 @@
-"""SenseVoice 语音转写模块 - 将音视频文件转写为文本"""
+"""faster-whisper 语音转写模块 - 将音视频文件转写为文本"""
 
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from rich.console import Console
 
@@ -21,23 +20,34 @@ console = Console()
 _model_cache: dict[str, Any] = {}
 
 
-def _get_pipeline() -> Any:
-    """获取或加载 SenseVoice 语音识别模型 pipeline
+def _get_model(config: Config) -> Any:
+    """获取或加载 faster-whisper 模型
 
-    使用全局缓存避免重复加载模型。首次调用时会从 ModelScope 下载模型。
+    使用全局缓存避免重复加载模型。首次调用时会从 Hugging Face 下载模型。
+    采用 CPU int8 量化以降低内存占用，适合 2C4G 服务器。
+
+    Args:
+        config: 全局配置，transcribe.model 指定模型大小（base/small/medium/large-v3）
 
     Returns:
-        modelscope pipeline 对象
+        faster_whisper.WhisperModel 实例
     """
-    cache_key = "sensevoice"
+    model_size = config.transcribe.model
+    cache_key = f"fw-{model_size}"
     if cache_key not in _model_cache:
-        console.log("[bold blue]正在加载 SenseVoiceSmall 模型（首次加载可能需要下载）...[/]")
-        from modelscope.pipelines import pipeline
-        from modelscope.utils.constant import Tasks
+        from faster_whisper import WhisperModel
 
-        _model_cache[cache_key] = pipeline(Tasks.auto_speech_recognition, model="iic/SenseVoiceSmall")
-        console.log("[bold green]SenseVoiceSmall 模型加载完成[/]")
+        console.log(f"[bold blue]正在加载 faster-whisper {model_size} 模型（首次可能需要下载）...[/]")
+        _model_cache[cache_key] = WhisperModel(
+            model_size,
+            device="cpu",
+            compute_type="int8",
+        )
+        console.log(f"[bold green]faster-whisper {model_size} 模型加载完成[/]")
     return _model_cache[cache_key]
+
+
+# ── 音频预处理 ──────────────────────────────────────────────────
 
 
 def _extract_audio(filepath: Path, output_path: Path) -> None:
@@ -72,8 +82,6 @@ def _extract_audio(filepath: Path, output_path: Path) -> None:
 def _get_audio_duration(wav_path: Path) -> float:
     """获取 WAV 文件时长
 
-    使用 FFmpeg 获取音频时长信息。
-
     Args:
         wav_path: WAV 文件路径
 
@@ -99,33 +107,12 @@ def _get_audio_duration(wav_path: Path) -> float:
     return 0.0
 
 
-def _traditional_to_simplified(text: str) -> str:
-    """将繁体中文转换为简体中文
-
-    Args:
-        text: 可能包含繁体的中文文本
-
-    Returns:
-        转换后的简体中文文本
-    """
-    try:
-        from opencc import OpenCC
-
-        cc = OpenCC("t2s")
-        return cc.convert(text)
-    except ImportError:
-        try:
-            from opencc_python_reimplemented import OpenCC
-
-            cc = OpenCC("t2s")
-            return cc.convert(text)
-        except ImportError:
-            console.log("[yellow]opencc 未安装，跳过繁简转换[/]")
-            return text
+# ── 结果保存 ────────────────────────────────────────────────────
 
 
 def _save_transcript(
     text: str,
+    segments: list[dict[str, Any]],
     source_id: str,
     title: str,
     author: str,
@@ -136,7 +123,8 @@ def _save_transcript(
     """保存转写结果到文本文件和 JSON 文件
 
     Args:
-        text: 转写文本
+        text: 完整转写文本
+        segments: 带时间戳的分段列表，每项包含 text/start/end 字段
         source_id: 来源标识
         title: 标题
         author: 作者
@@ -155,8 +143,7 @@ def _save_transcript(
     # 保存纯文本
     txt_path.write_text(text, encoding="utf-8")
 
-    # 构建带时间戳分段的 JSON 结构
-    segments = _split_into_segments(text, duration_seconds)
+    # 保存带时间戳分段的 JSON
     json_data = {
         "source_id": source_id,
         "title": title,
@@ -171,50 +158,7 @@ def _save_transcript(
     return txt_path, json_path
 
 
-def _split_into_segments(text: str, duration_seconds: float, min_segment_chars: int = 50) -> list[dict[str, Any]]:
-    """将文本按标点分段并估算时间戳
-
-    Args:
-        text: 完整转写文本
-        duration_seconds: 音频总时长
-        min_segment_chars: 最小分段字符数
-
-    Returns:
-        包含时间戳分段的列表
-    """
-    if not text or duration_seconds <= 0:
-        return []
-
-    # 按句号、问号、感叹号分段
-    raw_segments = re.split(r"([。！？；\n])", text)
-    segments: list[dict[str, Any]] = []
-    current = ""
-
-    for part in raw_segments:
-        current += part
-        if len(current) >= min_segment_chars or part in "。！？；\n":
-            stripped = current.strip()
-            if stripped:
-                segments.append({"text": stripped})
-            current = ""
-
-    # 处理剩余文本
-    if current.strip():
-        segments.append({"text": current.strip()})
-
-    # 估算时间戳（均匀分配）
-    total_chars = sum(len(s["text"]) for s in segments)
-    if total_chars == 0:
-        return segments
-
-    elapsed = 0.0
-    for seg in segments:
-        seg_duration = (len(seg["text"]) / total_chars) * duration_seconds
-        seg["start"] = round(elapsed, 2)
-        seg["end"] = round(elapsed + seg_duration, 2)
-        elapsed += seg_duration
-
-    return segments
+# ── 主转写流程 ──────────────────────────────────────────────────
 
 
 def transcribe_file(
@@ -228,11 +172,10 @@ def transcribe_file(
 
     完整的转写流程：
     1. 使用 FFmpeg 提取音频并转换为 16kHz 单声道 WAV
-    2. 加载 SenseVoiceSmall 模型（全局缓存，仅首次加载）
-    3. 执行语音转写（自动语言识别）
-    4. 繁体中文转简体中文（通过 opencc）
-    5. 保存 .txt 和 .json 格式的转写结果
-    6. 返回结构化的 TranscriptResult
+    2. 加载 faster-whisper 模型（全局缓存，仅首次加载，CPU int8）
+    3. 执行语音转写（自动语言识别 + 分段时间戳）
+    4. 保存 .txt 和 .json 格式的转写结果
+    5. 返回结构化的 TranscriptResult
 
     Args:
         filepath: 输入音视频文件路径
@@ -254,7 +197,7 @@ def transcribe_file(
             error=f"文件不存在: {filepath}",
         )
 
-    temp_wav: Optional[Path] = None
+    temp_wav: Path | None = None
 
     try:
         # Step 1: FFmpeg 提取音频
@@ -267,19 +210,24 @@ def transcribe_file(
 
         # Step 2 & 3: 加载模型并转写
         console.log("[dim]Step 2-3: 加载模型并转写...[/]")
-        asr_pipeline = _get_pipeline()
-        result = asr_pipeline(str(temp_wav))
+        model = _get_model(config)
+        language_hint = config.transcribe.language or None
+        segments_iter, info = model.transcribe(
+            str(temp_wav),
+            language=language_hint,
+            beam_size=5,
+        )
+        whisper_segments = list(segments_iter)
 
-        # 提取文本
-        if isinstance(result, dict):
-            text = result.get("text", "")
-            language = result.get("language", "zh")
-        elif isinstance(result, str):
-            text = result
-            language = "zh"
-        else:
-            text = str(result)
-            language = "zh"
+        # 从 faster-whisper 结果中提取文本和分段
+        segment_data: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+        for seg in whisper_segments:
+            segment_data.append({"text": seg.text, "start": round(seg.start, 2), "end": round(seg.end, 2)})
+            text_parts.append(seg.text)
+
+        text = "".join(text_parts)
+        language = info.language
 
         if not text.strip():
             return TranscriptResult(
@@ -290,15 +238,12 @@ def transcribe_file(
                 error="转写结果为空",
             )
 
-        # Step 4: 繁体转简体
-        console.log("[dim]Step 4: 繁体转简体...[/]")
-        text = _traditional_to_simplified(text)
-
-        # Step 5: 保存结果
-        console.log("[dim]Step 5: 保存转写结果...[/]")
+        # Step 4: 保存结果
+        console.log("[dim]Step 4: 保存转写结果...[/]")
         output_dir = Path(config.transcribe.output_dir)
         txt_path, json_path = _save_transcript(
             text=text,
+            segments=segment_data,
             source_id=source_id,
             title=title,
             author=author,
@@ -336,6 +281,9 @@ def transcribe_file(
                 temp_wav.unlink()
             except OSError:
                 pass
+
+
+# ── 辅助接口 ────────────────────────────────────────────────────
 
 
 def cleanup_media(filepath: Path, source_id: str) -> None:
