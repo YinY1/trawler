@@ -14,8 +14,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
-from typing import Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from shared.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -309,3 +313,74 @@ class JsonSetStore:
     def known_count(self) -> int:
         """已知条目数量。"""
         return len(self._data)
+
+
+# ═══════════════════════════════════════════════════════════
+# 消息状态管理 — ContentType, Phase, MessageRecord
+# ═══════════════════════════════════════════════════════════
+
+
+class ContentType(Enum):
+    """内容类型"""
+
+    VIDEO = auto()  # B站视频 / XHS视频笔记 — 完整四阶段
+    TEXT = auto()  # 微博 / XHS图文笔记 — 两阶段（下载+推送）
+
+
+class Phase(Enum):
+    """消息处理阶段"""
+
+    DISCOVERED = auto()
+    DOWNLOADED = auto()
+    TRANSCRIBED = auto()
+    SUMMARIZED = auto()
+    PUSHED = auto()
+
+
+# 各类型消息的阶段流转路径
+PHASE_FLOW: dict[ContentType, list[Phase]] = {
+    ContentType.VIDEO: [
+        Phase.DISCOVERED,
+        Phase.DOWNLOADED,
+        Phase.TRANSCRIBED,
+        Phase.SUMMARIZED,
+        Phase.PUSHED,
+    ],
+    ContentType.TEXT: [
+        Phase.DISCOVERED,
+        Phase.DOWNLOADED,
+        Phase.PUSHED,
+    ],
+}
+
+
+@dataclass
+class MessageRecord:
+    """单条消息在流水线中的完整状态"""
+
+    msg_id: str  # "{platform}:{id}" e.g. "bili:BV1xx", "xhs:note_id", "weibo:post_id"
+    platform: str  # "bili" | "xhs" | "weibo"
+    content_type: ContentType
+    phase: Phase
+    pubdate: int  # Unix 时间戳（内容发布时间）
+    title: str
+    author: str
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    error: str = ""
+
+
+@dataclass
+class PhaseContext:
+    """流水线上下文，各阶段产出逐级积累"""
+
+    msg: MessageRecord
+    config: Config
+    downloaded_filepath: Optional[Path] = None
+    image_paths: list[Path] = field(default_factory=list)
+    content_text: str = ""
+    transcript_text: str = ""
+    summary_text: str = ""
+    keywords: list[str] = field(default_factory=list)
+    comment_highlights: str = ""
+    error: str = ""

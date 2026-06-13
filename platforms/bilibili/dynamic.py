@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from platforms.bilibili.monitor import SubscriptionStore
 from shared.config import Config
+from shared.message_store import MessageStore as SubscriptionStore
 from shared.protocols import DynamicInfo
 
 logger = logging.getLogger(__name__)

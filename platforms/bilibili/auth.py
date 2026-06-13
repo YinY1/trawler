@@ -221,6 +221,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
 def build_tokens_from_config(config: Config) -> PlatformTokens | None:
     """Build PlatformTokens from config.bilibili.auth. Returns None if not configured."""
     import time as _time
+
     auth = config.bilibili.auth
     if not auth.sessdata or not auth.bili_jct:
         return None

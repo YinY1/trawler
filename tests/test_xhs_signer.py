@@ -15,6 +15,7 @@ from platforms.xiaohongshu.signer import _SIGN_WRAPPER, _VENDOR_DIR, _check_node
 # _check_node()
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCheckNode:
     """Tests for _check_node()."""
 
@@ -33,6 +34,7 @@ class TestCheckNode:
 # get_xhs_sign()
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestGetXhsSign:
     """Tests for get_xhs_sign()."""
 
@@ -41,10 +43,11 @@ class TestGetXhsSign:
 
     def test_success(self):
         """Returns correct dict with xs, xt, xs_common on success."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -62,10 +65,11 @@ class TestGetXhsSign:
 
     def test_success_with_empty_data_and_a1(self):
         """Works with empty data and empty a1."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -83,10 +87,11 @@ class TestGetXhsSign:
 
     def test_method_get(self):
         """Passes 'GET' as method argument to subprocess."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -104,10 +109,11 @@ class TestGetXhsSign:
 
     def test_subprocess_input_json(self):
         """stdin payload is correct JSON with a1 and data."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -123,10 +129,11 @@ class TestGetXhsSign:
 
     def test_subprocess_cwd_set_to_vendor_dir(self):
         """cwd is set to _VENDOR_DIR."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -146,18 +153,17 @@ class TestGetXhsSign:
 
     def test_missing_wrapper_raises(self):
         """Raises RuntimeError when sign_wrapper.js is missing."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch.object(Path, "exists", return_value=False):
-
+        with patch("shutil.which", return_value="/usr/bin/node"), patch.object(Path, "exists", return_value=False):
             with pytest.raises(RuntimeError, match="Sign wrapper not found"):
                 get_xhs_sign(self.API)
 
     def test_nonzero_return_code_with_json_stderr(self):
         """Raises RuntimeError with error message from JSON stderr."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=1,
@@ -170,10 +176,11 @@ class TestGetXhsSign:
 
     def test_nonzero_return_code_with_plain_text_stderr(self):
         """Raises RuntimeError with raw stderr when it's not valid JSON."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=1,
@@ -186,10 +193,11 @@ class TestGetXhsSign:
 
     def test_nonzero_return_code_with_empty_stderr(self):
         """Raises RuntimeError with exit code message when stderr is empty/blank."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=2,
@@ -202,10 +210,11 @@ class TestGetXhsSign:
 
     def test_invalid_json_stdout_raises(self):
         """Raises RuntimeError when stdout is not valid JSON."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -218,10 +227,11 @@ class TestGetXhsSign:
 
     def test_result_missing_keys_default_to_empty(self):
         """Missing keys in output default to empty string or '0'."""
-        with patch("shutil.which", return_value="/usr/bin/node"), \
-             patch("subprocess.run") as mock_run, \
-             patch.object(Path, "exists", return_value=True):
-
+        with (
+            patch("shutil.which", return_value="/usr/bin/node"),
+            patch("subprocess.run") as mock_run,
+            patch.object(Path, "exists", return_value=True),
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,

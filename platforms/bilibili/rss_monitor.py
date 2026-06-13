@@ -13,10 +13,10 @@ from typing import Optional
 import aiohttp
 import feedparser
 
-from platforms.bilibili.monitor import SubscriptionStore
 from shared.config import Config
 from shared.constants import RSS_REQUEST_TIMEOUT
 from shared.http import get_session
+from shared.message_store import MessageStore as SubscriptionStore
 from shared.protocols import VideoInfo
 
 logger = logging.getLogger(__name__)

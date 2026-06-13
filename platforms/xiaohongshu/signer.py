@@ -36,15 +36,10 @@ def get_xhs_sign(api: str, data: dict | str = "", a1: str = "", method: str = "P
         RuntimeError: If Node.js is not installed or signing fails
     """
     if not _check_node():
-        raise RuntimeError(
-            "Node.js is required for XHS API signing. Install Node.js 18+ and try again."
-        )
+        raise RuntimeError("Node.js is required for XHS API signing. Install Node.js 18+ and try again.")
 
     if not _SIGN_WRAPPER.exists():
-        raise RuntimeError(
-            f"Sign wrapper not found at {_SIGN_WRAPPER}. "
-            "Make sure the project is properly installed."
-        )
+        raise RuntimeError(f"Sign wrapper not found at {_SIGN_WRAPPER}. Make sure the project is properly installed.")
 
     if not _XHS_MAIN_JS.exists():
         raise RuntimeError(

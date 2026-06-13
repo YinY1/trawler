@@ -93,12 +93,14 @@ class TestGenerateQrCode:
     async def test_returns_qr_code_result(self):
         auth = BilibiliAuthenticator()
         session = _mock_session()
-        resp = _mock_aiohttp_response({
-            "data": {
-                "url": "https://scan.example.com/qr?key=abc",
-                "qrcode_key": "abc123",
+        resp = _mock_aiohttp_response(
+            {
+                "data": {
+                    "url": "https://scan.example.com/qr?key=abc",
+                    "qrcode_key": "abc123",
+                }
             }
-        })
+        )
         session.get.return_value = resp
 
         with patch("shared.http.get_session", AsyncMock(return_value=session)):

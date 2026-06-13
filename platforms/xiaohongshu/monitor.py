@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Optional
 
 import aiohttp
@@ -18,31 +17,15 @@ from platforms.xiaohongshu.auth import (
 from shared.config import Config
 from shared.constants import XHS_REQUEST_TIMEOUT
 from shared.http import get_session
-from shared.protocols import JsonSetStore, NoteInfo
+from shared.protocols import NoteInfo
 
 logger = logging.getLogger("trawler.xiaohongshu.monitor")
 console = Console()
 
 # 默认每页笔记数
 DEFAULT_PAGE_SIZE = 20
-# 默认最大每次检查笔记数
-DEFAULT_MAX_NOTES_PER_CHECK = 10
 # 笔记列表 API
 USER_POSTED_API = f"{XHS_BASE_URL}/api/sns/web/v1/user_posted"
-
-
-class XhsSubscriptionStore(JsonSetStore):
-    """小红书已知笔记存储，用于去重。
-
-    继承 JsonSetStore，管理 data/known_xhs_notes.json 文件。
-    """
-
-    def __init__(self, data_dir: str | Path = "data") -> None:
-        super().__init__(data_dir, "known_xhs_notes.json")
-
-    def mark_known_note(self, note: NoteInfo) -> None:
-        """将笔记标记为已知（便利方法）。"""
-        self.mark_known(note.note_id)
 
 
 def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: str) -> Optional[NoteInfo]:
@@ -213,26 +196,22 @@ async def _fetch_notes_fallback(
         return []
 
 
-async def check_new_notes(
+async def fetch_user_notes(
     user_id: str,
     name: str,
     config: Config,
-    store: XhsSubscriptionStore,
-    max_notes: int = DEFAULT_MAX_NOTES_PER_CHECK,
 ) -> list[NoteInfo]:
-    """检查指定用户的新笔记。
+    """获取指定用户的笔记列表。
 
-    获取用户笔记列表，过滤已知笔记，返回新增笔记列表。
+    获取用户笔记列表，返回全部笔记。
 
     Args:
         user_id: 小红书用户 ID
         name: 用户名称（用于日志）
         config: 全局配置
-        store: 已知笔记存储
-        max_notes: 单次检查最大返回笔记数
 
     Returns:
-        新增的 NoteInfo 列表（按发布时间降序）
+        NoteInfo 列表（按发布时间降序）
     """
     cookie = get_xhs_cookie(config)
     if not cookie:
@@ -259,24 +238,16 @@ async def check_new_notes(
         logger.info(f"[{name}] 未获取到任何笔记数据")
         return []
 
-    # 解析并过滤
-    new_notes: list[NoteInfo] = []
+    # 解析
+    notes: list[NoteInfo] = []
     for raw in raw_notes:
         note = _parse_note_from_api(raw, name, user_id)
         if note is None:
             continue
-
-        if store.is_known(note.note_id):
-            continue
-
-        new_notes.append(note)
+        notes.append(note)
 
     # 按发布时间降序排列
-    new_notes.sort(key=lambda n: n.pubdate, reverse=True)
+    notes.sort(key=lambda n: n.pubdate, reverse=True)
 
-    # 限制数量
-    if len(new_notes) > max_notes:
-        new_notes = new_notes[:max_notes]
-
-    logger.info(f"[{name}] 发现 {len(new_notes)} 条新笔记")
-    return new_notes
+    logger.info(f"[{name}] 获取到 {len(notes)} 条笔记")
+    return notes

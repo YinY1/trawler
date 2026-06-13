@@ -55,7 +55,10 @@ class TestGenerateQrCode:
 
         mock_resp = _make_mock_response(
             status=200,
-            json_data={"success": True, "data": {"qr_id": "qr_abc", "code": "code_123", "url": "https://qr.xhs.com/abc"}},
+            json_data={
+                "success": True,
+                "data": {"qr_id": "qr_abc", "code": "code_123", "url": "https://qr.xhs.com/abc"},
+            },
         )
 
         mock_session = MagicMock()

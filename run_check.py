@@ -297,7 +297,13 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
     default=False,
     help="启用详细日志输出",
 )
-def check(platform: str, config_path: str, verbose: bool) -> None:
+@click.option(
+    "--from-phase",
+    default=None,
+    type=click.Choice(["discovered", "downloaded", "transcribed", "summarized"], case_sensitive=False),
+    help="从指定阶段开始处理（不指定则自动断点续传）",
+)
+def check(platform: str, config_path: str, verbose: bool, from_phase: str | None) -> None:
     """检查各平台新内容"""
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
@@ -309,7 +315,7 @@ def check(platform: str, config_path: str, verbose: bool) -> None:
         console.print(f"[red]✗ 配置加载失败: {exc}[/]")
         sys.exit(1)
     try:
-        asyncio.run(run_check_once(config, platform, config_path))
+        asyncio.run(run_check_once(config, platform, config_path, from_phase=from_phase))
     except KeyboardInterrupt:
         console.print("\n[yellow]已中断[/]")
         sys.exit(130)

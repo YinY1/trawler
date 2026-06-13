@@ -39,6 +39,7 @@ def test_check_help(runner: CliRunner) -> None:
     assert "xhs" in result.output
     assert "weibo" in result.output
     assert "config.toml" in result.output
+    assert "--from-phase" in result.output
 
 
 # ── 3. trawler check --platform bili (success) ────────────────
@@ -217,3 +218,15 @@ def test_token_refresh_no_target(mock_load_config: MagicMock, runner: CliRunner)
     result = runner.invoke(cli, ["token", "refresh"])
     assert result.exit_code == 1
     assert "请指定" in result.output
+
+
+# ── 11. trawler check --from-phase ─────────────────────────
+
+
+@patch("run_check.run_check_once", new_callable=AsyncMock)
+@patch("run_check.load_config")
+def test_check_with_from_phase(mock_load_config: MagicMock, mock_run: AsyncMock, runner: CliRunner) -> None:
+    mock_load_config.return_value = MagicMock()
+    result = runner.invoke(cli, ["check", "--from-phase", "downloaded", "--platform", "bili"])
+    # Should fail on config, not on option parsing
+    assert result.exit_code != 2  # exit code 2 = invalid options

@@ -210,6 +210,7 @@ def get_request_headers(cookie: str) -> dict[str, str]:
 # Helper functions for XhsAuthenticator
 # ═══════════════════════════════════════════════════════════
 
+
 def generate_a1() -> str:
     """Generate a random a1 cookie value (same algorithm as Spider_XHS)."""
     ts_hex = hex(int(time.time() * 1000))[2:]
@@ -287,6 +288,7 @@ async def _fetch_sec_cookies(session: Any, cookies: dict[str, str]) -> dict[str,
 # ═══════════════════════════════════════════════════════════
 # XhsAuthenticator — QR 登录 + Keepalive 续期
 # ═══════════════════════════════════════════════════════════
+
 
 class XhsAuthenticator(BaseAuthenticator):
     """小红书 QR 扫码登录 + Keepalive 保活续期"""
@@ -490,6 +492,7 @@ class XhsAuthenticator(BaseAuthenticator):
 def build_tokens_from_config(config: Config) -> PlatformTokens | None:
     """Build PlatformTokens from config.xiaohongshu.auth. Returns None if not configured."""
     import time as _time
+
     auth = config.xiaohongshu.auth
     if not auth.cookie or auth.expires_at <= 0:
         return None
