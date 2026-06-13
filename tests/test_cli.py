@@ -94,7 +94,7 @@ def test_login_bili_success(mock_get_auth: MagicMock, mock_update: MagicMock, ru
     mock_update.assert_called_once()
 
 
-# ── 7. trawler login --platform xhs (success) ───────────────
+# ── ──
 
 
 @patch("run_check.update_auth_section")
@@ -186,13 +186,15 @@ def test_token_refresh_bili_expired(mock_load_config: MagicMock, runner: CliRunn
     assert "请先执行 trawler login" in result.output
 
 
-# ── 11. trawler token refresh --all (mixed states) ────────────
+# ── ──
 
 
 @patch("run_check._refresh_single_platform")
+@patch("run_check._is_platform_configured", return_value=True)
 @patch("run_check.load_config")
 def test_token_refresh_all(
     mock_load_config: MagicMock,
+    mock_is_configured: MagicMock,
     mock_refresh: MagicMock,
     runner: CliRunner,
 ) -> None:
@@ -207,7 +209,7 @@ def test_token_refresh_all(
     assert mock_refresh.call_args_list[2][0][0] == "weibo"
 
 
-# ── 12. trawler token refresh without --platform or --all ─────
+# ── ──
 
 
 @patch("run_check.load_config")

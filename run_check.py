@@ -124,22 +124,37 @@ def token_refresh(platform: str | None, refresh_all: bool) -> None:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
 
+    config = load_config("config.toml")
+
     if refresh_all:
-        targets = ["bili", "xhs", "weibo"]
+        targets = [p for p in ["bili", "xhs", "weibo"] if _is_platform_configured(p, config)]
     elif platform:
         targets = [platform]
     else:
         console.print("[red]✗ 请指定 --platform 或 --all[/]")
         sys.exit(1)
 
-    config = load_config("config.toml")
     any_failure = False
     for plat in targets:
         if not _refresh_single_platform(plat, config):
             any_failure = True
 
-    if not refresh_all and any_failure:
+    if any_failure:
         sys.exit(1)
+
+
+def _is_platform_configured(platform: str, config: Config) -> bool:
+    """Check if a platform has auth credentials configured."""
+    if platform == "bili":
+        return (
+            bool(config.bilibili.auth.sessdata and config.bilibili.auth.bili_jct)
+            and config.bilibili.auth.expires_at > time.time()
+        )
+    elif platform == "weibo":
+        return bool(config.weibo.auth.cookie and config.weibo.auth.expires_at > time.time())
+    elif platform == "xhs":
+        return bool(config.xiaohongshu.auth.cookie and config.xiaohongshu.auth.expires_at > time.time())
+    return False
 
 
 def _refresh_single_platform(platform: str, config: Config) -> bool:
@@ -151,7 +166,7 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
     if platform == "bili":
         auth = config.bilibili.auth
         if auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ bili Token 已过期或未配置，请先执行 trawler login --platform bili[/]")
+            console.print("[red]✗[/] Token 已过期或未配置，请先执行 trawler login --platform bili")
             return False
         try:
             authenticator = get_authenticator(platform)
@@ -173,16 +188,16 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
             if ac_val:
                 auth_dict["ac_time_value"] = ac_val
             update_auth_section(platform, auth_dict)
-            console.print("[green]✓ bili Token 续期成功[/]")
+            console.print(f"[green]✓[/] {platform} Token 续期成功")
             return True
         except Exception as exc:
-            console.print(f"[red]✗ bili 续期失败: {exc}[/]")
+            console.print(f"[red]✗[/] 续期失败: {exc}")
             return False
 
     elif platform == "weibo":
         auth = config.weibo.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ weibo 未配置 Cookie 或已过期，请先执行 trawler login --platform weibo[/]")
+            console.print("[red]✗[/] 未配置微博 Cookie 或已过期，请先执行 trawler login --platform weibo")
             return False
         try:
             from platforms.weibo.auth import WeiboAuthenticator
@@ -203,16 +218,16 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
             update_auth_section("weibo", auth_dict)
-            console.print("[green]✓ weibo Token 续期成功[/]")
+            console.print("[green]✓[/] weibo Token 续期成功")
             return True
         except Exception as exc:
-            console.print(f"[red]✗ weibo 续期失败: {exc}[/]")
+            console.print(f"[red]✗[/] 续期失败: {exc}")
             return False
 
     elif platform == "xhs":
         auth = config.xiaohongshu.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
-            console.print("[red]✗ xhs 未配置 Cookie 或已过期，请先执行 trawler login --platform xhs[/]")
+            console.print("[red]✗[/] 未配置小红书 Cookie 或已过期，请先执行 trawler login --platform xhs")
             return False
         try:
             from platforms.xiaohongshu.auth import XhsAuthenticator
@@ -233,10 +248,10 @@ def _refresh_single_platform(platform: str, config: Config) -> bool:
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
             update_auth_section("xhs", auth_dict)
-            console.print("[green]✓ xhs Token 续期成功[/]")
+            console.print("[green]✓[/] xhs Token 续期成功")
             return True
         except Exception as exc:
-            console.print(f"[red]✗ xhs 续期失败: {exc}[/]")
+            console.print(f"[red]✗[/] 续期失败: {exc}")
             return False
 
     else:
