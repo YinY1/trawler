@@ -62,6 +62,10 @@ class CommentHighlight:
     user_name: str
     is_up_owner: bool
     like_count: int
+    # 对话链路（UP主回复别人时展示完整上下文）
+    reply_to: str = ""  # 被回复的用户名
+    parent_content: str = ""  # 被回复的原文
+    is_pinned: bool = False  # 是否被UP主置顶
 
 
 # ═══════════════════════════════════════════════════════════
