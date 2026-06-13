@@ -15,7 +15,7 @@ from typing import Any
 
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import Phase, PhaseContext, PHASE_FLOW
+from shared.protocols import PHASE_FLOW, Phase, PhaseContext
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class PipelineEngine:
         phases = PHASE_FLOW[msg.content_type]
 
         start_idx = phases.index(msg.phase)
-        for next_phase in phases[start_idx + 1:]:
+        for next_phase in phases[start_idx + 1 :]:
             handler = cls._handlers.get((msg.platform, next_phase))
             if handler is None:
                 handler = cls._handlers.get(("*", next_phase))

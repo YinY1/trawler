@@ -51,7 +51,8 @@ def _build_highlight(
 
 
 def _find_parent_in_replies(
-    replies: list[dict], target_rpid: int,
+    replies: list[dict],
+    target_rpid: int,
 ) -> dict | None:
     """在 replies 列表中按 rpid 查找父回复。"""
     for r in replies:
@@ -184,7 +185,8 @@ async def fetch_comment_highlights(
                         else:
                             # 回复了子回复中的某人
                             parent_reply = _find_parent_in_replies(
-                                child_replies, parent_rpid,
+                                child_replies,
+                                parent_rpid,
                             )
                             if parent_reply:
                                 p = _extract_reply_info(parent_reply)
@@ -218,9 +220,7 @@ async def fetch_comment_highlights(
 
     # ── 如果 UP 主相关评论不足，补高赞 ────────────────────
     if len(highlights) < max_count:
-        existing_keys: set[tuple[str, str]] = {
-            (h.content, h.user_name) for h in highlights
-        }
+        existing_keys: set[tuple[str, str]] = {(h.content, h.user_name) for h in highlights}
         page = 1
         while len(highlights) < max_count and page <= max_pages:
             try:

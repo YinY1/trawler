@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from shared.protocols import ContentType, MessageRecord, Phase
 from shared.message_store import MessageStore
+from shared.protocols import ContentType, Phase
 
 
 @pytest.fixture

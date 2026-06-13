@@ -16,11 +16,7 @@ OUT_DIR = Path("data") / "debug"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 console = Console()
 
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
-)
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 POLL_INTERVAL = 2
 
 
@@ -68,22 +64,22 @@ async def main() -> None:
     # ── 1. 申请二维码 ──
     async with aiohttp.ClientSession(headers=headers, trust_env=False) as s:
         console.print("[1/4] [dim]申请二维码...[/dim]")
-        async with s.get(
-            "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-        ) as resp:
+        async with s.get("https://passport.bilibili.com/x/passport-login/web/qrcode/generate") as resp:
             body = await resp.json()
             qr_key: str = body["data"]["qrcode_key"]
             qr_url: str = (
-                "https://account.bilibili.com/h5/account-h5/auth/scan-web"
-                f"?navhide=1&callback=close&qrcode_key={qr_key}"
+                f"https://account.bilibili.com/h5/account-h5/auth/scan-web?navhide=1&callback=close&qrcode_key={qr_key}"
             )
 
-        save("initial", {
-            "qr_key": qr_key,
-            "qr_url": qr_url,
-            "generate_body": body,
-            "generate_set_cookie": extract_set_cookies(resp),
-        })
+        save(
+            "initial",
+            {
+                "qr_key": qr_key,
+                "qr_url": qr_url,
+                "generate_body": body,
+                "generate_set_cookie": extract_set_cookies(resp),
+            },
+        )
 
         console.print(f"\n  [dim]QR key:[/dim] {qr_key}")
         display_qr_in_terminal(qr_url)
@@ -104,18 +100,20 @@ async def main() -> None:
                 set_cookies = extract_set_cookies(resp)
                 refresh_token = data.get("refresh_token", "")
 
-                save(f"poll_{poll_num:02d}", {
-                    "code": code,
-                    "message": msg,
-                    "set_cookie": set_cookies,
-                    "refresh_token": refresh_token,
-                    "body": body,
-                })
+                save(
+                    f"poll_{poll_num:02d}",
+                    {
+                        "code": code,
+                        "message": msg,
+                        "set_cookie": set_cookies,
+                        "refresh_token": refresh_token,
+                        "body": body,
+                    },
+                )
 
                 rt_icon = "[green]✓[/]" if refresh_token else "[red]✗[/]"
                 console.print(
-                    f"  [#{poll_num:03d}] code={code} msg={msg} "
-                    f"cookies={len(set_cookies)} refresh_token={rt_icon}"
+                    f"  [#{poll_num:03d}] code={code} msg={msg} cookies={len(set_cookies)} refresh_token={rt_icon}"
                 )
 
                 if code == 0:
@@ -143,11 +141,14 @@ async def main() -> None:
             console.print("\n[3/4] [dim]请求 redirect URL...[/dim]")
             async with s.get(token["url"], allow_redirects=True) as resp:
                 redirect_cookies = extract_set_cookies(resp)
-                save("redirect", {
-                    "status": resp.status,
-                    "url": str(resp.url),
-                    "set_cookie": redirect_cookies,
-                })
+                save(
+                    "redirect",
+                    {
+                        "status": resp.status,
+                        "url": str(resp.url),
+                        "set_cookie": redirect_cookies,
+                    },
+                )
                 console.print(f"  status={resp.status} cookies={len(redirect_cookies)}")
                 token["redirect_set_cookie"] = redirect_cookies
                 save("credential", token)

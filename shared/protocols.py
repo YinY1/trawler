@@ -324,7 +324,7 @@ class ContentType(Enum):
     """内容类型"""
 
     VIDEO = auto()  # B站视频 / XHS视频笔记 — 完整四阶段
-    TEXT = auto()   # 微博 / XHS图文笔记 — 两阶段（下载+推送）
+    TEXT = auto()  # 微博 / XHS图文笔记 — 两阶段（下载+推送）
 
 
 class Phase(Enum):

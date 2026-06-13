@@ -54,6 +54,8 @@ class MessageStore:
 
     def save(self) -> None:
         """持久化消息数据到磁盘（原子写入，先写临时文件再 rename）。"""
+        if not self._dirty:
+            return
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -197,7 +199,7 @@ class MessageStore:
         for msg_id, data in list(self._messages.items()):
             if platform is not None and data.get("platform") != platform:
                 continue
-            current_phase = data.get("phase", "")
+            current_phase = data.get("phase", Phase.DISCOVERED.value)
             if current_phase >= target.value:
                 data["phase"] = target.value
                 data["error"] = ""
@@ -209,11 +211,7 @@ class MessageStore:
     def cleanup(self, window_hours: int = DEFAULT_WINDOW_HOURS) -> None:
         """删除超出时间窗口的消息。"""
         cutoff = time.time() - window_hours * 3600
-        to_remove = [
-            msg_id
-            for msg_id, data in self._messages.items()
-            if data.get("pubdate", 0) < cutoff
-        ]
+        to_remove = [msg_id for msg_id, data in self._messages.items() if data.get("pubdate", 0) < cutoff]
         for msg_id in to_remove:
             del self._messages[msg_id]
         if to_remove:

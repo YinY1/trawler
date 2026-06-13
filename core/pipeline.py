@@ -61,6 +61,8 @@ except ImportError:
 
     def cleanup_media(*args: Any, **kwargs: Any) -> None:  # noqa: E402
         pass
+
+
 from platforms.bilibili.comments import fetch_comment_highlights  # noqa: E402
 from platforms.bilibili.dynamic import check_new_dynamics  # noqa: E402
 from platforms.bilibili.monitor import SubscriptionStore, check_new_videos  # noqa: E402
@@ -166,12 +168,7 @@ def _format_comment_highlights(highlights: list[Any]) -> str:
 
         # 对话链路：UP主回复了某人
         if reply_to and parent_content:
-            parts.append(
-                f"- **{reply_to}**:\n"
-                f"  > {parent_content}\n"
-                f"  **{name}**{tag} (👍{like}):\n"
-                f"  {content}"
-            )
+            parts.append(f"- **{reply_to}**:\n  > {parent_content}\n  **{name}**{tag} (👍{like}):\n  {content}")
         else:
             parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
     return "\n".join(parts)

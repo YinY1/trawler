@@ -274,6 +274,7 @@ class WeiboAuthenticator(BaseAuthenticator):
 def build_tokens_from_config(config: Config) -> PlatformTokens | None:
     """Build PlatformTokens from config.weibo.auth. Returns None if not configured."""
     import time as _time
+
     auth = config.weibo.auth
     if not auth.cookie or auth.expires_at <= 0:
         return None

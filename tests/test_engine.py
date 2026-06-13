@@ -6,10 +6,17 @@ from pathlib import Path
 
 import pytest
 
+from core.engine import PipelineEngine
 from shared.config import Config
 from shared.message_store import MessageStore
 from shared.protocols import ContentType, Phase, PhaseContext
-from core.engine import PipelineEngine
+
+
+@pytest.fixture(autouse=True)
+def clean_engine_state() -> None:
+    """每个测试前重置 PipelineEngine 注册表，避免污染。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
 
 
 @pytest.fixture
@@ -79,9 +86,7 @@ async def test_process_message_full_flow(config: Config, store: MessageStore) ->
         calls.append("pushed")
         return True
 
-    msg = store.add_new(
-        "bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author"
-    )
+    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author")
     assert msg is not None
     await PipelineEngine.process_message(msg, config, store)
 
@@ -92,9 +97,7 @@ async def test_process_message_full_flow(config: Config, store: MessageStore) ->
 
 
 @pytest.mark.asyncio
-async def test_process_message_text_skips_transcribe_summarize(
-    config: Config, store: MessageStore
-) -> None:
+async def test_process_message_text_skips_transcribe_summarize(config: Config, store: MessageStore) -> None:
     """TEXT message should only go through DOWNLOADED -> PUSHED."""
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
@@ -111,9 +114,7 @@ async def test_process_message_text_skips_transcribe_summarize(
         calls.append("pushed")
         return True
 
-    msg = store.add_new(
-        "weibo:123", "weibo", ContentType.TEXT, 2000000000, "Post", "Author"
-    )
+    msg = store.add_new("weibo:123", "weibo", ContentType.TEXT, 2000000000, "Post", "Author")
     assert msg is not None
     await PipelineEngine.process_message(msg, config, store)
 
@@ -121,9 +122,7 @@ async def test_process_message_text_skips_transcribe_summarize(
 
 
 @pytest.mark.asyncio
-async def test_process_message_handler_failure_stops_flow(
-    config: Config, store: MessageStore
-) -> None:
+async def test_process_message_handler_failure_stops_flow(config: Config, store: MessageStore) -> None:
     """If a handler returns False, flow should stop and error should be recorded."""
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
@@ -137,9 +136,7 @@ async def test_process_message_handler_failure_stops_flow(
     async def tr(ctx: PhaseContext) -> bool:
         pytest.fail("should not be called")
 
-    msg = store.add_new(
-        "bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author"
-    )
+    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author")
     assert msg is not None
     await PipelineEngine.process_message(msg, config, store)
 
@@ -150,9 +147,7 @@ async def test_process_message_handler_failure_stops_flow(
 
 
 @pytest.mark.asyncio
-async def test_process_message_resume_from_mid_phase(
-    config: Config, store: MessageStore
-) -> None:
+async def test_process_message_resume_from_mid_phase(config: Config, store: MessageStore) -> None:
     """Should resume from current phase, not repeat completed phases."""
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
@@ -169,9 +164,7 @@ async def test_process_message_resume_from_mid_phase(
         calls.append("transcribed")
         return True
 
-    msg = store.add_new(
-        "bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author"
-    )
+    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author")
     assert msg is not None
     store.mark_phase("bili:BV1", Phase.DOWNLOADED)
     msg = store.get_message("bili:BV1")
@@ -186,19 +179,16 @@ async def test_process_message_resume_from_mid_phase(
 
 
 @pytest.mark.asyncio
-async def test_run_platform_detect_and_process(
-    config: Config, tmp_path: Path
-) -> None:
+async def test_run_platform_detect_and_process(config: Config, tmp_path: Path) -> None:
     """run_platform should run detector then process pending messages."""
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
-    store = MessageStore(tmp_path)
 
     detected = False
 
     @PipelineEngine.register_detector("bili")
     async def bili_detector(cfg: Config, st: MessageStore) -> None:
-        nonlocal detected
+        nonlocal detected  # noqa: F824
         detected = True
         st.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
 

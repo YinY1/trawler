@@ -16,9 +16,7 @@ from shared.protocols import TranscriptResult
 try:
     from faster_whisper import WhisperModel
 except ImportError:
-    raise ImportError(
-        "transcribe dependencies not installed. Run: uv pip install -e '.[transcribe]'"
-    )
+    raise ImportError("transcribe dependencies not installed. Run: uv pip install -e '.[transcribe]'")
 
 console = Console()
 
@@ -30,9 +28,7 @@ _model_cache: dict[str, Any] = {}
 def _get_model(config: Config) -> Any:
     """获取或加载 faster-whisper 模型"""
     if WhisperModel is None:
-        raise ImportError(
-            "transcribe dependencies not installed. Run: uv pip install -e '.[transcribe]'"
-        )
+        raise ImportError("transcribe dependencies not installed. Run: uv pip install -e '.[transcribe]'")
     model_size = config.transcribe.model
     cache_key = f"fw-{model_size}"
     if cache_key not in _model_cache:
