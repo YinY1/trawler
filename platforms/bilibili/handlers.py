@@ -158,6 +158,17 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
             console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
             logger.warning("Comment highlights failed for %s: %s", source_id, exc)
 
+    elif ctx.msg.platform == "xhs":
+        note_id = source_id.replace("xhs:", "")
+        try:
+            from platforms.xiaohongshu.comments import fetch_xhs_comment_highlights
+
+            highlights = await fetch_xhs_comment_highlights(note_id=note_id, config=ctx.config)
+            ctx.comment_highlights = format_comment_highlights(highlights)
+        except Exception as exc:
+            console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
+            logger.warning("XHS comment highlights failed for %s: %s", source_id, exc)
+
     console.print("  [dim]🤖 生成摘要...[/]")
 
     text_to_summarize = ctx.transcript_text or ctx.content_text

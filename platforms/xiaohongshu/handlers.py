@@ -93,6 +93,20 @@ async def xhs_download(ctx: PhaseContext) -> bool:
         console.print(f"  [yellow]⚠️  内容解析失败: {exc}[/]")
         logger.warning("XHS parse failed for %s: %s", note_id, exc)
 
+    # Fetch comment highlights for TEXT (图文) notes — skip SUMMARIZED phase
+    if ctx.msg.content_type == ContentType.TEXT:
+        try:
+            from core.formatter import format_comment_highlights
+            from platforms.xiaohongshu.comments import fetch_xhs_comment_highlights
+
+            highlights = await fetch_xhs_comment_highlights(note_id=note_id, config=ctx.config)
+            ctx.comment_highlights = format_comment_highlights(highlights)
+            if highlights:
+                console.print(f"  [dim]💬 获取到 {len(highlights)} 条热门评论[/]")
+        except Exception as exc:
+            console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
+            logger.warning("XHS comment highlights failed for %s: %s", note_id, exc)
+
     return True
 
 

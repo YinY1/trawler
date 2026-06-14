@@ -5,7 +5,12 @@
  * Writes JSON to stdout: {"xs": "...", "xt": ..., "xs_common": "..."}
  */
 const path = require('path');
+
+// Suppress vendor library init noise (prints '[Error]' to stdout on load)
+const _origLog = console.log;
+console.log = () => {};
 const { get_request_headers_params } = require(path.join(process.cwd(), 'static', 'xhs_main_260411.js'));
+console.log = _origLog;
 
 const api = process.argv[2];
 const method = process.argv[3] || 'POST';
