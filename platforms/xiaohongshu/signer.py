@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import json
 import logging
 import shutil
@@ -71,6 +72,7 @@ def get_xhs_sign(api: str, data: dict | str = "", a1: str = "", method: str = "P
         # Fallback: vendor lib may print noise to stdout before JSON
         # Try to find the last JSON object in stdout
         import re as _re
+
         _matches = _re.findall(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", proc.stdout.strip(), _re.DOTALL)
         if _matches:
             _match_str = _matches[-1]  # last JSON object

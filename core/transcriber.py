@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +14,9 @@ from shared.config import Config
 from shared.protocols import TranscriptResult
 
 try:
-    from faster_whisper import WhisperModel
+    from faster_whisper import WhisperModel  # pyright: ignore[reportMissingImports]
 except ImportError:
-    raise ImportError("transcribe dependencies not installed. Run: uv pip install -e '.[transcribe]'")
+    WhisperModel = None  # type: ignore[assignment]
 
 console = Console()
 
@@ -82,7 +82,7 @@ def _get_audio_duration(wav_path: Path) -> float:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             return float(result.stdout.strip())
-    except (subprocess.SubprocessError, ValueError):
+    except subprocess.SubprocessError, ValueError:
         pass
     return 0.0
 
@@ -147,7 +147,11 @@ def transcribe_file(
 
     try:
         # Step 1: FFmpeg 提取音频
-        temp_wav = Path(tempfile.mktemp(suffix=".wav"))
+        import tempfile as _tempfile
+
+        fd, tmp_path = _tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        temp_wav = Path(tmp_path)
         console.log("[dim]Step 1: 提取音频...[/]")
         _extract_audio(filepath, temp_wav)
 

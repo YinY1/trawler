@@ -2,26 +2,21 @@
 name = "trawler"
 version = "0.1.0"
 description = "多平台创作者内容追更自动化工作流"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "bilibili-api-python>=17.0",
-    "yt-dlp>=2024.0",
-    "feedparser>=6.0",
-    "requests>=2.31",
     "click>=8.0",
     "rich>=13.0",
     "terminal-qrcode>=1.1",
     "tomlkit>=0.13",
     "aiohttp>=3.9",
     "httpx>=0.27",
+    "faster-whisper>=1.1",
 ]
 
 [project.optional-dependencies]
 xhs = [
     "xhs>=0.1.9",
-]
-transcribe = [
-    "faster-whisper>=1.1",
 ]
 dev = [
     "pytest>=8.0",
@@ -33,10 +28,11 @@ dev = [
 [tool.pyright]
 include = ["core", "shared", "platforms", "run_check.py"]
 exclude = ["vendor", "tests"]
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
+reportMissingTypeStubs = false
 
 [project.scripts]
 trawler = "run_check:cli"
@@ -48,7 +44,7 @@ py-modules = ["run_check"]
 exclude = ["data*", "docs*", "vendor*", "tests*"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 120
 
 [tool.ruff.lint]

@@ -127,7 +127,7 @@ class OpenAIProvider:
         Raises:
             RuntimeError: API 调用失败时抛出
         """
-        import requests
+        import httpx
 
         url = f"{self.api_base}/chat/completions"
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -144,15 +144,15 @@ class OpenAIProvider:
         console.log(f"[dim]调用 OpenAI 兼容 API (model={self.model_name})...[/]")
 
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT)
-        except requests.Timeout:
+            response = httpx.post(url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT)
+        except httpx.TimeoutException:
             raise RuntimeError(f"OpenAI API 调用超时 ({LLM_API_TIMEOUT}s)")
-        except requests.ConnectionError:
+        except httpx.ConnectError:
             raise RuntimeError(f"无法连接到 API: {self.api_base}")
 
         try:
             response.raise_for_status()
-        except requests.HTTPError:
+        except httpx.HTTPStatusError:
             raise RuntimeError(f"API 返回错误 ({response.status_code}): {response.text[:200]}")
 
         data = response.json()

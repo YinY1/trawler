@@ -22,16 +22,12 @@ def _clean_engine_state() -> None:
 def _check_registrations(platform: str, expected_phases: list[Phase]) -> None:
     """Verify all expected phases are registered for a platform."""
     for phase in expected_phases:
-        assert (platform, phase) in PipelineEngine._handlers, (
-            f"Missing handler for {platform} / {phase}"
-        )
+        assert (platform, phase) in PipelineEngine._handlers, f"Missing handler for {platform} / {phase}"
 
 
 def _check_detector(platform: str) -> None:
     """Verify a detector is registered for the platform."""
-    assert platform in PipelineEngine._detectors, (
-        f"Missing detector for {platform}"
-    )
+    assert platform in PipelineEngine._detectors, f"Missing detector for {platform}"
 
 
 # -- B站 handlers ------------------------------------------------
@@ -42,10 +38,13 @@ def test_bili_module_imports() -> None:
     import platforms.bilibili.handlers  # noqa: F401
 
     _check_detector("bili")
-    _check_registrations("bili", [
-        Phase.DOWNLOADED,
-        Phase.PUSHED,
-    ])
+    _check_registrations(
+        "bili",
+        [
+            Phase.DOWNLOADED,
+            Phase.PUSHED,
+        ],
+    )
 
 
 # -- XHS handlers -------------------------------------------------
@@ -56,10 +55,13 @@ def test_xhs_module_imports() -> None:
     import platforms.xiaohongshu.handlers  # noqa: F401
 
     _check_detector("xhs")
-    _check_registrations("xhs", [
-        Phase.DOWNLOADED,
-        Phase.PUSHED,
-    ])
+    _check_registrations(
+        "xhs",
+        [
+            Phase.DOWNLOADED,
+            Phase.PUSHED,
+        ],
+    )
 
 
 # -- Weibo handlers -----------------------------------------------
@@ -70,7 +72,10 @@ def test_weibo_module_imports() -> None:
     import platforms.weibo.handlers  # noqa: F401
 
     _check_detector("weibo")
-    _check_registrations("weibo", [
-        Phase.DOWNLOADED,
-        Phase.PUSHED,
-    ])
+    _check_registrations(
+        "weibo",
+        [
+            Phase.DOWNLOADED,
+            Phase.PUSHED,
+        ],
+    )

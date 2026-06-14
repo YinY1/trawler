@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 from pathlib import Path
 
 import tomlkit

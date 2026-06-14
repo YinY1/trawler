@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 from typing import Any
 
@@ -51,7 +52,7 @@ def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> Co
         like_str = comment_data.get("like_count", "0")
         try:
             like_count = int(like_str) if like_str else 0
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             like_count = 0
 
         is_author = bool(author_user_id and user_id == author_user_id)

@@ -1,47 +1,46 @@
 # Trawler
 
-Multi-platform creator content trawler. Monitor Bilibili, Xiaohongshu, and Weibo for new content — auto download, transcribe, summarize, and push notifications.
+多平台创作者内容追更自动化工作流。监控 B站、小红书、微博的内容更新，自动下载、语音转写、AI 总结并推送通知。
 
-<!-- README-I18N:START -->
+## 功能特性
 
-**English** | [汉语](./README.zh.md)
+- **多平台监控** — 订阅 B站 UP 主（视频+动态）、小红书博主、微博用户
+- **自动下载** — 视频下载（bilibili-api + yt-dlp）、图文笔记下载
+- **语音转写** — 基于 faster-whisper 的离线语音识别，自动语言检测
+- **AI 摘要** — 自动生成内容摘要与关键词（CodeBuddy / OpenAI / Ollama / 本地回退）
+- **评论高亮** — 提取热门评论同步展示
+- **推送通知** — 通过 Gotify 发送 Markdown 格式通知
+- **二维码登录** — B站/小红书 QR 扫码登录，Token 自动刷新
+- **TOML 配置** — 统一配置文件，环境变量覆盖
+- **去重机制** — JSON 持久化集合存储，避免重复处理
 
-<!-- README-I18N:END -->
+## 快速开始
 
-## Features
+### 前置依赖
 
-- **Multi-platform monitoring** — Subscribe to Bilibili UP主 (RSS/API), Xiaohongshu bloggers, and Weibo users
-- **Auto download** — Video download via yt-dlp, note/image download for Xiaohongshu
-- **Speech-to-text** — SenseVoice (ModelScope) voice recognition with auto language detection
-- **AI summarization** — AI-generated summaries and keyword extraction (CodeBuddy / OpenAI / Ollama / local fallback)
-- **Push notifications** — Gotify-based notification with Markdown formatting
-- **Comment highlights** — Extract top comments for Bilibili and Xiaohongshu
-- **QR login** — Bilibili QR code authentication with auto token refresh
-- **TOML config** — TOML-driven configuration with environment variable override
-- **Dedup built-in** — JSON-backed set store prevents duplicate processing
+- Python >=3.14
+- FFmpeg（音频提取用）
+- Gotify 服务端（可选，推送通知用）
 
-## Quick Start
-
-> **For AI agents:** Skip to the [Agent Installation Guide](#for-llm-agents).
-
-### Prerequisites
-
-- Python 3.12+
-- FFmpeg (for audio extraction)
-- Gotify server (optional, for push notifications)
-
-### Installation
+### 安装
 
 ```bash
-pip install trawler
+# 创建虚拟环境
+uv venv --python 3.14
 
-# Optional: Xiaohongshu support
-pip install trawler[xhs]
+# 安装 trawler（含 dev 依赖）
+uv pip install -e ".[dev]"
+
+# 可选：小红书 API 支持
+uv pip install -e ".[xhs]"
+
+# 可选：语音转写支持
+uv pip install -e ".[transcribe]"
 ```
 
-### Configuration
+### 配置
 
-Create `config.toml` (see `config.toml.example`):
+创建 `config.toml`（参考 `config.toml.example`）：
 
 ```toml
 [bilibili]
@@ -50,101 +49,28 @@ Create `config.toml` (see `config.toml.example`):
   name = "UP主名称"
 ```
 
-### Usage
+### 使用
 
 ```bash
-# Login to Bilibili (QR code)
+# B站二维码登录
 trawler login --platform bili
 
-# Check for new content
-trawler check
+# 全平台内容检查
+trawler check --platform all
 
-# Check specific platform
+# 指定平台
 trawler check --platform bili
 trawler check --platform xhs
 
-# Check token status
+# 查看登录状态
 trawler token status
 ```
 
-## Architecture
+## 配置说明
 
-```
-trawler/
-├── core/              # Orchestration layer
-│   ├── pipeline.py    # Workflow pipeline
-│   ├── notifier.py    # Gotify push notifications
-│   ├── summarizer.py  # AI summary & keyword extraction
-│   └── transcriber.py # Speech-to-text (SenseVoice)
-├── platforms/
-│   ├── bilibili/      # B站: auth, monitor, comments, dynamic, rss
-│   └── xiaohongshu/   # 小红书: auth, monitor, comments, downloader, parser
-├── shared/
-│   ├── auth/          # Shared auth infrastructure (QR, token store, scheduler)
-│   ├── config.py      # TOML-driven configuration
-│   ├── protocols.py   # Data models & behavior contracts
-│   ├── downloader.py  # Shared download utilities
-│   └── http.py        # Shared aiohttp session
-├── run_check.py       # CLI entry point (Click)
-└── tests/             # Test suite (pytest, 8 modules)
-```
+配置采用 TOML 文件驱动，环境变量可覆盖同名字段。
 
-### Pipeline
-
-Each content item goes through a consistent pipeline:
-
-```
-Content Detected → Download → Transcribe → Summarize → Notify → Mark Done
-                    ↕                    ↕
-              Comment Highlights    Keyword Extraction
-```
-
-### Supported Platforms
-
-| Platform | Content Type | Auth | Monitor Mode |
-|---|---|---|---|
-| Bilibili | Videos, Dynamics | QR login | RSS / API |
-| Xiaohongshu | Notes | Cookie | API |
-| Weibo | Posts | Cookie | API |
-
-## For LLM Agents
-
-### Repository Overview
-
-Trawler is a Python 3.12 async project with this structure:
-
-- **`run_check.py`** — Click CLI entry point with `login`, `token`, `check` commands
-- **`core/`** — Orchestration logic (pipeline, notifier, summarizer, transcriber)
-- **`platforms/`** — Platform adapters (bilibili/, xiaohongshu/)
-- **`shared/`** — Config, data models (protocols.py), auth infrastructure, HTTP client
-- **`tests/`** — pytest tests (8 modules, asyncio mode)
-
-### Key Design Decisions
-
-1. **Pure orchestration in `core/pipeline.py`** — no business logic, only wiring
-2. **All cross-module contracts in `shared/protocols.py`** — dataclasses + Protocols
-3. **TOML config with env override** — `Config` dataclass hierarchy, env vars take priority
-4. **JsonSetStore for dedup** — `mark_known()` is memory-only, `save()` writes to disk
-5. **AI fallback chain** — CodeBuddy → OpenAI → Ollama → local TF-IDF extraction
-6. **RSS-first, API fallback** for Bilibili; API-only for Xiaohongshu/Weibo
-
-### Development
-
-```bash
-ruff check .          # lint
-ruff format .         # format
-pyright .             # type check
-pytest -x             # test (fail fast)
-```
-
-### Adding a New Platform
-
-1. Create `platforms/<name>/__init__.py` (docstring only) + `auth.py` + `monitor.py` + `comments.py`
-2. Add data models to `shared/protocols.py`
-3. Add platform config dataclass to `shared/config.py`
-4. Wire into `core/pipeline.py` + `run_check.py`
-
-### Configuration Model
+**层级结构：**
 
 ```
 Config
@@ -158,15 +84,75 @@ Config
 └── weibo (enabled, auth, monitor, subscriptions, notification)
 ```
 
-### Environment Variables
+**常用环境变量：**
 
-| Variable | Overrides |
+| 变量 | 作用 |
 |---|---|
-| `FEEDFLOW_GOTIFY_URL` | Gotify server URL |
-| `FEEDFLOW_GOTIFY_TOKEN_BILI` | Bilibili Gotify token |
-| `FEEDFLOW_GOTIFY_TOKEN_XHS` | Xiaohongshu Gotify token |
-| `FEEDFLOW_GOTIFY_TOKEN_WEIBO` | Weibo Gotify token |
-| `FEEDFLOW_XHS_COOKIE` | Xiaohongshu cookie |
-| `FEEDFLOW_WEIBO_COOKIE` | Weibo cookie |
-| `FEEDFLOW_LLM_API_KEY` | LLM API key |
-| `FEEDFLOW_LLM_API_BASE` | LLM API base URL |
+| `FEEDFLOW_GOTIFY_URL` | Gotify 服务地址 |
+| `FEEDFLOW_GOTIFY_TOKEN_BILI` | B站 Gotify Token |
+| `FEEDFLOW_GOTIFY_TOKEN_XHS` | 小红书 Gotify Token |
+| `FEEDFLOW_GOTIFY_TOKEN_WEIBO` | 微博 Gotify Token |
+| `FEEDFLOW_XHS_COOKIE` | 小红书 Cookie |
+| `FEEDFLOW_WEIBO_COOKIE` | 微博 Cookie |
+| `FEEDFLOW_LLM_API_KEY` | LLM API 密钥 |
+| `FEEDFLOW_LLM_API_BASE` | LLM API 地址 |
+
+## 项目结构
+
+```
+trawler/
+├── core/                 # 流程编排层
+│   ├── pipeline.py       # 工作流管道
+│   ├── transcriber.py    # 语音转写 (faster-whisper)
+│   ├── summarizer.py     # AI 摘要与关键词
+│   ├── formatter.py      # 消息格式化
+│   └── notifier.py       # Gotify 推送通知
+├── platforms/
+│   ├── bilibili/         # B站: auth, monitor, comments, downloader
+│   ├── xiaohongshu/      # 小红书: auth, monitor, comments, signer, downloader
+│   └── weibo/            # 微博: auth, monitor, comments, downloader, API
+├── shared/
+│   ├── config.py         # TOML 配置驱动
+│   ├── protocols.py      # 数据模型与行为契约 (dataclass + Protocol)
+│   ├── downloader.py     # 共享下载工具
+│   ├── http.py           # 共享 HTTP 客户端
+│   └── auth/             # 统一认证基础设施 (QR 登录, Token 存储, 定时刷新)
+├── run_check.py          # CLI 入口 (Click)
+└── tests/                # 测试套件 (pytest, asyncio)
+```
+
+### 管道流程
+
+```
+检测到更新 → 下载内容 → 语音转写 → AI 摘要 → 推送通知 → 标记完成
+                      ↕                    ↕
+                评论高亮提取           关键词提取
+```
+
+### 支持平台
+
+| 平台 | 内容类型 | 认证方式 | 监控方式 |
+|---|---|---|---|
+| Bilibili | 视频、动态 | 二维码登录 | RSS / API |
+| 小红书 | 图文笔记 | Cookie / 二维码 | API |
+| 微博 | 帖子 | Cookie | API |
+
+## 开发
+
+```bash
+uv run ruff check .       # 代码检查
+uv run ruff format .      # 格式化
+uv run pyright .          # 类型检查
+uv run pytest -x          # 测试（失败即停）
+```
+
+### 新增平台
+
+1. 创建 `platforms/<name>/__init__.py`（仅 docstring）+ `auth.py` + `monitor.py` + `comments.py`
+2. 在 `shared/protocols.py` 添加数据模型
+3. 在 `shared/config.py` 添加平台配置 dataclass
+4. 接入 `core/pipeline.py` + `run_check.py`
+
+## License
+
+MIT

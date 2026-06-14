@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+from shared.protocols import CommentHighlight
 
-def format_comment_highlights(highlights: list) -> str:
+
+def format_comment_highlights(highlights: list[CommentHighlight]) -> str:
     """将评论亮点列表格式化为 Markdown 文本。
 
     兼容统一 CommentHighlight 模型的字段：
@@ -44,12 +46,7 @@ def format_comment_highlights(highlights: list) -> str:
         tag = f" ({', '.join(tags)})" if tags else ""
 
         if reply_to and parent_content:
-            parts.append(
-                f"- **{reply_to}**:\n"
-                f"  > {parent_content}\n"
-                f"  **{name}**{tag} (👍{like}):\n"
-                f"  {content}"
-            )
+            parts.append(f"- **{reply_to}**:\n  > {parent_content}\n  **{name}**{tag} (👍{like}):\n  {content}")
         else:
             parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
     return "\n".join(parts)

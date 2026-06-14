@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import json
 import logging
 import time

@@ -68,7 +68,7 @@ class PipelineEngine:
         return decorator
 
     @classmethod
-    def register_detector(cls, platform: str) -> Callable:
+    def register_detector(cls, platform: str) -> Callable[..., Any]:
         """装饰器：注册某平台的 detector 函数。
 
         Usage::
@@ -78,7 +78,7 @@ class PipelineEngine:
                 ...
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             cls._detectors[platform] = func
             return func
 
@@ -156,18 +156,14 @@ class PipelineEngine:
 
         # 前缀匹配 detector：导入 handler 后，_detectors 中可能有
         # 多个以 platform 开头的 key（如 "bili" + "bili_dynamic"）
-        matching_keys = [
-            key
-            for key in cls._detectors
-            if key == platform or key.startswith(f"{platform}_")
-        ]
+        matching_keys = [key for key in cls._detectors if key == platform or key.startswith(f"{platform}_")]
         for key in matching_keys:
             detector = cls._detectors.get(key)
             if detector is not None:
                 await detector(config, store)
 
         # 消息处理：仍使用原始 platform 字符串
-        #（MessageRecord.platform 统一为 "bili"，不区分 video/dynamic）
+        # （MessageRecord.platform 统一为 "bili"，不区分 video/dynamic）
         for msg in store.get_messages(phase=Phase.PUSHED, exclude=True, platform=platform):
             await cls.process_message(msg, config, store)
 

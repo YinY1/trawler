@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import asyncio
 import json
 import logging

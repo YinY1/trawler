@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 
 import bilibili_api
@@ -82,7 +83,7 @@ def _parse_duration(raw_duration) -> int:
                 return int(parts[0]) * 60 + int(parts[1])
             if len(parts) == 3:
                 return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             pass
     return 0
 

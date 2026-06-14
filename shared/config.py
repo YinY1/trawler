@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import os
 import tomllib
 from dataclasses import dataclass, field, fields
@@ -322,8 +323,7 @@ def load_config(path: str | Path = "config/config.toml") -> Config:
         import warnings
 
         warnings.warn(
-            f"检测到旧的配置文件 {yaml_path}，但新版使用 TOML 格式。\n"
-            f"请参考 config/config.toml.example 创建配置文件。",
+            f"检测到旧的配置文件 {yaml_path}，但新版使用 TOML 格式。\n请参考 config/config.toml.example 创建配置文件。",
             UserWarning,
             stacklevel=2,
         )

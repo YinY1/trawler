@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 import os
 from pathlib import Path
@@ -280,7 +281,7 @@ async def _download_file(url: str, dest: Path) -> bool:
             async with session.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=XHS_DOWNLOAD_TIMEOUT),
-                ssl=None,
+                ssl=False,
             ) as resp:
                 if resp.status != 200:
                     logger.debug(f"下载文件失败，状态码: {resp.status}, URL: {url}")

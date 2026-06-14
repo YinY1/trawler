@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import asyncio
 import binascii
 import hashlib
@@ -110,7 +111,7 @@ def _try_vendor_sign(params: dict[str, Any], cookie: str) -> dict[str, str] | No
                         result = sign_func(params, cookie)
                         if isinstance(result, dict):
                             return result
-            except (ImportError, ModuleNotFoundError):
+            except ImportError, ModuleNotFoundError:
                 continue
 
     except Exception as e:
@@ -327,7 +328,7 @@ def _vendor_init_qr() -> dict:
     Returns:
         dict 包含 cookies, qr_id, code, qr_url
     """
-    from apis.xhs_pc_login_apis import XHSLoginApi
+    from apis.xhs_pc_login_apis import XHSLoginApi  # pyright: ignore[reportMissingImports]
 
     api = XHSLoginApi()
     cookies = api.generate_init_cookies()
@@ -348,7 +349,7 @@ def _vendor_check_status(poll_data: dict) -> tuple[bool, str, dict]:
     Returns:
         (success, msg, updated_cookies)
     """
-    from apis.xhs_pc_login_apis import XHSLoginApi
+    from apis.xhs_pc_login_apis import XHSLoginApi  # pyright: ignore[reportMissingImports]
 
     api = XHSLoginApi()
     return api.check_qrcode_status(poll_data["qr_id"], poll_data["code"], dict(poll_data["cookies"]))
@@ -369,7 +370,7 @@ def _vendor_poll_login(init_data: dict, deadline: float = 0.0) -> dict:
     Raises:
         QRExpiredError: 二维码过期或轮询超时
     """
-    from apis.xhs_pc_login_apis import XHSLoginApi
+    from apis.xhs_pc_login_apis import XHSLoginApi  # pyright: ignore[reportMissingImports]
 
     api = XHSLoginApi()
     cookies = dict(init_data["cookies"])

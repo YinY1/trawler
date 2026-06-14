@@ -7,6 +7,7 @@ PC 端: weibo.com/ajax (需要完整 Cookie，数据更丰富)
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 import re
 import time
@@ -132,7 +133,7 @@ def _parse_weibo_time(time_str: str) -> int:
     try:
         dt = datetime.strptime(time_str, _WEIBO_TIME_FORMAT)
         return int(dt.timestamp())
-    except (ValueError, OSError):
+    except ValueError, OSError:
         pass
 
     # 尝试中文格式

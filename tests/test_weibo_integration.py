@@ -87,7 +87,6 @@ class TestMobileAPI:
             assert "id" in p, f"Post missing id: {list(p.keys())[:5]}"
             assert p.get("text"), f"Post {p.get('id')} has empty text"
 
-
     @pytest.mark.asyncio
     async def test_parse_mobile_posts(self):
         """Fetch and parse real mobile posts into WeiboPost."""
@@ -109,7 +108,6 @@ class TestMobileAPI:
 
         assert parsed_count > 0, "No posts could be parsed"
 
-
     @pytest.mark.asyncio
     async def test_fetch_user_posts_high_level(self):
         """Test fetch_user_posts high-level wrapper with real API."""
@@ -124,7 +122,6 @@ class TestMobileAPI:
             assert p.post_id
             assert p.author
             assert p.pubdate > 0
-
 
 
 # ── Real API: fetch_user_posts_pc ────────────────────────────
@@ -144,7 +141,6 @@ class TestPCAPI:
             for p in posts:
                 assert isinstance(p, dict)
                 assert "idstr" in p or "id" in p
-
 
     @pytest.mark.asyncio
     async def test_parse_pc_posts(self):
@@ -166,7 +162,6 @@ class TestPCAPI:
                 assert post.pubdate > 0
 
         assert parsed_count > 0, "No PC posts could be parsed"
-
 
 
 # ── Real API: Comments ───────────────────────────────────────
@@ -195,7 +190,6 @@ class TestCommentsAPI:
                 assert h.content, "Comment has empty content"
                 assert h.like_count >= 0, "Comment has negative like_count"
 
-
     @pytest.mark.asyncio
     async def test_parse_real_comments(self):
         """Parse real comment data through _parse_comment."""
@@ -214,7 +208,6 @@ class TestCommentsAPI:
         # Highlight objects should already be parsed and valid
         assert all(isinstance(h.content, str) for h in highlights)
         assert all(isinstance(h.like_count, int) for h in highlights)
-
 
 
 # ── Config loading ───────────────────────────────────────────
