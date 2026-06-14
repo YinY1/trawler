@@ -70,6 +70,15 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         pubdate=ctx.msg.pubdate,
     )
 
+    # 尝试获取完整长文（如果标题被截断）
+    cookie = ctx.config.weibo.auth.cookie
+    if cookie:
+        from platforms.weibo.api import _fetch_long_text
+
+        full_text = await _fetch_long_text(cookie, post_id)
+        if full_text:
+            post.clean_text = full_text
+
     try:
         result = await download_weibo_media(post=post, config=ctx.config)
     except Exception as exc:

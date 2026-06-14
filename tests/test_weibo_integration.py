@@ -227,7 +227,7 @@ class TestConfigIntegration:
         assert config.weibo.enabled is True
         assert config.weibo.auth.cookie
         assert len(config.weibo.subscriptions) > 0
-        assert config.weibo.subscriptions[0].user_id == "2803301701"
+        # 不检查具体 user_id，因为每个开发者的配置不同
 
 
 # ── Debug tokens sanity ──────────────────────────────────────

@@ -73,14 +73,15 @@ def login(platform: str) -> None:
     try:
         authenticator = get_authenticator(platform)
 
-        def _on_status(status):
-            from shared.auth.base import QRStatus
-            if status.status == QRStatus.SCANNED:
-                print("  ✓ 已扫码，请在手机上确认")
-            elif status.status == QRStatus.SUCCESS:
-                print("  ✓ 登录成功")
+        from shared.auth.base import AuthStatus, QRStatus
 
-        print("  等待扫码中...（每 2 秒检测一次）")
+        def _on_status(status: AuthStatus) -> None:
+            if status.status == QRStatus.SCANNED:
+                console.print("  [green]✓[/] 已扫码，请在手机上确认")
+            elif status.status == QRStatus.SUCCESS:
+                console.print("  [green]✓[/] 登录成功")
+
+        console.print("  [dim]等待扫码中...（每 2 秒检测一次）[/]")
         tokens = asyncio.run(authenticator.qr_login(on_status=_on_status))
         # Weibo stores cookies as a single semicolon-delimited string
         if platform in ("weibo", "xhs"):
