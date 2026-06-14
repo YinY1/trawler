@@ -87,10 +87,10 @@ def login(platform: str) -> None:
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
         else:
             auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
-        # ac_time_value is stored separately (not in PlatformTokens) — only for bilibili
-        ac_val = authenticator.ac_time_value
-        if platform == "bili" and ac_val:
-            auth_dict["ac_time_value"] = ac_val
+        # refresh_token is stored separately (not in PlatformTokens) — only for bilibili
+        rt_val = authenticator.refresh_token
+        if platform == "bili" and rt_val:
+            auth_dict["refresh_token"] = rt_val
         update_auth_section(platform, auth_dict)
         # Save debug tokens JSON for integration tests (avoid re-scan)
         debug_path = Path("tests") / f"{platform}_debug_tokens.json"
@@ -253,9 +253,9 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             )
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
-            ac_val = authenticator.ac_time_value
-            if ac_val:
-                auth_dict["ac_time_value"] = ac_val
+            rt_val = authenticator.refresh_token
+            if rt_val:
+                auth_dict["refresh_token"] = rt_val
             update_auth_section(platform, auth_dict)
             console.print(f"[green]✓[/] {platform} Token 续期成功")
             return True

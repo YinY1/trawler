@@ -185,7 +185,7 @@ class TestGetTokens:
         assert tokens.cookies["sessdata"] == "sd_val"
         assert tokens.cookies["bili_jct"] == "bj_val"
         assert tokens.cookies["dedeuserid"] == "duid_val"
-        assert auth._last_ac_time_value == "rt_abc"
+        assert auth._last_refresh_token == "rt_abc"
 
     @pytest.mark.asyncio
     async def test_empty_cookies(self):
@@ -202,8 +202,8 @@ class TestRefreshTokens:
     async def test_refresh_success(self):
         auth = BilibiliAuthenticator(config_path="/tmp/nonexistent.toml")
         tokens = _sample_tokens()
+        mock_cfg = _make_config(refresh_token="ac_old")
 
-        mock_cfg = _make_config(ac_time_value="ac_old")
         mock_cred = MagicMock()
         mock_cred.check_refresh = AsyncMock(return_value=True)
         mock_cred.refresh = AsyncMock()
@@ -223,14 +223,14 @@ class TestRefreshTokens:
         assert result.cookies["bili_jct"] == "new_jct"
         assert result.cookies["dedeuserid"] == "new_duid"
         assert result.cookies["buvid3"] == "new_bv3"
-        assert auth._last_ac_time_value == "ac_new"
+        assert auth._last_refresh_token == "ac_new"
 
     @pytest.mark.asyncio
     async def test_no_refresh_needed(self):
         auth = BilibiliAuthenticator(config_path="/tmp/nonexistent.toml")
         tokens = _sample_tokens()
 
-        mock_cfg = _make_config(ac_time_value="ac_old")
+        mock_cfg = _make_config(refresh_token="ac_old")
         mock_cred = MagicMock()
         mock_cred.check_refresh = AsyncMock(return_value=False)
 
@@ -243,11 +243,11 @@ class TestRefreshTokens:
         assert result is tokens
 
     @pytest.mark.asyncio
-    async def test_graceful_on_missing_ac_time(self):
-        """没有 ac_time_value 时不再抛出异常，返回原始 tokens。"""
+    async def test_graceful_on_missing_refresh_token(self):
+        """没有 refresh_token 时返回原始 tokens。"""
         auth = BilibiliAuthenticator(config_path="/tmp/nonexistent.toml")
         tokens = _sample_tokens()
-        mock_cfg = _make_config()  # no ac_time_value
+        mock_cfg = _make_config()  # no refresh_token
 
         with patch("shared.config.load_config", return_value=mock_cfg):
             result = await auth.refresh_tokens(tokens)
@@ -259,7 +259,7 @@ class TestRefreshTokens:
         auth = BilibiliAuthenticator(config_path="/tmp/nonexistent.toml")
         tokens = _sample_tokens()
 
-        mock_cfg = _make_config(ac_time_value="ac_old")
+        mock_cfg = _make_config(refresh_token="ac_old")
         mock_cred = MagicMock()
         mock_cred.check_refresh = AsyncMock(return_value=True)
         mock_cred.refresh = AsyncMock(side_effect=Exception("correspondPath expired"))

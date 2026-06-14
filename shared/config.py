@@ -32,7 +32,7 @@ class BilibiliAuth:
     bili_jct: str = ""
     buvid3: str = ""
     dedeuserid: str = ""
-    ac_time_value: str = ""
+    refresh_token: str = ""
     expires_at: float = 0.0
     last_refresh_at: float = 0.0  # 上次刷新尝试的时间戳
 

@@ -13,7 +13,7 @@ sessdata = ""
 bili_jct = ""
 buvid3 = ""
 dedeuserid = ""
-ac_time_value = ""
+refresh_token = ""
 # 上次刷新尝试的时间戳（Unix 时间戳，0 表示未尝试过）
 last_refresh_at = 0
 # 登录过期时间（Unix 时间戳，0 表示未知）

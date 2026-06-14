@@ -46,13 +46,13 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
     def __init__(self, config_path: str = "config/config.toml") -> None:
         self._config_path = config_path
-        self._last_ac_time_value: str = ""
+        self._last_refresh_token: str = ""
         self._saved_cookies: dict[str, str] = {}
         self._refresh_token: str = ""
 
     @property
-    def ac_time_value(self) -> str | None:
-        return self._last_ac_time_value or None
+    def refresh_token(self) -> str | None:
+        return self._last_refresh_token or None
 
     # ── BaseAuthenticator 接口 ────────────────────────────
 
@@ -125,7 +125,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
     async def get_tokens(self, qr_key: str) -> PlatformTokens:
         now = time.time()
-        self._last_ac_time_value = self._refresh_token
+        self._last_refresh_token = self._refresh_token
 
         cookies: dict[str, str] = {}
         for key in ("SESSDATA", "bili_jct", "DedeUserID", "buvid3", "sid"):
@@ -148,9 +148,9 @@ class BilibiliAuthenticator(BaseAuthenticator):
         from shared.config import load_config
 
         cfg = load_config(self._config_path)
-        ac_time_value = cfg.bilibili.auth.ac_time_value
-        if not ac_time_value:
-            logger.warning("缺少 ac_time_value，跳过 token 续期（二维码未提供 refresh_token?）")
+        refresh_token = cfg.bilibili.auth.refresh_token
+        if not refresh_token:
+            logger.warning("缺少 refresh_token，跳过 token 续期")
             return tokens
 
         cred = bilibili_api.Credential(
@@ -158,7 +158,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
             bili_jct=tokens.cookies.get("bili_jct", ""),
             buvid3=tokens.cookies.get("buvid3", ""),
             dedeuserid=tokens.cookies.get("dedeuserid", ""),
-            ac_time_value=ac_time_value,
+            ac_time_value=refresh_token,
         )
 
         need = await cred.check_refresh()
@@ -185,7 +185,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
         buvid3 = cred.buvid3 or tokens.cookies.get("buvid3", "") or (await bilibili_api.get_buvid())[0]
         cookies["buvid3"] = buvid3
 
-        self._last_ac_time_value = cred.ac_time_value or ac_time_value
+        self._last_refresh_token = cred.ac_time_value or refresh_token
 
         return PlatformTokens(
             platform="bilibili",

@@ -161,8 +161,8 @@ def _tokens_to_auth_dict(platform: str, tokens: PlatformTokens, authenticator: A
             "dedeuserid": tokens.cookies.get("dedeuserid", ""),
             "expires_at": tokens.expires_at,
         }
-        if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-            d["ac_time_value"] = authenticator._last_ac_time_value
+        if hasattr(authenticator, "_last_refresh_token") and authenticator._last_refresh_token:
+            d["refresh_token"] = authenticator._last_refresh_token
         return d
     elif platform in ("weibo", "xhs"):
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
@@ -178,8 +178,8 @@ def _update_config_memory(platform: str, config: Config, tokens: PlatformTokens,
         config.bilibili.auth.buvid3 = tokens.cookies.get("buvid3", "")
         config.bilibili.auth.dedeuserid = tokens.cookies.get("dedeuserid", "")
         config.bilibili.auth.expires_at = tokens.expires_at
-        if authenticator and hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-            config.bilibili.auth.ac_time_value = authenticator._last_ac_time_value
+        if authenticator and hasattr(authenticator, "_last_refresh_token") and authenticator._last_refresh_token:
+            config.bilibili.auth.refresh_token = authenticator._last_refresh_token
     elif platform == "weibo":
         config.weibo.auth.cookie = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         config.weibo.auth.expires_at = tokens.expires_at

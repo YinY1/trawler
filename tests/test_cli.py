@@ -88,7 +88,7 @@ def test_login_bili_success(mock_get_auth: MagicMock, mock_update: MagicMock, ru
     mock_tokens.platform = "bili"
     mock_tokens.obtained_at = 1234567890.0
     mock_authenticator.qr_login = AsyncMock(return_value=mock_tokens)
-    mock_authenticator._last_ac_time_value = "ac123"
+    mock_authenticator._last_refresh_token = "rt123"
     mock_get_auth.return_value = mock_authenticator
 
     result = runner.invoke(cli, ["login", "--platform", "bili"])
