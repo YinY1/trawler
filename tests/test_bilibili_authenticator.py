@@ -103,7 +103,8 @@ class TestGenerateQrCode:
         )
         session.get.return_value = resp
 
-        with patch("shared.http.get_session", AsyncMock(return_value=session)):
+        with patch("platforms.bilibili.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = session
             result = await auth.generate_qr_code()
 
         assert isinstance(result, QRCodeResult)
@@ -131,7 +132,8 @@ def _poll_test_helper(code: int, expected_status: QRStatus, expected_success: bo
         resp = _mock_aiohttp_response(body, set_cookies=["SESSDATA=v; Path=/"])
         session.get.return_value = resp
 
-        with patch("shared.http.get_session", AsyncMock(return_value=session)):
+        with patch("platforms.bilibili.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = session
             status = await auth.poll_qr_status("k")
 
         assert status.status == expected_status

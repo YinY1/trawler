@@ -11,17 +11,13 @@ from rich.console import Console
 
 from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS, WEIBO_REQUEST_TIMEOUT
-from shared.http import get_session
 from shared.protocols import CommentHighlight
 
 logger = logging.getLogger(__name__)
 console = Console()
 
 # PC 端评论 API
-COMMENT_API = (
-    "https://weibo.com/ajax/statuses/buildComments"
-    "?flow=default&id={post_id}&is_show_bulletin=2&key="
-)
+COMMENT_API = "https://weibo.com/ajax/statuses/buildComments?flow=default&id={post_id}&is_show_bulletin=2&key="
 
 
 def _get_default_ua() -> str:
@@ -61,12 +57,8 @@ def _parse_comment(
             return None
 
         user_info = comment_data.get("user", {})
-        user_name = (
-            user_info.get("screen_name", "") if isinstance(user_info, dict) else ""
-        )
-        user_id = (
-            str(user_info.get("id", "")) if isinstance(user_info, dict) else ""
-        )
+        user_name = user_info.get("screen_name", "") if isinstance(user_info, dict) else ""
+        user_id = str(user_info.get("id", "")) if isinstance(user_info, dict) else ""
 
         like_count = int(comment_data.get("like_count", 0) or 0)
         is_author = bool(author_user_id and user_id == author_user_id)
@@ -116,52 +108,52 @@ async def fetch_weibo_comment_highlights(
     }
 
     all_comments: list[CommentHighlight] = []
-    session = await get_session()
-    max_id = 0
-    page = 0
-    max_pages = 5
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        max_id = 0
+        page = 0
+        max_pages = 5
 
-    while len(all_comments) < max_count * 2 and page < max_pages:
-        page += 1
-        try:
-            url = COMMENT_API.format(post_id=post_id)
-            if max_id:
-                url += f"&max_id={max_id}"
+        while len(all_comments) < max_count * 2 and page < max_pages:
+            page += 1
+            try:
+                url = COMMENT_API.format(post_id=post_id)
+                if max_id:
+                    url += f"&max_id={max_id}"
 
-            async with session.get(
-                url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    logger.debug(
-                        "[评论] API 返回状态码: %s, post_id: %s",
-                        resp.status,
-                        post_id,
-                    )
+                async with session.get(
+                    url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug(
+                            "[评论] API 返回状态码: %s, post_id: %s",
+                            resp.status,
+                            post_id,
+                        )
+                        break
+
+                    data = await resp.json()
+
+                if not data.get("ok"):
                     break
 
-                data = await resp.json()
+                comments_raw = data.get("data", [])
+                if not isinstance(comments_raw, list) or not comments_raw:
+                    break
 
-            if not data.get("ok"):
+                for raw in comments_raw:
+                    comment = _parse_comment(raw, author_user_id)
+                    if comment is not None:
+                        all_comments.append(comment)
+
+                max_id = data.get("max_id", 0) or 0
+                if not max_id:
+                    break  # 无更多页
+
+            except Exception as e:
+                logger.warning("[评论] 抓取评论异常: %s, post_id: %s", e, post_id)
                 break
-
-            comments_raw = data.get("data", [])
-            if not isinstance(comments_raw, list) or not comments_raw:
-                break
-
-            for raw in comments_raw:
-                comment = _parse_comment(raw, author_user_id)
-                if comment is not None:
-                    all_comments.append(comment)
-
-            max_id = data.get("max_id", 0) or 0
-            if not max_id:
-                break  # 无更多页
-
-        except Exception as e:
-            logger.warning("[评论] 抓取评论异常: %s, post_id: %s", e, post_id)
-            break
 
     if not all_comments:
         return []

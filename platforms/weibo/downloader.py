@@ -10,7 +10,6 @@ from rich.console import Console
 
 from shared.config import Config
 from shared.constants import WEIBO_DOWNLOAD_TIMEOUT
-from shared.http import get_session
 from shared.protocols import WeiboDownloadResult, WeiboPost
 
 logger = logging.getLogger(__name__)
@@ -42,22 +41,22 @@ async def _download_file(url: str, dest: Path) -> bool:
     Returns:
         是否成功
     """
-    session = await get_session()
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        resp = await session.get(url, timeout=aiohttp.ClientTimeout(total=WEIBO_DOWNLOAD_TIMEOUT))
+    async with aiohttp.ClientSession(trust_env=False) as session:
         try:
-            if resp.status != 200:
-                logger.debug("下载文件失败，状态码: %s, URL: %s", resp.status, url)
-                return False
-            content = await resp.read()
-        finally:
-            resp.close()
-        dest.write_bytes(content)
-        return True
-    except Exception as e:
-        logger.debug("下载文件异常: %s, URL: %s", e, url)
-        return False
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            resp = await session.get(url, timeout=aiohttp.ClientTimeout(total=WEIBO_DOWNLOAD_TIMEOUT))
+            try:
+                if resp.status != 200:
+                    logger.debug("下载文件失败，状态码: %s, URL: %s", resp.status, url)
+                    return False
+                content = await resp.read()
+            finally:
+                resp.close()
+            dest.write_bytes(content)
+            return True
+        except Exception as e:
+            logger.debug("下载文件异常: %s, URL: %s", e, url)
+            return False
 
 
 async def download_weibo_media(post: WeiboPost, config: Config) -> WeiboDownloadResult:

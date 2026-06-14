@@ -30,7 +30,6 @@ from shared.auth.base import (
 from shared.auth.qr_display import display_qr_in_terminal
 from shared.config import Config
 from shared.constants import XHS_REQUEST_TIMEOUT
-from shared.http import get_session
 
 logger = logging.getLogger("trawler.xiaohongshu.auth")
 console = Console()
@@ -407,7 +406,7 @@ class XhsAuthenticator(BaseAuthenticator):
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None:
-            self._session = await get_session()
+            self._session = aiohttp.ClientSession(trust_env=False)
         return self._session
 
     async def generate_qr_code(self) -> QRCodeResult:

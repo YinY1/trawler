@@ -28,7 +28,8 @@ class TestDownloadFile:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.downloader.get_session", return_value=mock_session):
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await _download_file(url, dest)
 
         assert result is True
@@ -44,7 +45,8 @@ class TestDownloadFile:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.downloader.get_session", return_value=mock_session):
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await _download_file(url, dest)
 
         assert result is False
@@ -58,7 +60,8 @@ class TestDownloadFile:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("platforms.weibo.downloader.get_session", return_value=mock_session):
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await _download_file(url, dest)
 
         assert result is False
@@ -110,7 +113,8 @@ class TestDownloadWeiboMedia:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.downloader.get_session", return_value=mock_session):
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await download_weibo_media(post, cfg)
 
         assert result.success is True
@@ -131,7 +135,8 @@ class TestDownloadWeiboMedia:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.downloader.get_session", return_value=mock_session):
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await download_weibo_media(post, cfg)
 
         assert result.success is False

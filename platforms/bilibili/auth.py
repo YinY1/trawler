@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import time
 
+import aiohttp
+
 from shared.auth.base import (
     AuthStatus,
     BaseAuthenticator,
@@ -52,49 +54,42 @@ class BilibiliAuthenticator(BaseAuthenticator):
     def ac_time_value(self) -> str | None:
         return self._last_ac_time_value or None
 
-    async def _get_http_session(self):
-        from shared.http import get_session
-
-        return await get_session()
-
     # ── BaseAuthenticator 接口 ────────────────────────────
 
     async def generate_qr_code(self) -> QRCodeResult:
         """纯手写 HTTP 申请二维码，不依赖任何库。"""
-        session = await self._get_http_session()
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.bilibili.com/",
         }
-
-        async with session.get(
-            "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
-            headers=headers,
-        ) as resp:
-            body = await resp.json()
-            data = body.get("data", {})
-            qr_url = data.get("url", "")
-            qr_key = data.get("qrcode_key", "")
-            return QRCodeResult(qr_url=qr_url, qr_key=qr_key, expires_in=180)
+        async with aiohttp.ClientSession(trust_env=False) as session:
+            async with session.get(
+                "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
+                headers=headers,
+            ) as resp:
+                body = await resp.json()
+                data = body.get("data", {})
+                qr_url = data.get("url", "")
+                qr_key = data.get("qrcode_key", "")
+                return QRCodeResult(qr_url=qr_url, qr_key=qr_key, expires_in=180)
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
         """纯手写 HTTP 轮询扫码状态，获取 Set-Cookie + refresh_token。"""
-        session = await self._get_http_session()
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.bilibili.com/",
         }
-
-        async with session.get(
-            "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
-            params={"qrcode_key": qr_key},
-            headers=headers,
-        ) as resp:
-            # 从 Set-Cookie 提取所有 cookie
-            for cookie in resp.headers.getall("set-cookie", []):
-                name = cookie.split("=", 1)[0]
-                value = cookie.split(";")[0].split("=", 1)[1] if "=" in cookie else ""
-                self._saved_cookies[name] = value
+        async with aiohttp.ClientSession(trust_env=False) as session:
+            async with session.get(
+                "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
+                params={"qrcode_key": qr_key},
+                headers=headers,
+            ) as resp:
+                # 从 Set-Cookie 提取所有 cookie
+                for cookie in resp.headers.getall("set-cookie", []):
+                    name = cookie.split("=", 1)[0]
+                    value = cookie.split(";")[0].split("=", 1)[1] if "=" in cookie else ""
+                    self._saved_cookies[name] = value
 
             body = await resp.json()
             data = body.get("data", {})

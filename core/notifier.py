@@ -10,7 +10,6 @@ from rich.console import Console
 
 from shared.config import NotificationConfig
 from shared.constants import GOTIFY_MAX_RETRIES, GOTIFY_TIMEOUT
-from shared.http import get_session
 
 console = Console()
 
@@ -54,20 +53,20 @@ async def send_gotify(
         "priority": priority if priority is not None else config.priority,
     }
 
-    session = await get_session()
     max_retries = GOTIFY_MAX_RETRIES
     for attempt in range(1, max_retries + 1):
         try:
-            async with session.post(
-                url,
-                params=params,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=GOTIFY_TIMEOUT),
-            ) as resp:
-                resp.raise_for_status()
-            console.log(f"[green]Gotify 通知发送成功: {title}[/]")
-            return True
+            async with aiohttp.ClientSession(trust_env=False) as session:
+                async with session.post(
+                    url,
+                    params=params,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=GOTIFY_TIMEOUT),
+                ) as resp:
+                    resp.raise_for_status()
+                console.log(f"[green]Gotify 通知发送成功: {title}[/]")
+                return True
 
         except asyncio.TimeoutError:
             console.log(f"[yellow]Gotify 请求超时 (尝试 {attempt}/{max_retries})[/]")

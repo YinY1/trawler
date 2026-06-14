@@ -18,7 +18,6 @@ from platforms.xiaohongshu.auth import (
 from platforms.xiaohongshu.signer import get_xhs_sign
 from shared.config import Config
 from shared.constants import XHS_REQUEST_TIMEOUT
-from shared.http import get_session
 from shared.protocols import NoteInfo
 
 logger = logging.getLogger("trawler.xiaohongshu.monitor")
@@ -146,7 +145,8 @@ async def _fetch_notes_via_api(
         "xsec_token": "",
         "xsec_source": "pc_feed",
     }
-    query = urlencode(params, doseq=True)
+    # 注意：必须保持逗号不被编码（image_formats），否则签名不匹配 → 406
+    query = urlencode(params, doseq=True, safe=",")
     full_api = f"{api}?{query}"
 
     # Build signed headers (same pattern as Spider_XHS vendor)
@@ -162,29 +162,29 @@ async def _fetch_notes_via_api(
         "Cookie": cookie,
     }
 
-    session = await get_session()
-    try:
-        async with session.get(
-            XHS_API_BASE + full_api,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-        ) as resp:
-            if resp.status != 200:
-                logger.warning(f"小红书笔记列表 API 返回状态码: {resp.status}")
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                XHS_API_BASE + full_api,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(f"小红书笔记列表 API 返回状态码: {resp.status}")
+                    return []
+
+                data = await resp.json(content_type=None)
+
+            if not data.get("success", False):
+                msg = data.get("msg", "unknown")
+                logger.warning(f"小红书笔记列表 API 失败: {msg}")
                 return []
 
-            data = await resp.json(content_type=None)
-
-        if not data.get("success", False):
-            msg = data.get("msg", "unknown")
-            logger.warning(f"小红书笔记列表 API 失败: {msg}")
+            notes = data.get("data", {}).get("notes", [])
+            return notes if isinstance(notes, list) else []
+        except Exception as e:
+            logger.warning(f"小红书笔记列表 API 请求异常: {e}")
             return []
-
-        notes = data.get("data", {}).get("notes", [])
-        return notes if isinstance(notes, list) else []
-    except Exception as e:
-        logger.warning(f"小红书笔记列表 API 请求异常: {e}")
-        return []
 
 
 async def _fetch_notes_fallback(
@@ -213,7 +213,8 @@ async def _fetch_notes_fallback(
         "xsec_token": "",
         "xsec_source": "pc_feed",
     }
-    query = urlencode(params, doseq=True)
+    # 保持逗号不被编码，确保签名一致性
+    query = urlencode(params, doseq=True, safe=",")
     full_api = f"{api}?{query}"
 
     headers: dict[str, str] = {
@@ -222,27 +223,27 @@ async def _fetch_notes_fallback(
         "Cookie": cookie,
     }
 
-    session = await get_session()
-    try:
-        async with session.get(
-            XHS_API_BASE + full_api,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-        ) as resp:
-            if resp.status != 200:
-                logger.debug(f"降级请求返回状态码: {resp.status}")
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                XHS_API_BASE + full_api,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug(f"降级请求返回状态码: {resp.status}")
+                    return []
+
+                data = await resp.json(content_type=None)
+
+            if not data.get("success", False):
                 return []
 
-            data = await resp.json(content_type=None)
-
-        if not data.get("success", False):
+            notes = data.get("data", {}).get("notes", [])
+            return notes if isinstance(notes, list) else []
+        except Exception as e:
+            logger.debug(f"降级请求失败: {e}")
             return []
-
-        notes = data.get("data", {}).get("notes", [])
-        return notes if isinstance(notes, list) else []
-    except Exception as e:
-        logger.debug(f"降级请求失败: {e}")
-        return []
 
 
 async def fetch_user_notes(

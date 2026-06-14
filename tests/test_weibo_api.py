@@ -57,7 +57,8 @@ class TestFetchUserPostsMobile:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_mobile(cookie, user_id="12345")
 
         assert len(posts) == 1
@@ -76,7 +77,8 @@ class TestFetchUserPostsMobile:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_mobile(cookie, user_id="12345")
 
         assert posts == []
@@ -89,7 +91,8 @@ class TestFetchUserPostsMobile:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_mobile(cookie, user_id="12345")
 
         assert posts == []
@@ -130,7 +133,8 @@ class TestFetchUserPostsPc:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_pc(cookie, user_id="67890")
 
         assert len(posts) == 1
@@ -149,7 +153,8 @@ class TestFetchUserPostsPc:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_pc(cookie, user_id="67890")
 
         assert posts == []
