@@ -13,9 +13,9 @@ from rich.console import Console
 from core.engine import PipelineEngine
 from core.notifier import notify_new_weibo_post
 from core.summarizer import extract_keywords, generate_summary
+from platforms.weibo.api import fetch_user_posts
 from platforms.weibo.comments import fetch_weibo_comment_highlights
 from platforms.weibo.downloader import download_weibo_media
-from platforms.weibo.monitor import fetch_user_posts
 from platforms.weibo.parser import parse_weibo_post
 from shared.config import Config
 from shared.message_store import MessageStore

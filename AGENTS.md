@@ -27,7 +27,7 @@ platforms/       平台适配层: bilibili/, xiaohongshu/
 
 - **数据模型**全部在 `shared/protocols.py`，`dataclass` 定义，`Protocol` 定义行为契约
 - **配置**在 `shared/config.py`，`dataclass` 驱动，环境变量覆盖
-- **平台模块模式**：`auth.py` + `monitor.py` + `comments.py` [+ `downloader.py` / `parser.py` + `rss_monitor.py`]
+- **平台模块模式**：`auth.py` + `monitor.py` + `comments.py` [+ `downloader.py` / `parser.py`]
 - CLI 入口 `run_check.py`，Click 命令 `trawler`
 
 ## Conventions

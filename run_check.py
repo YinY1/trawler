@@ -6,6 +6,8 @@ import asyncio
 import logging
 import sys
 import time
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -17,6 +19,37 @@ from shared.auth.base import PlatformTokens
 from shared.config import Config, load_config
 
 console = Console()
+
+
+def setup_logging(verbose: bool = False, log_dir: str = "data") -> None:
+    """配置日志：控制台 + 文件轮转。
+
+    Args:
+        verbose: 为 True 时日志级别为 DEBUG，否则 INFO
+        log_dir: 日志文件目录
+    """
+    log_level = logging.DEBUG if verbose else logging.INFO
+    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    datefmt = "%H:%M:%S"
+
+    root = logging.getLogger()
+    root.setLevel(log_level)
+
+    # 控制台 handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    root.addHandler(console_handler)
+
+    # 文件 handler（轮转：5MB × 3 个备份）
+    log_path = Path(log_dir) / "trawler.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        str(log_path), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    root.addHandler(file_handler)
 
 
 @click.group()
@@ -305,8 +338,7 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
 )
 def check(platform: str, config_path: str, verbose: bool, from_phase: str | None) -> None:
     """检查各平台新内容"""
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+    setup_logging(verbose=verbose)
     if verbose:
         console.print("[dim]调试模式已启用[/]")
     try:

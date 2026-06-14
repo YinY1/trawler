@@ -135,6 +135,9 @@ class PipelineEngine:
     ) -> None:
         """统一平台入口：cleanup -> detect -> process。
 
+        Detector 支持前缀匹配：``"bili"`` 会运行所有以 ``"bili"``
+        开头的 detector key（如 ``"bili"`` 和 ``"bili_dynamic"``）。
+
         Args:
             config: 全局配置
             platform: 平台标识 ("bili" | "xhs" | "weibo")
@@ -151,10 +154,20 @@ class PipelineEngine:
         if module_path is not None:
             importlib.import_module(module_path)
 
-        detector = cls._detectors.get(platform)
-        if detector is not None:
-            await detector(config, store)
+        # 前缀匹配 detector：导入 handler 后，_detectors 中可能有
+        # 多个以 platform 开头的 key（如 "bili" + "bili_dynamic"）
+        matching_keys = [
+            key
+            for key in cls._detectors
+            if key == platform or key.startswith(f"{platform}_")
+        ]
+        for key in matching_keys:
+            detector = cls._detectors.get(key)
+            if detector is not None:
+                await detector(config, store)
 
+        # 消息处理：仍使用原始 platform 字符串
+        #（MessageRecord.platform 统一为 "bili"，不区分 video/dynamic）
         for msg in store.get_messages(phase=Phase.PUSHED, exclude=True, platform=platform):
             await cls.process_message(msg, config, store)
 
