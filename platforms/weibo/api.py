@@ -338,20 +338,18 @@ async def fetch_user_posts_mobile(
 
     async with aiohttp.ClientSession(trust_env=False) as session:
         try:
-            resp = await session.get(
+            async with session.get(
                 url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-            )
-            if resp.status != 200:
-                logger.warning("移动端 API 返回状态码: %s", resp.status)
-                return []
-            data = await resp.json()
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("移动端 API 返回状态码: %s", resp.status)
+                    return []
+                data = await resp.json()
         except Exception as e:
             logger.warning("移动端 API 请求失败: %s", e)
             return []
-        finally:
-            resp.close()
 
     if not data.get("ok"):
         logger.debug("移动端 API 返回失败: %s", data.get("msg", "unknown"))
@@ -402,20 +400,18 @@ async def fetch_user_posts_pc(
 
     async with aiohttp.ClientSession(trust_env=False) as session:
         try:
-            resp = await session.get(
+            async with session.get(
                 url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-            )
-            if resp.status != 200:
-                logger.warning("PC 端 API 返回状态码: %s", resp.status)
-                return []
-            data = await resp.json()
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("PC 端 API 返回状态码: %s", resp.status)
+                    return []
+                data = await resp.json()
         except Exception as e:
             logger.warning("PC 端 API 请求失败: %s", e)
             return []
-        finally:
-            resp.close()
 
     if not data.get("ok"):
         logger.debug("PC 端 API 返回失败: %s", data.get("msg", "unknown"))
