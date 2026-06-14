@@ -37,6 +37,7 @@ config.toml
 transcripts/
 downloads/
 *_debug_tokens.json
+debug_*.py
 
 # Git worktrees
 .worktrees/

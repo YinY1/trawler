@@ -68,7 +68,17 @@ def get_xhs_sign(api: str, data: dict | str = "", a1: str = "", method: str = "P
     try:
         result = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        raise RuntimeError(f"Invalid sign output: {proc.stdout[:200]}")
+        # Fallback: vendor lib may print noise to stdout before JSON
+        # Try to find the last JSON object in stdout
+        import re as _re
+        _match = _re.search(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", proc.stdout.strip(), _re.DOTALL)
+        if _match:
+            try:
+                result = json.loads(_match.group())
+            except json.JSONDecodeError:
+                raise RuntimeError(f"Invalid sign output: {proc.stdout[:200]}")
+        else:
+            raise RuntimeError(f"Invalid sign output: {proc.stdout[:200]}")
 
     return {
         "xs": result.get("xs", ""),

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import binascii
 import hashlib
 import json
 import logging
 import os
 import random
+import sys
 import time
-import uuid
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -20,9 +23,10 @@ from shared.auth.base import (
     BaseAuthenticator,
     PlatformTokens,
     QRCodeResult,
+    QRExpiredError,
     QRStatus,
-    RefreshFailedError,
 )
+from shared.auth.qr_display import display_qr_in_terminal
 from shared.config import Config
 from shared.constants import XHS_REQUEST_TIMEOUT
 from shared.http import get_session
@@ -286,6 +290,98 @@ async def _fetch_sec_cookies(session: Any, cookies: dict[str, str]) -> dict[str,
 
 
 # ═══════════════════════════════════════════════════════════
+# Vendor XHSLoginApi helper functions
+# ═══════════════════════════════════════════════════════════
+
+_VENDOR_DIR = str(Path(__file__).resolve().parent.parent.parent / "vendor" / "spider_xhs")
+
+
+def _vendor_setup() -> None:
+    """设置 vendor 模块的导入路径和 Node.js 搜索路径。"""
+    if _VENDOR_DIR not in sys.path:
+        sys.path.insert(0, _VENDOR_DIR)
+    os.environ["NODE_PATH"] = os.path.join(_VENDOR_DIR, "node_modules")
+    os.environ["LOGURU_LEVEL"] = "ERROR"
+
+
+def _vendor_call(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """在 vendor 目录上下文中执行函数（设置 cwd + path，完成后恢复）。"""
+    _vendor_setup()
+    old_cwd = os.getcwd()
+    os.chdir(_VENDOR_DIR)
+    try:
+        return func(*args, **kwargs)
+    finally:
+        os.chdir(old_cwd)
+
+
+def _vendor_init_qr() -> dict:
+    """同步：通过 vendor XHSLoginApi 生成 init cookies + QR code。
+
+    Returns:
+        dict 包含 cookies, qr_id, code, qr_url
+    """
+    from apis.xhs_pc_login_apis import XHSLoginApi
+
+    api = XHSLoginApi()
+    cookies = api.generate_init_cookies()
+    success, msg, qr_data = api.generate_qrcode(cookies)
+    if not success:
+        raise RuntimeError(f"生成二维码失败: {msg}")
+    return {
+        "cookies": qr_data["cookies"],
+        "qr_id": qr_data["qr_id"],
+        "code": qr_data["code"],
+        "qr_url": qr_data["qr_url"],
+    }
+
+
+def _vendor_check_status(poll_data: dict) -> tuple[bool, str, dict]:
+    """同步：通过 vendor XHSLoginApi 单次轮询 QR 状态。
+
+    Returns:
+        (success, msg, updated_cookies)
+    """
+    from apis.xhs_pc_login_apis import XHSLoginApi
+
+    api = XHSLoginApi()
+    return api.check_qrcode_status(
+        poll_data["qr_id"], poll_data["code"], dict(poll_data["cookies"])
+    )
+
+
+def _vendor_poll_login(init_data: dict) -> dict:
+    """同步：通过 vendor XHSLoginApi 完整轮询 + 验证。
+
+    循环轮询直至成功或过期。成功后调用 get_user_info 验证。
+
+    Returns:
+        最终 cookies dict（含 web_session）
+
+    Raises:
+        QRExpiredError: 二维码过期
+    """
+    from apis.xhs_pc_login_apis import XHSLoginApi
+
+    api = XHSLoginApi()
+    cookies = dict(init_data["cookies"])
+    qr_id = init_data["qr_id"]
+    code = init_data["code"]
+
+    while True:
+        success, msg, cookies = api.check_qrcode_status(qr_id, code, cookies)
+        if success:
+            break
+        if msg == "二维码已过期":
+            raise QRExpiredError("二维码已过期")
+        time.sleep(2)
+
+    # 验证登录
+    api.get_user_info(cookies)
+    return {k: v for k, v in cookies.items() if v}
+
+
+# ═══════════════════════════════════════════════════════════
 # XhsAuthenticator — QR 登录 + Keepalive 续期
 # ═══════════════════════════════════════════════════════════
 
@@ -295,7 +391,7 @@ class XhsAuthenticator(BaseAuthenticator):
 
     def __init__(self) -> None:
         self._session: aiohttp.ClientSession | None = None
-        self._init_cookies: dict[str, str] = {}
+        self._vendor_cookies: dict[str, str] = {}
         self._qr_code: str = ""
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
@@ -304,141 +400,66 @@ class XhsAuthenticator(BaseAuthenticator):
         return self._session
 
     async def generate_qr_code(self) -> QRCodeResult:
-        from platforms.xiaohongshu.signer import get_xhs_sign
-
-        session = await self._ensure_session()
-        a1_val = generate_a1()
-        self._init_cookies = {
-            "abRequestId": str(uuid.uuid4()),
-            "ets": str(int(time.time() * 1000)),
-            "webBuild": "6.7.4",
-            "xsecappid": "xhs-pc-web",
-            "loadts": str(int(time.time() * 1000) + random.randint(50, 200)),
-            "a1": a1_val,
-            "webId": generate_web_id(a1_val),
-        }
-        sec_cookies = await _fetch_sec_cookies(session, self._init_cookies)
-        self._init_cookies.update(sec_cookies)
-        api = XHS_QR_CREATE_API
-        data = {"qr_type": 1}
-        sign = get_xhs_sign(api, data, self._init_cookies.get("a1", ""), "POST")
-        headers = {
-            "User-Agent": DEFAULT_USER_AGENT,
-            "Content-Type": "application/json;charset=UTF-8",
-            "Origin": XHS_HOME_URL,
-            "Referer": f"{XHS_HOME_URL}/",
-            "x-s": sign["xs"],
-            "x-t": sign["xt"],
-            "x-s-common": sign["xs_common"],
-        }
-        async with session.post(
-            XHS_API_BASE + api,
-            headers=headers,
-            cookies=self._init_cookies,
-            json=data,
-            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-        ) as resp:
-            for key, morsel in resp.cookies.items():
-                self._init_cookies[key] = morsel.value if hasattr(morsel, "value") else str(morsel)
-            res = await resp.json(content_type=None)
-        if not res.get("success"):
-            raise RuntimeError(f"生成二维码失败: {res.get('msg', '未知错误')}")
-        qr_data: dict = res.get("data") or {}
-        if not all(k in qr_data for k in ("qr_id", "code", "url")):
-            raise RuntimeError("生成二维码失败: 响应缺少必要字段")
-        self._qr_code = qr_data["code"]
+        init_data = await asyncio.to_thread(_vendor_call, _vendor_init_qr)
+        self._vendor_cookies = init_data["cookies"]
+        self._qr_code = init_data["code"]
         return QRCodeResult(
-            qr_url=qr_data["url"],
-            qr_key=qr_data["qr_id"],
+            qr_url=init_data["qr_url"],
+            qr_key=init_data["qr_id"],
             expires_in=180,
         )
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
-        from platforms.xiaohongshu.signer import get_xhs_sign
+        poll_data = {
+            "cookies": self._vendor_cookies,
+            "qr_id": qr_key,
+            "code": self._qr_code,
+        }
+        try:
+            success, msg, cookies = await asyncio.to_thread(
+                _vendor_call, _vendor_check_status, poll_data,
+            )
+            self._vendor_cookies = cookies
+        except Exception as e:
+            return AuthStatus(
+                success=False,
+                status=QRStatus.WAITING,
+                message=f"轮询失败: {e}",
+            )
 
-        session = await self._ensure_session()
-        api = XHS_QR_CHECK_API
-        data = {"qrId": qr_key, "code": self._qr_code}
-        sign = get_xhs_sign(api, data, self._init_cookies.get("a1", ""), "POST")
-        headers = {
-            "User-Agent": DEFAULT_USER_AGENT,
-            "Content-Type": "application/json;charset=UTF-8",
-            "Origin": XHS_HOME_URL,
-            "Referer": f"{XHS_HOME_URL}/",
-            "x-s": sign["xs"],
-            "x-t": sign["xt"],
-            "x-s-common": sign["xs_common"],
-        }
-        async with session.post(
-            XHS_API_BASE + api,
-            headers=headers,
-            cookies=self._init_cookies,
-            json=data,
-            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-        ) as resp:
-            for key, morsel in resp.cookies.items():
-                self._init_cookies[key] = morsel.value if hasattr(morsel, "value") else str(morsel)
-            res = await resp.json(content_type=None)
-        status = (res.get("data") or {}).get("codeStatus")
-        status_map: dict[int, QRStatus] = {
-            0: QRStatus.WAITING,
-            1: QRStatus.SCANNED,
-            2: QRStatus.SUCCESS,
-            3: QRStatus.EXPIRED,
-        }
-        qr_status = status_map.get(status, QRStatus.WAITING)
-        msg_map: dict[int, str] = {
-            0: "等待扫码",
-            1: "已扫码，等待确认",
-            2: "登录成功",
-            3: "二维码已过期",
-        }
-        if qr_status == QRStatus.SUCCESS:
-            await self._fetch_login_info(qr_key, session)
-        return AuthStatus(
-            success=qr_status == QRStatus.SUCCESS,
-            status=qr_status,
-            message=msg_map.get(status, f"未知状态: {status}"),
-        )
+        if success:
+            return AuthStatus(success=True, status=QRStatus.SUCCESS, message=msg)
+        if msg == "二维码已过期":
+            return AuthStatus(success=False, status=QRStatus.EXPIRED, message=msg)
 
-    async def _fetch_login_info(self, qr_key: str, session: aiohttp.ClientSession) -> None:
-        from platforms.xiaohongshu.signer import get_xhs_sign
-
-        api = XHS_QR_STATUS_API
-        params = {"qr_id": qr_key, "code": self._qr_code}
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        full_api = f"{api}?{query}"
-        sign = get_xhs_sign(full_api, a1=self._init_cookies.get("a1", ""), method="GET")
-        headers = {
-            "User-Agent": DEFAULT_USER_AGENT,
-            "Origin": XHS_HOME_URL,
-            "Referer": f"{XHS_HOME_URL}/",
-            "x-s": sign["xs"],
-            "x-t": sign["xt"],
-            "x-s-common": sign["xs_common"],
-        }
-        async with session.get(
-            XHS_API_BASE + full_api,
-            headers=headers,
-            cookies=self._init_cookies,
-            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-        ) as resp:
-            for key, morsel in resp.cookies.items():
-                self._init_cookies[key] = morsel.value if hasattr(morsel, "value") else str(morsel)
-            res = await resp.json(content_type=None)
-        if res.get("success") and "login_info" in res.get("data", {}):
-            self._init_cookies["web_session"] = res["data"]["login_info"].get("session", "")
+        status = QRStatus.SCANNED if "确认" in msg else QRStatus.WAITING
+        return AuthStatus(success=False, status=status, message=msg)
 
     async def get_tokens(self, qr_key: str) -> PlatformTokens:
-        if "web_session" not in self._init_cookies:
-            raise RefreshFailedError("未获取到 web_session，QR 登录可能未完成")
         now = time.time()
-        cookie_keys = ["a1", "web_session", "webId", "gid", "sec_poison_id"]
-        cookies = {}
-        for k in cookie_keys:
-            v = self._init_cookies.get(k)
-            if v is not None:
-                cookies[k] = v
+        return PlatformTokens(
+            platform="xhs",
+            cookies={k: v for k, v in self._vendor_cookies.items() if v},
+            obtained_at=now,
+            expires_at=now + 7 * 86400,
+        )
+
+    async def qr_login(
+        self, on_status: Callable[[AuthStatus], None] | None = None,
+    ) -> PlatformTokens:
+        """使用 vendor XHSLoginApi 完成 QR 扫码登录全流程。"""
+        _ = on_status  # vendor 内部自行处理状态
+
+        # ── Step 1: init cookies + QR（在 thread 中运行） ──
+        init_data = await asyncio.to_thread(_vendor_call, _vendor_init_qr)
+
+        # ── Step 2: 在主线程显示 QR 码 ──
+        display_qr_in_terminal(init_data["qr_url"])
+
+        # ── Step 3: 轮询 + 获取 session（在 thread 中运行） ──
+        cookies = await asyncio.to_thread(_vendor_call, _vendor_poll_login, init_data)
+
+        now = time.time()
         return PlatformTokens(
             platform="xhs",
             cookies=cookies,
@@ -472,15 +493,31 @@ class XhsAuthenticator(BaseAuthenticator):
         if tokens.expires_at < time.time():
             return False
         session = await self._ensure_session()
-        cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
+        cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items() )
+        a1 = tokens.cookies.get("a1", "")
         try:
+            from platforms.xiaohongshu.signer import get_xhs_sign
+
+            api = "/api/sns/web/v2/user/me"
+            sign = get_xhs_sign(api, a1=a1, method="GET")
+            headers = {
+                "User-Agent": DEFAULT_USER_AGENT,
+                "Origin": XHS_HOME_URL,
+                "Referer": f"{XHS_HOME_URL}/",
+                "Cookie": cookie_str,
+                "x-s": sign["xs"],
+                "x-t": sign["xt"],
+                "x-s-common": sign["xs_common"],
+            }
             async with session.get(
-                XHS_HOME_URL,
-                headers={"User-Agent": DEFAULT_USER_AGENT, "Cookie": cookie_str},
+                XHS_API_BASE + api,
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-                allow_redirects=False,
             ) as resp:
-                return resp.status == 200
+                if resp.status != 200:
+                    return False
+                data = await resp.json(content_type=None)
+                return data.get("success", False) and bool(data.get("data", {}).get("nickname"))
         except Exception as e:
             logger.warning("小红书 token 有效性检查失败: %s", e)
             return False

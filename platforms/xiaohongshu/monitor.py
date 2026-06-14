@@ -9,11 +9,12 @@ import aiohttp
 from rich.console import Console
 
 from platforms.xiaohongshu.auth import (
-    XHS_BASE_URL,
-    get_request_headers,
-    get_signed_params,
+    DEFAULT_USER_AGENT,
+    XHS_API_BASE,
+    XHS_HOME_URL,
     get_xhs_cookie,
 )
+from platforms.xiaohongshu.signer import get_xhs_sign
 from shared.config import Config
 from shared.constants import XHS_REQUEST_TIMEOUT
 from shared.http import get_session
@@ -24,8 +25,16 @@ console = Console()
 
 # 默认每页笔记数
 DEFAULT_PAGE_SIZE = 20
-# 笔记列表 API
-USER_POSTED_API = f"{XHS_BASE_URL}/api/sns/web/v1/user_posted"
+
+
+def _extract_a1(cookie: str) -> str:
+    """从 Cookie 字符串中提取 a1 值。"""
+    for part in cookie.split(";"):
+        if "=" in part:
+            k, v = part.strip().split("=", 1)
+            if k.strip() == "a1":
+                return v.strip()
+    return ""
 
 
 def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: str) -> Optional[NoteInfo]:
@@ -69,8 +78,21 @@ def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: s
             except (ValueError, TypeError):
                 liked_count = 0
 
-        # 发布时间
-        pubdate = note_data.get("last_update_time", 0) or note_data.get("time", 0)
+        # 发布时间：优先使用 API 返回字段，fallback 到 note_id 前 8 位 hex 编码的时间戳
+        pubdate = (
+            note_data.get("last_update_time", 0)
+            or note_data.get("time", 0)
+            or note_data.get("create_time", 0)
+            or note_data.get("timestamp", 0)
+        )
+        if not pubdate:
+            # XHS note_id 前 8 位 hex = Unix 时间戳（秒）
+            note_id_str = note_data.get("note_id", "") or note_data.get("id", "")
+            if len(note_id_str) >= 8:
+                try:
+                    pubdate = int(note_id_str[:8], 16)
+                except (ValueError, TypeError):
+                    pubdate = 0
         if isinstance(pubdate, str):
             try:
                 pubdate = int(pubdate)
@@ -103,7 +125,7 @@ async def _fetch_notes_via_api(
     cursor: str = "",
     num: int = DEFAULT_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
-    """通过小红书 API 获取用户笔记列表。
+    """通过小红书 API 获取用户笔记列表 (GET with query params)。
 
     Args:
         user_id: 小红书用户 ID
@@ -114,69 +136,95 @@ async def _fetch_notes_via_api(
     Returns:
         笔记数据列表
     """
-    body: dict[str, Any] = {
-        "user_id": user_id,
+    api = "/api/sns/web/v1/user_posted"
+    params = {
+        "num": str(num),
         "cursor": cursor,
-        "num": num,
-        "image_scenes": [],
+        "user_id": user_id,
+        "image_formats": "jpg,webp,avif",
+        "xsec_token": "",
+        "xsec_source": "pc_feed",
+    }
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    full_api = f"{api}?{query}"
+
+    # Build signed headers (same pattern as Spider_XHS vendor)
+    a1 = _extract_a1(cookie)
+    sign = get_xhs_sign(full_api, a1=a1, method="GET")
+    headers: dict[str, str] = {
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Origin": XHS_HOME_URL,
+        "Referer": f"{XHS_HOME_URL}/",
+        "x-s": sign["xs"],
+        "x-t": sign["xt"],
+        "x-s-common": sign["xs_common"],
+        "Cookie": cookie,
     }
 
-    headers = get_request_headers(cookie)
-    signed = get_signed_params(body, cookie)
-    headers.update(signed)
-
     session = await get_session()
-    async with session.post(
-        USER_POSTED_API,
-        json=body,
-        headers=headers,
-        timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-    ) as resp:
-        if resp.status != 200:
-            logger.warning(f"小红书笔记列表 API 返回状态码: {resp.status}")
+    try:
+        async with session.get(
+            XHS_API_BASE + full_api,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                logger.warning(f"小红书笔记列表 API 返回状态码: {resp.status}")
+                return []
+
+            data = await resp.json(content_type=None)
+
+        if not data.get("success", False):
+            msg = data.get("msg", "unknown")
+            logger.warning(f"小红书笔记列表 API 失败: {msg}")
             return []
 
-        data = await resp.json(content_type=None)
-
-    if not data.get("success", False):
-        msg = data.get("msg", "unknown")
-        logger.warning(f"小红书笔记列表 API 失败: {msg}")
+        notes = data.get("data", {}).get("notes", [])
+        return notes if isinstance(notes, list) else []
+    except Exception as e:
+        logger.warning(f"小红书笔记列表 API 请求异常: {e}")
         return []
-
-    notes = data.get("data", {}).get("notes", [])
-    return notes if isinstance(notes, list) else []
 
 
 async def _fetch_notes_fallback(
     user_id: str,
     cookie: str,
+    cursor: str = "",
+    num: int = DEFAULT_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
-    """降级方案：使用简化请求获取笔记列表。
-
-    当签名 API 不可用时，尝试基本请求获取数据。
+    """降级方案：使用无签名请求获取笔记列表（可能不生效）。
 
     Args:
         user_id: 小红书用户 ID
         cookie: Cookie 字符串
+        cursor: 分页游标
+        num: 每页数量
 
     Returns:
         笔记数据列表
     """
+    api = "/api/sns/web/v1/user_posted"
     params = {
+        "num": str(num),
+        "cursor": cursor,
         "user_id": user_id,
-        "cursor": "",
-        "num": str(DEFAULT_PAGE_SIZE),
-        "image_scenes": "",
+        "image_formats": "jpg,webp,avif",
+        "xsec_token": "",
+        "xsec_source": "pc_feed",
     }
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    full_api = f"{api}?{query}"
 
-    headers = get_request_headers(cookie)
-    # 降级时不添加签名头
+    headers: dict[str, str] = {
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Referer": f"{XHS_HOME_URL}/",
+        "Cookie": cookie,
+    }
 
     session = await get_session()
     try:
         async with session.get(
-            USER_POSTED_API,
-            params=params,
+            XHS_API_BASE + full_api,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
         ) as resp:
