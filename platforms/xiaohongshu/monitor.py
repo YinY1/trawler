@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from urllib.parse import urlencode
 
 import aiohttp
 from rich.console import Console
@@ -145,7 +146,7 @@ async def _fetch_notes_via_api(
         "xsec_token": "",
         "xsec_source": "pc_feed",
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
+    query = urlencode(params, doseq=True)
     full_api = f"{api}?{query}"
 
     # Build signed headers (same pattern as Spider_XHS vendor)
@@ -212,7 +213,7 @@ async def _fetch_notes_fallback(
         "xsec_token": "",
         "xsec_source": "pc_feed",
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
+    query = urlencode(params, doseq=True)
     full_api = f"{api}?{query}"
 
     headers: dict[str, str] = {

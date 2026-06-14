@@ -1,16 +1,3 @@
-"""跨平台评论链统一抽象
-
-各平台通过 ``@register("platform")`` 装饰器注册获取器，handler 只需一行调用::
-
-    from core.comments import fetch_comment_highlights
-
-    highlights = await fetch_comment_highlights(ctx.msg.platform, content_id, ctx.config)
-    ctx.comment_highlights = format_comment_highlights(highlights)
-
-注册的函数签名为 ``fetch_highlights(content_id, config, **kwargs) -> list[CommentHighlight]``，
-``**kwargs`` 透传平台特定参数（如 ``author_user_id``、``max_count``）。
-"""
-
 from __future__ import annotations
 
 import logging
@@ -18,6 +5,16 @@ from typing import Any, Callable
 
 from shared.config import Config
 from shared.protocols import CommentHighlight
+
+# ── 跨平台评论链统一抽象 ──
+# 各平台通过 @register("platform") 装饰器注册获取器，handler 只需一行调用:
+#
+#     from core.comments import fetch_comment_highlights
+#     highlights = await fetch_comment_highlights(ctx.msg.platform, content_id, ctx.config)
+#     ctx.comment_highlights = format_comment_highlights(highlights)
+#
+# 注册的函数签名为 fetch_highlights(content_id, config, **kwargs) -> list[CommentHighlight]，
+# **kwargs 透传平台特定参数（如 author_user_id、max_count）。
 
 logger = logging.getLogger(__name__)
 
@@ -87,4 +84,7 @@ def _load_platform(platform: str) -> None:
         return
     import importlib
 
-    importlib.import_module(module_path)
+    try:
+        importlib.import_module(module_path)
+    except Exception as e:
+        logger.warning("Failed to import comment module for %s: %s", platform, e)

@@ -10,6 +10,7 @@ import logging
 import os
 import random
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -294,10 +295,15 @@ async def _fetch_sec_cookies(session: Any, cookies: dict[str, str]) -> dict[str,
 # ═══════════════════════════════════════════════════════════
 
 _VENDOR_DIR = str(Path(__file__).resolve().parent.parent.parent / "vendor" / "spider_xhs")
+_VENDOR_LOCK = threading.Lock()
 
 
 def _vendor_setup() -> None:
-    """设置 vendor 模块的导入路径和 Node.js 搜索路径。"""
+    """设置 vendor 模块的导入路径和 Node.js 搜索路径。
+
+    注：NODE_PATH/LOGURU_LEVEL 不在 shared/config.py 中集中配置，因为这是 vendor 模块的
+    运行基础设施而非业务配置。VENDOR_DIR 从代码路径计算，不适用预配置模式。
+    """
     if _VENDOR_DIR not in sys.path:
         sys.path.insert(0, _VENDOR_DIR)
     os.environ["NODE_PATH"] = os.path.join(_VENDOR_DIR, "node_modules")
@@ -308,11 +314,12 @@ def _vendor_call(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """在 vendor 目录上下文中执行函数（设置 cwd + path，完成后恢复）。"""
     _vendor_setup()
     old_cwd = os.getcwd()
-    os.chdir(_VENDOR_DIR)
-    try:
-        return func(*args, **kwargs)
-    finally:
-        os.chdir(old_cwd)
+    with _VENDOR_LOCK:
+        os.chdir(_VENDOR_DIR)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            os.chdir(old_cwd)
 
 
 def _vendor_init_qr() -> dict:
@@ -350,16 +357,20 @@ def _vendor_check_status(poll_data: dict) -> tuple[bool, str, dict]:
     )
 
 
-def _vendor_poll_login(init_data: dict) -> dict:
+def _vendor_poll_login(init_data: dict, deadline: float = 0.0) -> dict:
     """同步：通过 vendor XHSLoginApi 完整轮询 + 验证。
 
     循环轮询直至成功或过期。成功后调用 get_user_info 验证。
+
+    Args:
+        init_data: QR 初始化数据（cookies, qr_id, code）
+        deadline: 截止时间（time.monotonic()），0 表示无限制
 
     Returns:
         最终 cookies dict（含 web_session）
 
     Raises:
-        QRExpiredError: 二维码过期
+        QRExpiredError: 二维码过期或轮询超时
     """
     from apis.xhs_pc_login_apis import XHSLoginApi
 
@@ -369,6 +380,8 @@ def _vendor_poll_login(init_data: dict) -> dict:
     code = init_data["code"]
 
     while True:
+        if deadline > 0 and time.monotonic() > deadline:
+            raise QRExpiredError("二维码轮询超时")
         success, msg, cookies = api.check_qrcode_status(qr_id, code, cookies)
         if success:
             break
@@ -457,7 +470,8 @@ class XhsAuthenticator(BaseAuthenticator):
         display_qr_in_terminal(init_data["qr_url"])
 
         # ── Step 3: 轮询 + 获取 session（在 thread 中运行） ──
-        cookies = await asyncio.to_thread(_vendor_call, _vendor_poll_login, init_data)
+        deadline = time.monotonic() + 180
+        cookies = await asyncio.to_thread(_vendor_call, _vendor_poll_login, init_data, deadline)
 
         now = time.time()
         return PlatformTokens(
