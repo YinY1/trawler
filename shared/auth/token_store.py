@@ -1,4 +1,4 @@
-"""Credential persistence — updates only the [platform.auth] section of a TOML config."""
+"""Credential persistence — updates the [platform.auth] section in cookies.toml."""
 
 from __future__ import annotations
 
@@ -6,23 +6,27 @@ from pathlib import Path
 
 import tomlkit
 
+COOKIES_FILENAME = "cookies.toml"
+
 
 def update_auth_section(config_path: str | Path, platform: str, auth_dict: dict) -> None:
-    """Update only the [platform.auth] section in config.toml, preserving all other content.
+    """Update only the [platform.auth] section in cookies.toml, preserving all other content.
+
+    The target file is ``cookies.toml`` in the same directory as ``config_path``.
+    If the file does not exist, it will be created.
 
     Args:
-        config_path: Path to config.toml
+        config_path: Base config path (used to derive directory for cookies.toml)
         platform: Platform name ("bilibili" | "xiaohongshu" | "weibo")
         auth_dict: Key-value pairs to update in [platform.auth]
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
     """
     p = Path(config_path)
-    if not p.exists():
-        raise FileNotFoundError(f"Config file not found: {p}")
+    cookies_path = p.with_name(COOKIES_FILENAME)
 
-    doc = tomlkit.parse(p.read_text(encoding="utf-8"))
+    if cookies_path.exists():
+        doc = tomlkit.parse(cookies_path.read_text(encoding="utf-8"))
+    else:
+        doc = tomlkit.document()
 
     # Ensure platform table exists
     if platform not in doc:
@@ -38,4 +42,4 @@ def update_auth_section(config_path: str | Path, platform: str, auth_dict: dict)
     for key, value in auth_dict.items():
         auth_table[key] = value
 
-    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    cookies_path.write_text(tomlkit.dumps(doc), encoding="utf-8")

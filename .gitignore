@@ -31,7 +31,9 @@ Thumbs.db
 data/
 
 # Configuration (contains credentials)
-config.toml
+config/config.toml
+config/cookies.toml
+config/subscriptions.toml
 
 # Debug artifacts
 transcripts/

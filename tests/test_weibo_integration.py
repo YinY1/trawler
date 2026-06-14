@@ -60,11 +60,11 @@ def _require_tokens():
 
 def _require_config() -> Config:
     """Load config; skip if weibo not enabled or no cookie."""
-    config = load_config("config.toml")
+    config = load_config("config/config.toml")
     if not config.weibo.enabled:
-        pytest.skip("Weibo not enabled in config.toml")
+        pytest.skip("Weibo not enabled in config/config.toml")
     if not config.weibo.auth.cookie:
-        pytest.skip("No weibo cookie in config.toml. Run: trawler login --platform weibo")
+        pytest.skip("No weibo cookie in config/config.toml. Run: trawler login --platform weibo")
     return config
 
 

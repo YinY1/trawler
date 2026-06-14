@@ -42,7 +42,7 @@ def get_credential(config: Config):
 class BilibiliAuthenticator(BaseAuthenticator):
     """B站 QR 扫码登录 + Cookie 续期"""
 
-    def __init__(self, config_path: str = "config.toml") -> None:
+    def __init__(self, config_path: str = "config/config.toml") -> None:
         self._config_path = config_path
         self._last_ac_time_value: str = ""
         self._saved_cookies: dict[str, str] = {}

@@ -58,7 +58,9 @@ def should_renew(
 logger = logging.getLogger(__name__)
 
 
-async def check_and_renew_tokens(platform: str, config: Config, config_path: str = "config.toml") -> RenewalResult:
+async def check_and_renew_tokens(
+    platform: str, config: Config, config_path: str = "config/config.toml"
+) -> RenewalResult:
     """Check platform tokens and renew if needed.
 
     Called at the start of each trawler check run.
@@ -130,7 +132,7 @@ def _build_tokens_from_config(platform: str, config: Config) -> PlatformTokens |
 
 
 def _get_authenticator_for_platform(
-    platform: str, config: Config, config_path: str = "config.toml"
+    platform: str, config: Config, config_path: str = "config/config.toml"
 ) -> BaseAuthenticator | None:
     """Get authenticator instance for the given platform."""
     if platform == "bilibili":
