@@ -51,8 +51,8 @@ def get_authenticator(platform: str) -> BaseAuthenticator:
     raise ValueError(f"Unsupported platform: {platform}")
 
 
-def update_auth_section(platform: str, auth_dict: dict, config_path: str = "config.toml") -> None:
-    """Update [platform.auth] section in config.toml."""
+def update_auth_section(platform: str, auth_dict: dict, config_path: str = "config/config.toml") -> None:
+    """Update [platform.auth] section in cookies.toml (derived from config_path)."""
     from shared.auth.token_store import update_auth_section as _update
 
     table = _PLATFORM_TABLE.get(platform, platform)

@@ -70,7 +70,7 @@ async def run_weibo_check_once(config: Config, from_phase: Phase | None = None) 
 async def run_check_once(
     config: Config,
     platform: str = "all",
-    config_path: str = "config.toml",
+    config_path: str = "config/config.toml",
     from_phase: str | None = None,
 ) -> None:
     """统一检查入口

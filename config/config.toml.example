@@ -1,10 +1,8 @@
 # ═══════════════════════════════════════════════════════════════════
 # Trawler 配置文件 — 复制为 config.toml 并根据需要修改
 #
-# ⚠️ 从旧版 config.yaml 迁移的用户：请手动将配置迁移到此格式。
-#    旧格式已不再支持。参考此文件创建新的 config.toml。
-# 提示：使用 `trawler login --platform bili` 可通过扫码快速登录 B 站，
-#        自动填充 [bilibili.auth] 部分。
+# 平台凭证（Cookie）请编辑 cookies.toml（参考 cookies.toml.example）
+# 订阅列表请编辑 subscriptions.toml（参考 subscriptions.toml.example）
 # ═══════════════════════════════════════════════════════════════════
 
 # ── 通用设置 ─────────────────────────────────────────────────────
@@ -62,18 +60,8 @@ model_name = ""
 # B 站（Bilibili）配置
 # ══════════════════════════════════════════════════════════════════
 
-[bilibili.auth]
-# B 站登录 Cookie 凭据 — 推荐使用 trawler login --platform bili 扫码登录
-# 手动填写方法：浏览器登录 B 站后从 Cookie 中提取以下字段
-sessdata = ""
-bili_jct = ""
-buvid3 = ""
-dedeuserid = ""
-ac_time_value = ""
-# 上次刷新尝试的时间戳（Unix 时间戳，0 表示未尝试过）
-last_refresh_at = 0
-# 登录过期时间（Unix 时间戳，0 表示未知）
-expires_at = 0
+# 登录凭证请编辑 cookies.toml（[bilibili.auth]）
+# 订阅列表请编辑 subscriptions.toml（[[bilibili.subscriptions]]）
 
 [bilibili.monitor]
 # 监控模式：rss（通过 RSSHub）或 dynamic（通过动态 API）
@@ -90,12 +78,6 @@ rsshub_instances = [
     "https://rsshub.liumingye.cn",
     "https://rss.shab.fun",
 ]
-
-# 每个 [[bilibili.subscriptions]] 代表一个订阅的 UP 主
-# 取消注释并添加 UP 主的 UID 和名称：
-# [[bilibili.subscriptions]]
-# uid = 123456
-# name = "示例UP主"
 
 [bilibili.notification]
 # 是否启用新视频通知
@@ -115,22 +97,14 @@ priority = 5
 # 是否启用小红书监控（需要额外安装 xhs 依赖）
 enabled = false
 
-[xiaohongshu.auth]
-# 小红书登录 Cookie（从浏览器中提取）
-cookie = ""
-# Cookie 过期时间（Unix 时间戳，0 表示未知）
-expires_at = 0
+# 登录凭证请编辑 cookies.toml（[xiaohongshu.auth]）
+# 订阅列表请编辑 subscriptions.toml（[[xiaohongshu.subscriptions]]）
 
 [xiaohongshu.monitor]
 # 监控模式：api / rss
 mode = "api"
 # 检查间隔（分钟）
 interval_minutes = 10
-
-# 每个 [[xiaohongshu.subscriptions]] 代表一个订阅的用户
-[[xiaohongshu.subscriptions]]
-user_id = ""
-name = ""
 
 [xiaohongshu.notification]
 enabled = true
@@ -146,22 +120,14 @@ priority = 5
 # 是否启用微博监控
 enabled = false
 
-[weibo.auth]
-# 微博登录 Cookie（从浏览器中提取）
-cookie = ""
-# Cookie 过期时间（Unix 时间戳，0 表示未知）
-expires_at = 0
+# 登录凭证请编辑 cookies.toml（[weibo.auth]）
+# 订阅列表请编辑 subscriptions.toml（[[weibo.subscriptions]]）
 
 [weibo.monitor]
 # 监控模式：api / rss
 mode = "api"
 # 检查间隔（分钟）
 interval_minutes = 10
-
-# 每个 [[weibo.subscriptions]] 代表一个订阅的用户
-[[weibo.subscriptions]]
-user_id = ""
-name = ""
 
 [weibo.notification]
 enabled = true

@@ -305,8 +305,14 @@ def _apply_env_overrides(cfg: Config) -> None:
         cfg.analysis.api_base = v
 
 
-def load_config(path: str | Path = "config.toml") -> Config:
-    """从 TOML 文件加载配置并应用环境变量覆盖"""
+def load_config(path: str | Path = "config/config.toml") -> Config:
+    """从 TOML 文件加载配置并应用环境变量覆盖。
+
+    配置从三个文件合并加载（均位于 ``config/`` 目录下）：
+    - ``config/config.toml``: 基础配置
+    - ``config/cookies.toml``: 平台登录凭证
+    - ``config/subscriptions.toml``: 订阅列表
+    """
     p = Path(path)
 
     # 检测旧版 config.yaml 并给出迁移提示
@@ -316,18 +322,41 @@ def load_config(path: str | Path = "config.toml") -> Config:
 
         warnings.warn(
             f"检测到旧的配置文件 {yaml_path}，但新版使用 TOML 格式。\n"
-            f"请参考 config.toml.example 创建 {path} 并迁移配置。",
+            f"请参考 config/config.toml.example 创建配置文件。",
             UserWarning,
             stacklevel=2,
         )
 
-    if not p.exists():
-        cfg = Config()
-        _apply_env_overrides(cfg)
-        return cfg
+    raw: dict = {}
 
-    with open(p, "rb") as f:
-        raw: dict = tomllib.load(f)
+    # ── 1. 加载基础配置 ────────────────────────────────────────
+    if p.exists():
+        with open(p, "rb") as f:
+            raw = tomllib.load(f)
+
+    # ── 2. 合并凭证配置（config/cookies.toml）────────────────
+    cookies_path = p.with_name("cookies.toml")
+    if cookies_path.exists():
+        with open(cookies_path, "rb") as f:
+            cookies_raw: dict = tomllib.load(f)
+        for _platform in ("bilibili", "xiaohongshu", "weibo"):
+            _entry = cookies_raw.get(_platform)
+            if isinstance(_entry, dict) and "auth" in _entry:
+                if _platform not in raw:
+                    raw[_platform] = {}
+                raw[_platform]["auth"] = _entry["auth"]
+
+    # ── 3. 合并订阅列表（config/subscriptions.toml）──────────
+    subs_path = p.with_name("subscriptions.toml")
+    if subs_path.exists():
+        with open(subs_path, "rb") as f:
+            subs_raw: dict = tomllib.load(f)
+        for _platform in ("bilibili", "xiaohongshu", "weibo"):
+            _entry = subs_raw.get(_platform)
+            if isinstance(_entry, dict) and "subscriptions" in _entry:
+                if _platform not in raw:
+                    raw[_platform] = {}
+                raw[_platform]["subscriptions"] = _entry["subscriptions"]
 
     cfg = _parse_config(raw)
     _apply_env_overrides(cfg)

@@ -43,9 +43,7 @@ def setup_logging(verbose: bool = False, log_dir: str = "data") -> None:
     # 文件 handler（轮转：5MB × 3 个备份）
     log_path = Path(log_dir) / "trawler.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = RotatingFileHandler(
-        str(log_path), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
-    )
+    file_handler = RotatingFileHandler(str(log_path), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
     file_handler.setLevel(log_level)
     file_handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
     root.addHandler(file_handler)
@@ -126,7 +124,7 @@ def token_status() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
-    config = load_config("config.toml")
+    config = load_config("config/config.toml")
 
     table = Table(title="Token 状态")
     table.add_column("平台", style="bold")
@@ -183,7 +181,7 @@ def token_refresh(platform: str | None, refresh_all: bool, force: bool) -> None:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
 
-    config = load_config("config.toml")
+    config = load_config("config/config.toml")
 
     if refresh_all:
         targets = [p for p in ["bili", "xhs", "weibo"] if _is_platform_configured(p, config, force)]
@@ -340,7 +338,7 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
 @click.option(
     "--config",
     "config_path",
-    default="config.toml",
+    default="config/config.toml",
     show_default=True,
     help="配置文件路径",
 )

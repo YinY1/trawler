@@ -38,7 +38,7 @@ def test_check_help(runner: CliRunner) -> None:
     assert "bili" in result.output
     assert "xhs" in result.output
     assert "weibo" in result.output
-    assert "config.toml" in result.output
+    assert "config/config.toml" in result.output
     assert "--from-phase" in result.output
 
 

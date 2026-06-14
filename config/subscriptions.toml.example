@@ -1,0 +1,25 @@
+# ═══════════════════════════════════════════════════════════════════
+# Trawler 订阅列表 — 复制为 subscriptions.toml 并根据需要修改
+# ═══════════════════════════════════════════════════════════════════
+
+# ── B 站（Bilibili） ────────────────────────────────────────────
+# 每个 [[bilibili.subscriptions]] 代表一个订阅的 UP 主
+# 取消注释并添加 UP 主的 UID 和名称：
+
+# [[bilibili.subscriptions]]
+# uid = 123456
+# name = "示例UP主"
+
+# ── 小红书（Xiaohongshu） ───────────────────────────────────────
+# 每个 [[xiaohongshu.subscriptions]] 代表一个订阅的用户
+
+# [[xiaohongshu.subscriptions]]
+# user_id = ""
+# name = ""
+
+# ── 微博（Weibo） ───────────────────────────────────────────────
+# 每个 [[weibo.subscriptions]] 代表一个订阅的用户
+
+# [[weibo.subscriptions]]
+# user_id = ""
+# name = ""

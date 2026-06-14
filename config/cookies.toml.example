@@ -1,0 +1,36 @@
+# ═══════════════════════════════════════════════════════════════════
+# Trawler 平台登录凭证 — 复制为 cookies.toml 并根据需要修改
+#
+# 推荐使用 `trawler login --platform <name>` 登录后自动填充此文件。
+# ═══════════════════════════════════════════════════════════════════
+
+# ── B 站（Bilibili） ────────────────────────────────────────────
+# 推荐使用 trawler login --platform bili 扫码登录
+# 手动填写方法：浏览器登录 B 站后从 Cookie 中提取以下字段
+
+[bilibili.auth]
+sessdata = ""
+bili_jct = ""
+buvid3 = ""
+dedeuserid = ""
+ac_time_value = ""
+# 上次刷新尝试的时间戳（Unix 时间戳，0 表示未尝试过）
+last_refresh_at = 0
+# 登录过期时间（Unix 时间戳，0 表示未知）
+expires_at = 0
+
+# ── 小红书（Xiaohongshu） ───────────────────────────────────────
+
+[xiaohongshu.auth]
+# 小红书登录 Cookie（从浏览器中提取）
+cookie = ""
+# Cookie 过期时间（Unix 时间戳，0 表示未知）
+expires_at = 0
+
+# ── 微博（Weibo） ───────────────────────────────────────────────
+
+[weibo.auth]
+# 微博登录 Cookie（从浏览器中提取）
+cookie = ""
+# Cookie 过期时间（Unix 时间戳，0 表示未知）
+expires_at = 0

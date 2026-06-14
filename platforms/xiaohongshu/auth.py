@@ -73,7 +73,7 @@ def get_xhs_cookie(config: Config) -> str:
         return cookie.strip()
 
     logger.warning("未配置小红书 Cookie，API 请求可能失败")
-    console.print("[yellow]⚠ 未配置小红书 Cookie，请在 config.toml 或环境变量 XHS_COOKIE 中设置[/yellow]")
+    console.print("[yellow]⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 XHS_COOKIE 中设置[/yellow]")
     return ""
 
 
@@ -352,9 +352,7 @@ def _vendor_check_status(poll_data: dict) -> tuple[bool, str, dict]:
     from apis.xhs_pc_login_apis import XHSLoginApi
 
     api = XHSLoginApi()
-    return api.check_qrcode_status(
-        poll_data["qr_id"], poll_data["code"], dict(poll_data["cookies"])
-    )
+    return api.check_qrcode_status(poll_data["qr_id"], poll_data["code"], dict(poll_data["cookies"]))
 
 
 def _vendor_poll_login(init_data: dict, deadline: float = 0.0) -> dict:
@@ -430,7 +428,9 @@ class XhsAuthenticator(BaseAuthenticator):
         }
         try:
             success, msg, cookies = await asyncio.to_thread(
-                _vendor_call, _vendor_check_status, poll_data,
+                _vendor_call,
+                _vendor_check_status,
+                poll_data,
             )
             self._vendor_cookies = cookies
         except Exception as e:
@@ -458,7 +458,8 @@ class XhsAuthenticator(BaseAuthenticator):
         )
 
     async def qr_login(
-        self, on_status: Callable[[AuthStatus], None] | None = None,
+        self,
+        on_status: Callable[[AuthStatus], None] | None = None,
     ) -> PlatformTokens:
         """使用 vendor XHSLoginApi 完成 QR 扫码登录全流程。"""
         _ = on_status  # vendor 内部自行处理状态
@@ -507,7 +508,7 @@ class XhsAuthenticator(BaseAuthenticator):
         if tokens.expires_at < time.time():
             return False
         session = await self._ensure_session()
-        cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items() )
+        cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         a1 = tokens.cookies.get("a1", "")
         try:
             from platforms.xiaohongshu.signer import get_xhs_sign
