@@ -22,17 +22,15 @@ console = Console()
 
 
 def setup_logging(verbose: bool = False, log_dir: str = "data") -> None:
-    """配置日志：控制台 + 文件轮转。
+    """配置日志：控制台 + 文件轮转（幂等，重复调用不叠加 handler）。"""
+    root = logging.getLogger()
+    if root.handlers:
+        return  # 已配置，幂等跳过
 
-    Args:
-        verbose: 为 True 时日志级别为 DEBUG，否则 INFO
-        log_dir: 日志文件目录
-    """
     log_level = logging.DEBUG if verbose else logging.INFO
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     datefmt = "%H:%M:%S"
 
-    root = logging.getLogger()
     root.setLevel(log_level)
 
     # 控制台 handler
@@ -338,14 +336,15 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
 )
 def check(platform: str, config_path: str, verbose: bool, from_phase: str | None) -> None:
     """检查各平台新内容"""
-    setup_logging(verbose=verbose)
-    if verbose:
-        console.print("[dim]调试模式已启用[/]")
     try:
         config = load_config(config_path)
     except Exception as exc:
         console.print(f"[red]✗ 配置加载失败: {exc}[/]")
         sys.exit(1)
+
+    setup_logging(verbose=verbose, log_dir=config.general.data_dir)
+    if verbose:
+        console.print("[dim]调试模式已启用[/]")
     try:
         asyncio.run(run_check_once(config, platform, config_path, from_phase=from_phase))
     except KeyboardInterrupt:
