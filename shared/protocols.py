@@ -163,9 +163,7 @@ class DownloadResult:
     filepath: Optional[Path] = None
     error: Optional[str] = None
     access_limited: bool = False
-
-
-access_note: str = ""
+    access_note: str = ""
 
 
 @dataclass

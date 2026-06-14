@@ -225,7 +225,29 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
 
 @PipelineEngine.register("bili", Phase.PUSHED)
 async def bili_push(ctx: PhaseContext) -> bool:
-    """推送 B站视频通知。"""
+    """推送 B站通知（视频 / 动态）。"""
+    if ctx.msg.content_type == ContentType.DYNAMIC:
+        from core.notifier import notify_dynamic
+
+        console.print("  [dim]🔔 推送动态通知...[/]")
+        dynamic_id = ctx.msg.msg_id.replace("bili_dyn:", "")
+        try:
+            await notify_dynamic(
+                dynamic_info={
+                    "user": ctx.msg.author,
+                    "content": ctx.summary_text or ctx.msg.title,
+                    "dynamic_id": dynamic_id,
+                    "type": "动态",
+                    "url": f"https://t.bilibili.com/{dynamic_id}",
+                },
+                config=ctx.config.bilibili.notification,
+            )
+            console.print("  [green]✓ 动态通知推送完成[/]")
+        except Exception as exc:
+            console.print(f"  [yellow]⚠️  动态通知推送失败: {exc}[/]")
+            logger.warning("Dynamic notify failed for %s: %s", ctx.msg.msg_id, exc)
+        return True
+
     bvid = ctx.msg.msg_id.replace("bili:", "")
     console.print("  [dim]🔔 推送通知...[/]")
 
@@ -250,31 +272,5 @@ async def bili_push(ctx: PhaseContext) -> bool:
         except Exception as exc:
             console.print(f"  [yellow]⚠️  媒体清理失败: {exc}[/]")
             logger.warning("Cleanup failed for %s: %s", bvid, exc)
-
-    return True
-
-
-@PipelineEngine.register("bili_dynamic", Phase.PUSHED)
-async def bili_dynamic_push(ctx: PhaseContext) -> bool:
-    """推送 B站动态通知。"""
-    from core.notifier import notify_dynamic
-
-    console.print("  [dim]🔔 推送动态通知...[/]")
-
-    try:
-        await notify_dynamic(
-            dynamic_info={
-                "user": ctx.msg.author,
-                "content": ctx.summary_text or ctx.msg.title,
-                "dynamic_id": ctx.msg.msg_id.replace("bili_dyn:", ""),
-                "type": "动态",
-                "url": f"https://t.bilibili.com/{ctx.msg.msg_id.replace('bili_dyn:', '')}",
-            },
-            config=ctx.config.bilibili.notification,
-        )
-        console.print("  [green]✓ 动态通知推送完成[/]")
-    except Exception as exc:
-        console.print(f"  [yellow]⚠️  动态通知推送失败: {exc}[/]")
-        logger.warning("Dynamic notify failed for %s: %s", ctx.msg.msg_id, exc)
 
     return True
