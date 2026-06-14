@@ -36,6 +36,20 @@ def _sample_tokens(**cookie_overrides: str) -> PlatformTokens:
     )
 
 
+def _mock_resp(
+    status: int = 200,
+    json_data: dict | None = None,
+    set_cookie: list[str] | None = None,
+) -> MagicMock:
+    resp = MagicMock()
+    resp.status = status
+    if json_data is not None:
+        resp.json = AsyncMock(return_value=json_data)
+    resp.headers = MagicMock()
+    resp.headers.getall.return_value = set_cookie or []
+    return resp
+
+
 # ── WeiboAuthenticator.generate_qr_code ────────────────────
 
 
@@ -46,7 +60,7 @@ class TestGenerateQrCode:
         mock_resp = MagicMock()
         mock_resp.status = 200
 
-        async def json_side() -> dict:
+        async def json_side(*args, **kwargs) -> dict:
             return {"data": {"qrid": "qr_abc123", "image": "data:image/png;base64,..."}}
 
         mock_resp.json = AsyncMock(side_effect=json_side)
@@ -82,7 +96,7 @@ class TestGenerateQrCodeApiError:
         mock_resp = MagicMock()
         mock_resp.status = 200
 
-        async def json_side() -> dict:
+        async def json_side(*args, **kwargs) -> dict:
             return {"data": {}}
 
         mock_resp.json = AsyncMock(side_effect=json_side)
@@ -100,18 +114,19 @@ class TestGenerateQrCodeApiError:
 
 
 class TestPollQrStatus:
+    _RETCODE_MAP: dict[str, tuple[int, QRStatus, bool]] = {
+        "waiting": (50114001, QRStatus.WAITING, False),
+        "scanned": (50114002, QRStatus.SCANNED, False),
+        "success": (20000000, QRStatus.SUCCESS, True),
+        "expired": (50114004, QRStatus.EXPIRED, False),
+    }
+
     @pytest.mark.asyncio
     async def test_waiting(self):
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-
-        async def json_side() -> dict:
-            return {"data": {"status": 0}}  # 0 = waiting
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        mock = _mock_resp(json_data={"retcode": 50114001})
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=mock)
 
         with patch("shared.http.get_session", return_value=mock_session):
             status = await auth.poll_qr_status("qr_abc")
@@ -122,15 +137,9 @@ class TestPollQrStatus:
     @pytest.mark.asyncio
     async def test_scanned(self):
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-
-        async def json_side() -> dict:
-            return {"data": {"status": 1, "nickname": "测试用户"}}  # 1 = scanned
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        mock = _mock_resp(json_data={"retcode": 50114002, "data": {"nickname": "测试用户"}})
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=mock)
 
         with patch("shared.http.get_session", return_value=mock_session):
             status = await auth.poll_qr_status("qr_abc")
@@ -139,36 +148,11 @@ class TestPollQrStatus:
         assert not status.success
 
     @pytest.mark.asyncio
-    async def test_confirmed(self):
-        auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-
-        async def json_side() -> dict:
-            return {"data": {"status": 2}}  # 2 = confirmed (on phone)
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
-        mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
-
-        with patch("shared.http.get_session", return_value=mock_session):
-            status = await auth.poll_qr_status("qr_abc")
-
-        assert status.status == QRStatus.CONFIRMED
-        assert not status.success
-
-    @pytest.mark.asyncio
     async def test_success(self):
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-
-        async def json_side() -> dict:
-            return {"data": {"status": 3}}  # 3 = success (redirect with cookies)
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        mock = _mock_resp(json_data={"retcode": 20000000, "data": {"alt": "ST-xxx"}})
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=mock)
 
         with patch("shared.http.get_session", return_value=mock_session):
             status = await auth.poll_qr_status("qr_abc")
@@ -179,15 +163,9 @@ class TestPollQrStatus:
     @pytest.mark.asyncio
     async def test_expired(self):
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-
-        async def json_side() -> dict:
-            return {"data": {"status": 4}}  # 4 = expired
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        mock = _mock_resp(json_data={"retcode": 50114004})
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=mock)
 
         with patch("shared.http.get_session", return_value=mock_session):
             status = await auth.poll_qr_status("qr_abc")
@@ -198,13 +176,36 @@ class TestPollQrStatus:
     @pytest.mark.asyncio
     async def test_bad_status_returns_waiting(self):
         auth = WeiboAuthenticator()
+        mock = _mock_resp(json_data={"retcode": 99999})  # Unknown retcode
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock)
+
+        with patch("shared.http.get_session", return_value=mock_session):
+            status = await auth.poll_qr_status("qr_abc")
+
+        assert status.status == QRStatus.WAITING
+        assert not status.success
+
+    @pytest.mark.asyncio
+    async def test_non_json_response(self):
+        auth = WeiboAuthenticator()
         mock_resp = MagicMock()
         mock_resp.status = 200
+        mock_resp.json = AsyncMock(side_effect=Exception("not json"))
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
 
-        async def json_side() -> dict:
-            return {"data": {"status": 999}}  # Unknown status
+        with patch("shared.http.get_session", return_value=mock_session):
+            status = await auth.poll_qr_status("qr_abc")
 
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        assert status.status == QRStatus.WAITING
+        assert not status.success
+
+    @pytest.mark.asyncio
+    async def test_http_error_returns_waiting(self):
+        auth = WeiboAuthenticator()
+        mock_resp = MagicMock()
+        mock_resp.status = 500
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
@@ -222,23 +223,24 @@ class TestGetTokens:
     @pytest.mark.asyncio
     async def test_returns_platform_tokens(self):
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.headers = MagicMock()
-        mock_resp.headers.get.return_value = None  # default
-        mock_resp.headers.getall.return_value = [
-            "SUB=fake_sub; Path=/; Domain=.weibo.com; HttpOnly",
-            "SUBP=fake_subp; Path=/; Domain=.weibo.com",
-            "WBPSESS=fake_wbpsess; Path=/; Domain=.weibo.com",
-            "SSOLoginState=1735689600; Path=/; Domain=.weibo.com",
-        ]
-
-        async def json_side() -> dict:
-            return {"data": {"status": 3, "nickname": "测试用户"}}
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        # Pre-populate last check data (as poll_qr_status would)
+        auth._last_check_data = {
+            "retcode": 20000000,
+            "data": {"url": "https://passport.weibo.com/sso/v2/login?alt=TEST-ALT"},
+        }
+        # Mock the login URL call
+        login_resp = _mock_resp(
+            status=200,
+            json_data={"retcode": 20000000},
+            set_cookie=[
+                "SUB=fake_sub; Path=/; Domain=.weibo.com; HttpOnly",
+                "SUBP=fake_subp; Path=/; Domain=.weibo.com",
+                "WBPSESS=fake_wbpsess; Path=/; Domain=.weibo.com",
+                "SSOLoginState=1735689600; Path=/; Domain=.weibo.com",
+            ],
+        )
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=login_resp)
 
         with patch("shared.http.get_session", return_value=mock_session):
             tokens = await auth.get_tokens("qr_abc")
@@ -251,38 +253,72 @@ class TestGetTokens:
         assert tokens.expires_at > time.time()
 
     @pytest.mark.asyncio
-    async def test_raises_when_not_success(self):
+    async def test_raises_when_no_check_data(self):
+        """No _last_check_data → raise."""
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
+        auth._last_check_data = None
 
-        async def json_side() -> dict:
-            return {"data": {"status": 2}}  # confirmed, not yet success
+        with pytest.raises(RefreshFailedError, match="无可用响应数据"):
+            await auth.get_tokens("qr_abc")
 
-        mock_resp.json = AsyncMock(side_effect=json_side)
+    @pytest.mark.asyncio
+    async def test_raises_when_retcode_not_success(self):
+        auth = WeiboAuthenticator()
+        auth._last_check_data = {"retcode": 50114002}  # scanned, not success
+
+        with pytest.raises(RefreshFailedError, match="二维码未成功登录"):
+            await auth.get_tokens("qr_abc")
+
+    @pytest.mark.asyncio
+    async def test_raises_when_no_url_and_no_set_cookie(self):
+        """No url in response and no Set-Cookie from fallback → raise."""
+        auth = WeiboAuthenticator()
+        auth._last_check_data = {
+            "retcode": 20000000,
+            "data": {"status": 3},  # no url
+        }
+        # Fallback /check returns no Set-Cookie
+        fallback_resp = _mock_resp(status=302, set_cookie=[])
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=fallback_resp)
 
         with (
             patch("shared.http.get_session", return_value=mock_session),
-            pytest.raises(RefreshFailedError, match="二维码未确认"),
+            pytest.raises(RefreshFailedError, match="未获取到 Cookie"),
         ):
             await auth.get_tokens("qr_abc")
 
     @pytest.mark.asyncio
-    async def test_raises_on_missing_set_cookie(self):
+    async def test_fallback_to_redirect_cookies(self):
+        """No url, but /check (with allow_redirects=False) returns Set-Cookie."""
         auth = WeiboAuthenticator()
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.headers = MagicMock()
-        mock_resp.headers.getall.return_value = []  # No Set-Cookie
-
-        async def json_side() -> dict:
-            return {"data": {"status": 3}}
-
-        mock_resp.json = AsyncMock(side_effect=json_side)
+        auth._last_check_data = {
+            "retcode": 20000000,
+            "data": {"status": 3},  # no url
+        }
+        fallback_resp = _mock_resp(
+            status=302,
+            set_cookie=["SUB=fallback_sub; Path=/; Domain=.weibo.com"],
+        )
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = AsyncMock(return_value=fallback_resp)
+
+        with patch("shared.http.get_session", return_value=mock_session):
+            tokens = await auth.get_tokens("qr_abc")
+
+        assert tokens.cookies["SUB"] == "fallback_sub"
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_set_cookie_with_url(self):
+        """url exists but login URL returns no Set-Cookie."""
+        auth = WeiboAuthenticator()
+        auth._last_check_data = {
+            "retcode": 20000000,
+            "data": {"url": "https://passport.weibo.com/sso/v2/login?alt=TEST"},
+        }
+        login_resp = _mock_resp(status=200, set_cookie=[])
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=login_resp)
 
         with (
             patch("shared.http.get_session", return_value=mock_session),

@@ -11,6 +11,7 @@ import logging
 from rich.console import Console
 
 from core.engine import PipelineEngine
+from core.formatter import format_comment_highlights
 from core.notifier import notify_new_weibo_post
 from core.summarizer import extract_keywords, generate_summary
 from platforms.weibo.api import fetch_user_posts
@@ -49,21 +50,6 @@ async def weibo_detector(config: Config, store: MessageStore) -> None:
 
 
 # -- Phase: DOWNLOADED -------------------------------------------
-
-
-def _format_weibo_comment_highlights(highlights: list) -> str:
-    """格式化微博评论亮点为 Markdown。"""
-    if not highlights:
-        return ""
-    parts: list[str] = []
-    for h in highlights:
-        name = getattr(h, "user_name", "匿名")
-        content = getattr(h, "content", "")
-        like = getattr(h, "like_count", 0)
-        is_author = getattr(h, "is_author", False)
-        tag = " (作者)" if is_author else ""
-        parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
-    return "\n".join(parts)
 
 
 @PipelineEngine.register("weibo", Phase.DOWNLOADED)
@@ -142,7 +128,7 @@ async def weibo_download(ctx: PhaseContext) -> bool:
             post_id=post_id,
             config=ctx.config,
         )
-        ctx.comment_highlights = _format_weibo_comment_highlights(highlights)
+        ctx.comment_highlights = format_comment_highlights(highlights)
         if highlights:
             console.print(f"  [dim]💬 获取到 {len(highlights)} 条热门评论[/]")
     except Exception as exc:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 import time
@@ -71,7 +72,16 @@ def login(platform: str) -> None:
 
     try:
         authenticator = get_authenticator(platform)
-        tokens = asyncio.run(authenticator.qr_login())
+
+        def _on_status(status):
+            from shared.auth.base import QRStatus
+            if status.status == QRStatus.SCANNED:
+                print("  ✓ 已扫码，请在手机上确认")
+            elif status.status == QRStatus.SUCCESS:
+                print("  ✓ 登录成功")
+
+        print("  等待扫码中...（每 2 秒检测一次）")
+        tokens = asyncio.run(authenticator.qr_login(on_status=_on_status))
         # Weibo stores cookies as a single semicolon-delimited string
         if platform in ("weibo", "xhs"):
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
@@ -83,6 +93,17 @@ def login(platform: str) -> None:
         if platform == "bili" and ac_val:
             auth_dict["ac_time_value"] = ac_val
         update_auth_section(platform, auth_dict)
+        # Save debug tokens JSON for integration tests (avoid re-scan)
+        debug_path = Path("tests") / f"{platform}_debug_tokens.json"
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_data = {
+            "platform": tokens.platform,
+            "cookies": tokens.cookies,
+            "obtained_at": tokens.obtained_at,
+            "expires_at": tokens.expires_at,
+        }
+        debug_path.write_text(json.dumps(debug_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"[dim]🔑 Debug tokens saved to {debug_path}[/]")
         console.print(f"[green]✓ {platform} 登录成功，凭证已保存[/]")
     except QRExpiredError:
         console.print("[red]✗ 二维码已过期，请重试[/]")

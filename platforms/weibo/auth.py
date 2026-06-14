@@ -25,17 +25,18 @@ logger = logging.getLogger(__name__)
 # 微博 QR 登录 API
 QR_IMAGE_URL = "https://passport.weibo.com/sso/v2/qrcode/image?entry=miniblog&size=180"
 QR_CHECK_URL = "https://passport.weibo.com/sso/v2/qrcode/check?entry=miniblog&qrid={qrid}"
+QR_REFERER = "https://passport.weibo.com/"
 
 # Cookie keepalive — 访问微博首页
 KEEPALIVE_URL = "https://weibo.com"
 
-# 微博 QR 状态码映射
-_QR_STATUS_MAP: dict[int, QRStatus] = {
-    0: QRStatus.WAITING,  # 未扫码
-    1: QRStatus.SCANNED,  # 已扫码
-    2: QRStatus.CONFIRMED,  # 已确认（手机端）
-    3: QRStatus.SUCCESS,  # 登录成功
-    4: QRStatus.EXPIRED,  # 已过期
+# 微博 QR 状态 retcode 映射
+# 50114001 = 未扫码, 50114002 = 已扫码待确认, 20000000 = 登录成功, 50114004 = 已过期
+_QR_RETCODE_MAP: dict[int, QRStatus] = {
+    50114001: QRStatus.WAITING,
+    50114002: QRStatus.SCANNED,
+    20000000: QRStatus.SUCCESS,
+    50114004: QRStatus.EXPIRED,
 }
 
 
@@ -100,13 +101,20 @@ def _get_user_agent() -> str:
 class WeiboAuthenticator(BaseAuthenticator):
     """微博 QR 扫码登录 + Cookie Keepalive 续期"""
 
+    def __init__(self) -> None:
+        # 最近一次 poll_qr_status 成功返回的响应数据（retcode=20000000 时保存）
+        self._last_check_data: dict | None = None
+
     # ── BaseAuthenticator 接口 ────────────────────────────
 
     async def generate_qr_code(self) -> QRCodeResult:
         session = await shared.http.get_session()
         resp = await session.get(
             QR_IMAGE_URL,
-            headers={"User-Agent": _get_user_agent()},
+            headers={
+                "User-Agent": _get_user_agent(),
+                "Referer": QR_REFERER,
+            },
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
         try:
@@ -121,7 +129,7 @@ class WeiboAuthenticator(BaseAuthenticator):
             raise RuntimeError("生成二维码失败：未获取到 qrid")
 
         # 构造登录 URL，手机微博 App 扫描此 URL 后触发登录流程
-        qr_url = f"https://passport.weibo.com/sso/v2/qrcode/login?entry=miniblog&qrid={qrid}"
+        qr_url = f"https://passport.weibo.cn/signin/qrcode/scan?qr={qrid}&sinainternalbrowser=topnav&showmenu=0"
         return QRCodeResult(qr_url=qr_url, qr_key=qrid, expires_in=WEIBO_POLL_TIMEOUT)
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
@@ -129,64 +137,103 @@ class WeiboAuthenticator(BaseAuthenticator):
         url = QR_CHECK_URL.format(qrid=qr_key)
         resp = await session.get(
             url,
-            headers={"User-Agent": _get_user_agent()},
+            headers={
+                "User-Agent": _get_user_agent(),
+                "Referer": QR_REFERER,
+            },
             timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
         )
         try:
             if resp.status != 200:
                 logger.warning("轮询二维码状态失败，状态码: %s", resp.status)
                 return AuthStatus(success=False, status=QRStatus.WAITING, message="请求失败")
-            data = await resp.json()
+            try:
+                data = await resp.json(content_type=None)
+            except Exception as json_err:
+                logger.warning("轮询二维码响应非 JSON: %s, 状态码: %s", json_err, resp.status)
+                return AuthStatus(success=False, status=QRStatus.WAITING, message="响应格式错误")
         finally:
             resp.close()
 
-        status_code = data.get("data", {}).get("status", 0)
-        status = _QR_STATUS_MAP.get(status_code, QRStatus.WAITING)
-        nickname = data.get("data", {}).get("nickname", "")
+        if not isinstance(data, dict):
+            logger.warning("轮询二维码响应数据类型异常: %s", type(data).__name__)
+            data = {}
+
+        retcode = data.get("retcode", 0)
+        status = _QR_RETCODE_MAP.get(retcode, QRStatus.WAITING)
+
+        # 保存成功响应，供 get_tokens 直接使用（避免重复请求 /check 导致 ticket 过期）
+        if retcode == 20000000:
+            self._last_check_data = data
+
+        nickname = ""
+        if isinstance(data.get("data"), dict):
+            nickname = data["data"].get("nickname", "")
 
         msg_map: dict[QRStatus, str] = {
             QRStatus.WAITING: "等待扫码",
             QRStatus.SCANNED: f"已扫码 ({nickname})，等待确认" if nickname else "已扫码，等待确认",
-            QRStatus.CONFIRMED: "已确认，即将登录",
             QRStatus.SUCCESS: "登录成功",
             QRStatus.EXPIRED: "二维码已过期",
         }
         return AuthStatus(
             success=status == QRStatus.SUCCESS,
             status=status,
-            message=msg_map.get(status, "未知状态"),
+            message=msg_map.get(status, f"未知状态 (retcode={retcode})"),
         )
 
     async def get_tokens(self, qr_key: str) -> PlatformTokens:
+        """获取登录成功后的 Cookie。
+
+        poll_qr_status 保存的 _last_check_data 包含：
+        - retcode=20000000
+        - data.url: 跨域登录 URL（访问此 URL 获取 Set-Cookie）
+        """
         session = await shared.http.get_session()
-        url = QR_CHECK_URL.format(qrid=qr_key)
-        resp = await session.get(
-            url,
-            headers={"User-Agent": _get_user_agent()},
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        )
-        try:
-            data = await resp.json()
-        finally:
-            resp.close()
-        status_code = data.get("data", {}).get("status", 0)
+        data = self._last_check_data
 
-        if status_code != 3:
-            raise RefreshFailedError("二维码未确认，无法获取 token")
+        if not isinstance(data, dict):
+            raise RefreshFailedError("登录成功但无可用响应数据")
 
-        # 从 Set-Cookie 头提取 cookies（需要重新请求）
-        resp2 = await session.get(
-            url,
-            headers={"User-Agent": _get_user_agent()},
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        )
-        try:
-            set_cookie = resp2.headers.getall("Set-Cookie", [])
-        finally:
-            resp2.close()
+        retcode = data.get("retcode", 0)
+        if retcode != 20000000:
+            raise RefreshFailedError(f"二维码未成功登录 (retcode={retcode})")
 
-        if not set_cookie:
-            raise RefreshFailedError("未获取到 Cookie 响应头")
+        # 从 /check 响应中获取登录 URL
+        login_url = ""
+        if isinstance(data.get("data"), dict):
+            login_url = data["data"].get("url", "")
+        if not login_url:
+            # 降级: 直接请求 /check 尝试捕获 Set-Cookie（如 302 重定向）
+            resp = await session.get(
+                QR_CHECK_URL.format(qrid=qr_key),
+                headers={
+                    "User-Agent": _get_user_agent(),
+                    "Referer": QR_REFERER,
+                },
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                allow_redirects=False,
+            )
+            try:
+                set_cookie = resp.headers.getall("Set-Cookie", [])
+            finally:
+                resp.close()
+            if not set_cookie:
+                raise RefreshFailedError("未获取到 Cookie 响应头")
+        else:
+            # 直接访问登录 URL 获取 Set-Cookie（不跟随重定向，捕获 302 中的 Set-Cookie）
+            resp = await session.get(
+                login_url,
+                headers={"User-Agent": _get_user_agent()},
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                allow_redirects=False,
+            )
+            try:
+                set_cookie = resp.headers.getall("Set-Cookie", [])
+            finally:
+                resp.close()
+            if not set_cookie:
+                raise RefreshFailedError("未获取到 Cookie 响应头")
 
         cookies = _parse_weibo_cookies(set_cookie)
         if "SUB" not in cookies:
@@ -273,8 +320,6 @@ class WeiboAuthenticator(BaseAuthenticator):
 
 def build_tokens_from_config(config: Config) -> PlatformTokens | None:
     """Build PlatformTokens from config.weibo.auth. Returns None if not configured."""
-    import time as _time
-
     auth = config.weibo.auth
     if not auth.cookie or auth.expires_at <= 0:
         return None
@@ -288,6 +333,6 @@ def build_tokens_from_config(config: Config) -> PlatformTokens | None:
     return PlatformTokens(
         platform="weibo",
         cookies=cookie_dict,
-        obtained_at=_time.time(),
+        obtained_at=time.time(),
         expires_at=auth.expires_at,
     )

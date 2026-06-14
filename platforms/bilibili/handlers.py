@@ -11,6 +11,7 @@ import logging
 from rich.console import Console
 
 from core.engine import PipelineEngine
+from core.formatter import format_comment_highlights
 from core.notifier import notify_new_video
 from core.summarizer import extract_keywords, generate_summary
 from core.transcriber import cleanup_media, transcribe_file_async
@@ -72,39 +73,6 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
 
 
 # -- Phase: DOWNLOADED -------------------------------------------
-
-
-def _format_comment_highlights(highlights: list) -> str:
-    """将评论亮点列表格式化为 Markdown 文本。"""
-    if not highlights:
-        return ""
-    parts: list[str] = []
-    for h in highlights:
-        name = getattr(h, "user_name", "匿名")
-        content = getattr(h, "content", "")
-        like = getattr(h, "like_count", 0)
-        is_author = getattr(h, "is_up_owner", False) or getattr(h, "is_author", False)
-        is_pinned = getattr(h, "is_pinned", False)
-        reply_to = getattr(h, "reply_to", "")
-        parent_content = getattr(h, "parent_content", "")
-
-        tags: list[str] = []
-        if is_author:
-            tags.append("UP主")
-        if is_pinned:
-            tags.append("置顶")
-        tag = f" ({', '.join(tags)})" if tags else ""
-
-        if reply_to and parent_content:
-            parts.append(
-                f"- **{reply_to}**:\n"
-                f"  > {parent_content}\n"
-                f"  **{name}**{tag} (👍{like}):\n"
-                f"  {content}"
-            )
-        else:
-            parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
-    return "\n".join(parts)
 
 
 @PipelineEngine.register("bili", Phase.DOWNLOADED)
@@ -185,7 +153,7 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
         bvid = source_id.replace("bili:", "")
         try:
             highlights = await fetch_comment_highlights(bvid=bvid, config=ctx.config)
-            ctx.comment_highlights = _format_comment_highlights(highlights)
+            ctx.comment_highlights = format_comment_highlights(highlights)
         except Exception as exc:
             console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
             logger.warning("Comment highlights failed for %s: %s", source_id, exc)

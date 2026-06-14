@@ -1,33 +1,6 @@
 from __future__ import annotations
 
-from shared.auth.qr_display import _render_qr_matrix, display_qr_in_terminal
-
-
-class TestRenderQrMatrix:
-    def test_returns_string(self) -> None:
-        result = _render_qr_matrix("https://example.com")
-        assert isinstance(result, str)
-
-    def test_contains_unicode_block_chars(self) -> None:
-        result = _render_qr_matrix("https://example.com")
-        assert "█" in result
-        assert "▀" in result
-        assert "▄" in result
-
-    def test_multiline_output(self) -> None:
-        result = _render_qr_matrix("https://example.com")
-        lines = result.split("\n")
-        assert len(lines) >= 5
-
-    def test_different_urls_produce_different_output(self) -> None:
-        a = _render_qr_matrix("https://example.com/a")
-        b = _render_qr_matrix("https://example.com/b")
-        assert a != b
-
-    def test_empty_url_still_produces_output(self) -> None:
-        result = _render_qr_matrix("")
-        assert isinstance(result, str)
-        assert len(result) > 0
+from shared.auth.qr_display import display_qr_in_terminal
 
 
 class TestDisplayQrInTerminal:

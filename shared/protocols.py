@@ -60,16 +60,16 @@ class DynamicInfo:
 
 @dataclass
 class CommentHighlight:
-    """评论亮点"""
+    """评论亮点 — 跨平台统一模型"""
 
     content: str
     user_name: str
-    is_up_owner: bool
+    is_author: bool  # 统一字段名（原 Bili: is_up_owner, Weibo/XHS: is_author）
     like_count: int
-    # 对话链路（UP主回复别人时展示完整上下文）
+    # 对话链路（作者回复别人时展示完整上下文）
     reply_to: str = ""  # 被回复的用户名
     parent_content: str = ""  # 被回复的原文
-    is_pinned: bool = False  # 是否被UP主置顶
+    is_pinned: bool = False  # 是否被置顶
 
 
 # ═══════════════════════════════════════════════════════════
@@ -93,16 +93,6 @@ class NoteInfo:
     xsec_token: str = ""
 
 
-@dataclass
-class XhsCommentHighlight:
-    """小红书评论亮点"""
-
-    content: str
-    user_name: str
-    is_author: bool
-    like_count: int
-
-
 # ═══════════════════════════════════════════════════════════
 # 微博数据模型
 # ═══════════════════════════════════════════════════════════
@@ -123,17 +113,9 @@ class WeiboPost:
     comments_count: int = 0
     likes_count: int = 0
     is_original: bool = True
+    is_long_text: bool = False
+    long_text: str = ""  # 长文全文（isLongText=True 时填充）
     reposted_post: Optional[WeiboPost] = None  # 转发时可嵌套
-
-
-@dataclass
-class WeiboCommentHighlight:
-    """微博评论亮点"""
-
-    content: str
-    user_name: str
-    is_author: bool
-    like_count: int
 
 
 @dataclass

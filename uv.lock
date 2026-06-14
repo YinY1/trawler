@@ -1402,6 +1402,48 @@ wheels = [
 ]
 
 [[package]]
+name = "terminal-qrcode"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama" },
+    { name = "qrcode" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/31/64657767ffd8ffaf609badd0dd30d30e5c9659fbea646e966e3685a3da4d/terminal_qrcode-1.1.0.tar.gz", hash = "sha256:04d94bcb80f5079dc7bd3a7ea97796e7c9210708a3eca7e9bb3a6221e50dd638", size = 60453, upload-time = "2026-03-11T14:27:25.837Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/5f/c8efda97d50b6562a79de84c7322c8895c338feffd2496428f6ea67e4b68/terminal_qrcode-1.1.0-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:89a264d97f789343daf509921adfde1047ba46a3e9c24c0f57986dc9a4f3db33", size = 513851, upload-time = "2026-03-11T14:26:44.651Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/0b/bb4f052df8ee11fc84bcc6847522ad54f98aa83aac73ba9cfc9e66a99307/terminal_qrcode-1.1.0-cp312-cp312-macosx_15_0_x86_64.whl", hash = "sha256:0a993b00dca81e45bb5192b1a39b3d592d705ac64cb96622fcf2b645991d0d6c", size = 611930, upload-time = "2026-03-11T14:26:46.104Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/99/52dd27554cdea679aa15a79dc2c89a2e82ed4c448f1e968d97c1e6b07505/terminal_qrcode-1.1.0-cp312-cp312-manylinux_2_26_i686.manylinux_2_28_i686.whl", hash = "sha256:f5e51f49ebae39acde660f0096db609a07f6751c61939ba78dd04c7afa00673d", size = 885302, upload-time = "2026-03-11T14:26:47.794Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/1a/899a0c5addea5494ed5574c655a6e653702199fd454052d0ae0373ad405e/terminal_qrcode-1.1.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0c9b8b6594d79a82aab37bd1c15e085cd326a35b4fa2ffb7a164dca9e845d33e", size = 859745, upload-time = "2026-03-11T14:26:49.276Z" },
+    { url = "https://files.pythonhosted.org/packages/85/21/093fb9b190cd79aaf0982fa9630913b54be5ccb80cc3639460e1890d9813/terminal_qrcode-1.1.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a851e8b263dc969d540378f32fc255dc06629f7bb0f0bdbfca89e9b320382b4c", size = 802098, upload-time = "2026-03-11T14:26:51.037Z" },
+    { url = "https://files.pythonhosted.org/packages/26/8b/8989a6d54f1b177277bc526fb64b3ea00522ec5a0fcd0eb948affdb490b1/terminal_qrcode-1.1.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:a02f2c637ff2df62bae9b2d3b428bfe7ee97b5aaa44beb9ada987ce1d2943d80", size = 734531, upload-time = "2026-03-11T14:26:52.325Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/c3/860cccd3ab376fc5eb2e8b2a8013ae52ca85b05775d51d2e48e3d6dca038/terminal_qrcode-1.1.0-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:532e7934e47cb56ee682bd64ccd58c1a20491a79be3534ba974399a5e9b83a47", size = 799332, upload-time = "2026-03-11T14:26:53.512Z" },
+    { url = "https://files.pythonhosted.org/packages/79/77/d8aa2b4c5d242c5249d93ed0c2586dc089047a0ec89d218741d53306d647/terminal_qrcode-1.1.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:4dcfdbf99eabb7bfa6996478cc8fa445783e2e521f416e5090e345ba0de29bbd", size = 756954, upload-time = "2026-03-11T14:26:54.79Z" },
+    { url = "https://files.pythonhosted.org/packages/62/40/2caba51fc4ec9095cc57924dfc76f1d3db7e9dc627e2000ca31626c03ff3/terminal_qrcode-1.1.0-cp312-cp312-win32.whl", hash = "sha256:01ed185d793d2a89a6c01ff1326678f03f1a51c690e837ea46861e0335d30147", size = 318563, upload-time = "2026-03-11T14:26:55.962Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/ae/a59016451c03ea26c80dee9ab767f6792b3aab9723f906c53546e8610fa9/terminal_qrcode-1.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:18664ea58db4198d0aa9a49e264bd8a89a4fd9442c208428a50749a68b6c90a1", size = 361416, upload-time = "2026-03-11T14:26:57.422Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/0a/8d217a3e67b873021faa641c063da07ffdc746a826fe11ca42674fc60c38/terminal_qrcode-1.1.0-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:fdbad897b49ae3a5cba8651ee6cc3cc9655ef58729fd27142d8d7b129bbe1b3d", size = 513859, upload-time = "2026-03-11T14:26:58.811Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/84/e262b9d7c99f6af38e2db4373d71a7d7e5445654bbb24cfc0289ff7b10f0/terminal_qrcode-1.1.0-cp313-cp313-macosx_15_0_x86_64.whl", hash = "sha256:53430e247f4bc873d5a94846b5859dc5065a439bdf23efb9191c46f326c4de64", size = 611932, upload-time = "2026-03-11T14:27:00.48Z" },
+    { url = "https://files.pythonhosted.org/packages/11/e4/9f48943109268505bd5df3f67bca05c7d1df3a996df95f07dff50b1c48cc/terminal_qrcode-1.1.0-cp313-cp313-manylinux_2_26_i686.manylinux_2_28_i686.whl", hash = "sha256:5189c5ab95bf6595554d092d61f6b6b32ff63efd0c07013d1696948f37410cfa", size = 885468, upload-time = "2026-03-11T14:27:01.874Z" },
+    { url = "https://files.pythonhosted.org/packages/75/6c/1dd51fa73a468de55b659d93d637f2cdf778d44a90fff28d906b6ea53519/terminal_qrcode-1.1.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d3420943ef219f36966f5376551e2c20a91511b83fa5b9c694c5cc34dcc73e31", size = 859869, upload-time = "2026-03-11T14:27:03.246Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/9c/ff8da8e339808b79e03cdf09e6c8a219f8a68eeda25691835dd915ff5fd8/terminal_qrcode-1.1.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:bf9985ac63c443b28b2118be3309d9f8eb4006160a26aeac5a5bbda7c876fc5f", size = 802225, upload-time = "2026-03-11T14:27:04.399Z" },
+    { url = "https://files.pythonhosted.org/packages/93/08/f44829c1e1aeb90dac20d94f31d91139d36446670fe09e99d4eeb136e2a0/terminal_qrcode-1.1.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:ebbc7e98422357caf2b50df68bb77d4fc6b7062908d05ef0837b5febc51d5d27", size = 734653, upload-time = "2026-03-11T14:27:05.698Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/ed/09b346def2377eb029e55f47b3d2335106ae3f8de7f609251932b2cc156c/terminal_qrcode-1.1.0-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:d9554e3404937c0c8c6f73ed0d92f20218c56d551ab9d56f604eef94d0a235cd", size = 799417, upload-time = "2026-03-11T14:27:07.057Z" },
+    { url = "https://files.pythonhosted.org/packages/02/32/84565c06804219f36531eba290b888646ca95856394ab544b2efa1f1bcdb/terminal_qrcode-1.1.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:2a59d39b38e39cf5305d3f7d4607c7ae9e73bf80004701b01a349223e3a56b45", size = 757071, upload-time = "2026-03-11T14:27:08.624Z" },
+    { url = "https://files.pythonhosted.org/packages/94/ea/1a1c73b322c4e9cf2937a08cb969363026a87f042003e4c451162a9593b8/terminal_qrcode-1.1.0-cp313-cp313-win32.whl", hash = "sha256:c1b28708ef12e3f3297ed8a0873fd1febbd1e288db9210a3eb017c4b6a16da95", size = 318532, upload-time = "2026-03-11T14:27:10.044Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/28/38aaf723f0eae3db5be7e338d3df0b8a25e587613998df293e9d03482b39/terminal_qrcode-1.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:37b8f3f058b75946415b49ac2814f673000f81b17ae047c16bae9bc6e6c1f708", size = 361393, upload-time = "2026-03-11T14:27:11.101Z" },
+    { url = "https://files.pythonhosted.org/packages/00/63/7ece47b7113ab6789dc0f202e1b2512d8d71c6ce41842a28475b3ccdf309/terminal_qrcode-1.1.0-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:10f5fff27a14f67985cd9accc71d04285e93520d560f0d5e7ee7e68aff6f5801", size = 513871, upload-time = "2026-03-11T14:27:12.238Z" },
+    { url = "https://files.pythonhosted.org/packages/68/42/efd0ed440f227dd8d12e471dadac174b69bba3b3b8962bfebe72ef050a20/terminal_qrcode-1.1.0-cp314-cp314-macosx_15_0_x86_64.whl", hash = "sha256:6055595c3a06253d7c675115d410a2eaf012a0db9173d63d6710f59c31cf3df1", size = 611955, upload-time = "2026-03-11T14:27:13.386Z" },
+    { url = "https://files.pythonhosted.org/packages/06/f7/7b15694fe4a7ab4d36307bd1009b3dd3554841452ce6e7c460d4fad9548d/terminal_qrcode-1.1.0-cp314-cp314-manylinux_2_26_i686.manylinux_2_28_i686.whl", hash = "sha256:03df5b29c5a4d76ee4cff98c3d7a5a85f1f041b84a169db8cacbd0e2cb8c2da9", size = 885678, upload-time = "2026-03-11T14:27:14.893Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/83/3e170c4042ee251d75f5d4ab1dcd13ad45692146840fc9c8776018d36b48/terminal_qrcode-1.1.0-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:72263f159077dd72a0337de475669dc2afd9ee29089c6aa5942bb07785c05962", size = 860185, upload-time = "2026-03-11T14:27:16.16Z" },
+    { url = "https://files.pythonhosted.org/packages/21/16/879481de6b16b94ea662a06f7324a67e00925e0a95783f66c499ea39de4b/terminal_qrcode-1.1.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c4ab85ac7e0eb2bba09befc8f41f4c309519c396aa5bc25b20a50fcda61107f7", size = 802513, upload-time = "2026-03-11T14:27:17.866Z" },
+    { url = "https://files.pythonhosted.org/packages/27/b4/8ca4914c31e577f651f6fe56f8d9d96e0785d337aedcb06b177df0cf1bb1/terminal_qrcode-1.1.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:b02d1eecbce11732ef77e4de41afad4766cfaac0f53c1ac7fbe722add291598e", size = 734916, upload-time = "2026-03-11T14:27:19.106Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/78/e413d161f7eb94630603dd730c19478dcd32757a25391c02b1d5d42424d1/terminal_qrcode-1.1.0-cp314-cp314-musllinux_1_2_i686.whl", hash = "sha256:a6f9f85201bbef6eec6cc1b7bce61b9704fd24ea9d748c797033bb293b9daeb8", size = 799586, upload-time = "2026-03-11T14:27:20.562Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/d9/e9c830bce94eb1d996e29a731ed39d94f754173f63b776899ada3bcbedf6/terminal_qrcode-1.1.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:5a980f0b7462f96ce6443a5bcc37d8410b33e1723dca08e2bd10dac34bf0ea0b", size = 757321, upload-time = "2026-03-11T14:27:21.735Z" },
+    { url = "https://files.pythonhosted.org/packages/22/d1/a8f4768d658ae96684a931dae2fcf054e7ce6afe2b493a6d713d698920e3/terminal_qrcode-1.1.0-cp314-cp314-win32.whl", hash = "sha256:f24bea3b6b13121a4bc4d5bba6ef05ba9d50389252bd68d7c7a0e776af6155ec", size = 327246, upload-time = "2026-03-11T14:27:22.959Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/7e/61f1408e415d79b98e0ecc7277833ef4a2c67df7567b90dcc629de7b5bcd/terminal_qrcode-1.1.0-cp314-cp314-win_amd64.whl", hash = "sha256:3774a26b55899cf43d9c30afe50dafa21c94eb057551023ab283761df39f1bb3", size = 372184, upload-time = "2026-03-11T14:27:24.445Z" },
+]
+
+[[package]]
 name = "tokenizers"
 version = "0.22.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1457,9 +1499,9 @@ dependencies = [
     { name = "bilibili-api-python" },
     { name = "click" },
     { name = "feedparser" },
-    { name = "qrcode" },
     { name = "requests" },
     { name = "rich" },
+    { name = "terminal-qrcode" },
     { name = "tomlkit" },
     { name = "yt-dlp" },
 ]
@@ -1488,10 +1530,10 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "qrcode", specifier = ">=7.4" },
     { name = "requests", specifier = ">=2.31" },
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "terminal-qrcode", specifier = ">=1.1" },
     { name = "tomlkit", specifier = ">=0.13" },
     { name = "xhs", marker = "extra == 'xhs'", specifier = ">=0.1.9" },
     { name = "yt-dlp", specifier = ">=2024.0" },
