@@ -85,6 +85,8 @@ def test_login_bili_success(mock_get_auth: MagicMock, mock_update: MagicMock, ru
     mock_tokens = MagicMock()
     mock_tokens.cookies = {"SESSDATA": "abc", "bili_jct": "def"}
     mock_tokens.expires_at = 1234567890.0
+    mock_tokens.platform = "bili"
+    mock_tokens.obtained_at = 1234567890.0
     mock_authenticator.qr_login = AsyncMock(return_value=mock_tokens)
     mock_authenticator._last_ac_time_value = "ac123"
     mock_get_auth.return_value = mock_authenticator
@@ -105,6 +107,8 @@ def test_login_xhs_success(mock_get_auth: MagicMock, mock_update: MagicMock, run
     mock_tokens = MagicMock()
     mock_tokens.cookies = {"a1": "abc123", "web_session": "xyz789"}
     mock_tokens.expires_at = 1234567890.0
+    mock_tokens.platform = "xhs"
+    mock_tokens.obtained_at = 1234567890.0
     mock_authenticator.qr_login = AsyncMock(return_value=mock_tokens)
     mock_get_auth.return_value = mock_authenticator
 

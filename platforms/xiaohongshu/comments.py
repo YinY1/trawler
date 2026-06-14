@@ -17,7 +17,7 @@ from platforms.xiaohongshu.auth import (
 from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS
 from shared.http import get_session
-from shared.protocols import XhsCommentHighlight
+from shared.protocols import CommentHighlight
 
 logger = logging.getLogger("trawler.xiaohongshu.comments")
 console = Console()
@@ -29,7 +29,7 @@ COMMENT_API = f"{XHS_BASE_URL}/api/sns/web/v2/comment/page"
 MAX_HIGHLIGHT_COMMENTS = MAX_COMMENT_HIGHLIGHTS
 
 
-def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> XhsCommentHighlight | None:
+def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> CommentHighlight | None:
     """解析单条评论数据。
 
     Args:
@@ -37,7 +37,7 @@ def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> Xh
         author_user_id: 笔记作者 ID（用于判断 is_author）
 
     Returns:
-        XhsCommentHighlight 或 None
+        CommentHighlight 或 None
     """
     try:
         content = comment_data.get("content", "")
@@ -57,7 +57,7 @@ def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> Xh
 
         is_author = bool(author_user_id and user_id == author_user_id)
 
-        return XhsCommentHighlight(
+        return CommentHighlight(
             content=content,
             user_name=user_name,
             is_author=is_author,
@@ -74,7 +74,7 @@ async def fetch_xhs_comment_highlights(
     *,
     author_user_id: str = "",
     max_count: int = MAX_HIGHLIGHT_COMMENTS,
-) -> list[XhsCommentHighlight]:
+) -> list[CommentHighlight]:
     """获取小红书笔记的评论亮点（热门评论）。
 
     按点赞数降序排列，过滤笔记作者本人的评论，最多返回 max_count 条。
@@ -105,7 +105,7 @@ async def fetch_xhs_comment_highlights(
     signed = get_signed_params(params, cookie)
     headers.update(signed)
 
-    all_comments: list[XhsCommentHighlight] = []
+    all_comments: list[CommentHighlight] = []
 
     session = await get_session()
     try:

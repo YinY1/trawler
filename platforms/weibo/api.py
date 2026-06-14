@@ -30,6 +30,9 @@ PC_USER_POSTS_API = "https://weibo.com/ajax/statuses/mymblog?uid={user_id}&page=
 # 微博图片 CDN 模板
 SINAIMG_URL_TEMPLATE = "https://wx1.sinaimg.cn/large/{pic_id}.jpg"
 
+# 长文 API
+LONGTEXT_API = "https://weibo.com/ajax/statuses/longtext?id={post_id}"
+
 # 默认 User-Agent
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -71,6 +74,43 @@ def _clean_html(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.strip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line)
+
+
+async def _fetch_long_text(cookie: str, post_id: str) -> str:
+    """获取微博长文完整内容。
+
+    Args:
+        cookie: Cookie 字符串
+        post_id: 帖子 ID
+
+    Returns:
+        完整长文纯文本，失败时返回空字符串
+    """
+    if not cookie or not post_id:
+        return ""
+
+    url = LONGTEXT_API.format(post_id=post_id)
+    headers = {
+        "User-Agent": _DEFAULT_UA,
+        "Referer": "https://weibo.com/",
+        "Cookie": cookie,
+    }
+
+    session = await shared.http.get_session()
+    try:
+        async with session.get(
+            url,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                return ""
+            data = await resp.json()
+            lt = data.get("data", {})
+            return lt.get("longTextContent_raw", "") or lt.get("longTextContent", "")
+    except Exception:
+        logger.debug("获取长文失败: %s", post_id)
+        return ""
 
 
 def _parse_weibo_time(time_str: str) -> int:
@@ -210,7 +250,8 @@ def _parse_pc_post(raw: dict[str, Any]) -> WeiboPost | None:
             return None
 
         text = raw.get("text", "")
-        clean_text = _clean_html(text)
+        clean_text = _clean_html(raw.get("text_raw", "") or text)
+        is_long_text = bool(raw.get("isLongText", False))
         user_info = raw.get("user", {})
         author = user_info.get("screen_name", "") if isinstance(user_info, dict) else ""
         user_id = str(user_info.get("id", "")) if isinstance(user_info, dict) else ""
@@ -257,6 +298,7 @@ def _parse_pc_post(raw: dict[str, Any]) -> WeiboPost | None:
             comments_count=comments_count,
             likes_count=likes_count,
             is_original=is_original,
+            is_long_text=is_long_text,
             reposted_post=reposted_post,
         )
     except Exception as e:
@@ -395,17 +437,18 @@ async def fetch_user_posts(
     cookie: str,
     user_id: str,
     max_posts: int = 20,
-    prefer_pc: bool = False,
+    prefer_pc: bool = True,
 ) -> list[WeiboPost]:
     """获取用户微博列表，自动选择 API 并解析为 WeiboPost。
 
-    优先使用移动端 API（无需签名），降级使用 PC 端 API。
+    默认优先使用 PC 端 API（标准 SUB cookie 即可），移动端 API 需要额外
+    weibo.cn 域的 cookie 才可用。
 
     Args:
         cookie: Cookie 字符串
         user_id: 用户 ID
         max_posts: 最大获取数量
-        prefer_pc: 是否优先使用 PC 端 API
+        prefer_pc: 是否优先使用 PC 端 API（默认 True）
 
     Returns:
         解析后的 WeiboPost 列表
@@ -428,5 +471,14 @@ async def fetch_user_posts(
         post = parse_func(raw)
         if post is not None:
             results.append(post)
+
+    # 长文补充
+    if cookie:
+        for post in results:
+            if post.is_long_text:
+                full_text = await _fetch_long_text(cookie, post.post_id)
+                if full_text:
+                    post.long_text = full_text
+                    post.clean_text = full_text
 
     return results

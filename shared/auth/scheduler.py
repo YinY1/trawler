@@ -92,10 +92,8 @@ async def check_and_renew_tokens(platform: str, config: Config, config_path: str
     try:
         new_tokens = await authenticator.refresh_tokens(tokens)
 
-        # 检查是否真的刷新了（cookie 不同才算成功）
-        old_key = tokens.cookies.get("sessdata", "")
-        new_key = new_tokens.cookies.get("sessdata", "")
-        if new_key and new_key != old_key:
+        # 检查是否真的刷新了（obtained_at 更新说明 refresh_tokens 返回了新 tokens）
+        if new_tokens.obtained_at > tokens.obtained_at:
             from shared.auth import update_auth_section
 
             _update_last_refresh_at(platform, config, new_tokens.obtained_at, config_path)
@@ -105,7 +103,7 @@ async def check_and_renew_tokens(platform: str, config: Config, config_path: str
             logger.info("%s token 续期成功", platform)
             return RenewalResult(platform, "renewed", f"{platform}: token 续期成功")
         else:
-            logger.info("%s token 无需续期 (check_refresh 返回无需刷新)", platform)
+            logger.info("%s token 无需续期 (refresh_tokens 返回原始 tokens)", platform)
             return RenewalResult(platform, "skipped", f"{platform}: token 无需续期")
     except Exception as e:
         logger.warning("%s token 续期失败: %s", platform, e)

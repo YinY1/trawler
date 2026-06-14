@@ -10,7 +10,7 @@ dependencies = [
     "requests>=2.31",
     "click>=8.0",
     "rich>=13.0",
-    "qrcode>=7.4",
+    "terminal-qrcode>=1.1",
     "tomlkit>=0.13",
     "aiohttp>=3.9",
 ]
@@ -54,3 +54,7 @@ select = ["E", "F", "I", "N", "W"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: integration tests that require real API credentials (skipped by default)",
+]
+addopts = "-m \"not integration\""

@@ -31,7 +31,7 @@ def _build_highlight(
     *,
     content: str,
     user_name: str,
-    is_up_owner: bool,
+    is_author: bool,
     like_count: int,
     is_pinned: bool = False,
     reply_to: str = "",
@@ -42,7 +42,7 @@ def _build_highlight(
     return CommentHighlight(
         content=content,
         user_name=user_name,
-        is_up_owner=is_up_owner,
+        is_author=is_author,
         like_count=like_count,
         is_pinned=is_pinned,
         reply_to=reply_to,
@@ -149,7 +149,7 @@ async def fetch_comment_highlights(
                 hl = _build_highlight(
                     content=info_top["content"],
                     user_name=info_top["user_name"],
-                    is_up_owner=is_up,
+                    is_author=is_up,
                     like_count=info_top["like"],
                     is_pinned=True,
                 )
@@ -161,7 +161,7 @@ async def fetch_comment_highlights(
                 hl = _build_highlight(
                     content=info_top["content"],
                     user_name=info_top["user_name"],
-                    is_up_owner=True,
+                    is_author=True,
                     like_count=info_top["like"],
                 )
                 if hl:
@@ -196,7 +196,7 @@ async def fetch_comment_highlights(
                         hl = _build_highlight(
                             content=child_info["content"],
                             user_name=child_info["user_name"],
-                            is_up_owner=True,
+                            is_author=True,
                             like_count=child_info["like"],
                             reply_to=parent_user,
                             parent_content=parent_text,
@@ -248,7 +248,7 @@ async def fetch_comment_highlights(
                 hl = _build_highlight(
                     content=info_fill["content"],
                     user_name=info_fill["user_name"],
-                    is_up_owner=False,
+                    is_author=False,
                     like_count=info_fill["like"],
                 )
                 if hl:
