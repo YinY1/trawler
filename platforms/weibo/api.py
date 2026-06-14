@@ -15,7 +15,6 @@ from typing import Any
 
 import aiohttp
 
-import shared.http
 from shared.constants import WEIBO_REQUEST_TIMEOUT
 from shared.protocols import WeiboPost
 
@@ -96,21 +95,21 @@ async def _fetch_long_text(cookie: str, post_id: str) -> str:
         "Cookie": cookie,
     }
 
-    session = await shared.http.get_session()
-    try:
-        async with session.get(
-            url,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        ) as resp:
-            if resp.status != 200:
-                return ""
-            data = await resp.json()
-            lt = data.get("data", {})
-            return lt.get("longTextContent_raw", "") or lt.get("longTextContent", "")
-    except Exception:
-        logger.debug("获取长文失败: %s", post_id)
-        return ""
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+                lt = data.get("data", {})
+                return lt.get("longTextContent_raw", "") or lt.get("longTextContent", "")
+        except Exception:
+            logger.debug("获取长文失败: %s", post_id)
+            return ""
 
 
 def _parse_weibo_time(time_str: str) -> int:
@@ -337,24 +336,20 @@ async def fetch_user_posts_mobile(
         "Cookie": cookie,
     }
 
-    session = await shared.http.get_session()
-    resp = None
-    try:
-        resp = await session.get(
-            url,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        )
-        if resp.status != 200:
-            logger.warning("移动端 API 返回状态码: %s", resp.status)
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("移动端 API 返回状态码: %s", resp.status)
+                    return []
+                data = await resp.json()
+        except Exception as e:
+            logger.warning("移动端 API 请求失败: %s", e)
             return []
-        data = await resp.json()
-    except Exception as e:
-        logger.warning("移动端 API 请求失败: %s", e)
-        return []
-    finally:
-        if resp is not None:
-            resp.close()
 
     if not data.get("ok"):
         logger.debug("移动端 API 返回失败: %s", data.get("msg", "unknown"))
@@ -403,24 +398,20 @@ async def fetch_user_posts_pc(
         "Cookie": cookie,
     }
 
-    session = await shared.http.get_session()
-    resp = None
-    try:
-        resp = await session.get(
-            url,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        )
-        if resp.status != 200:
-            logger.warning("PC 端 API 返回状态码: %s", resp.status)
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("PC 端 API 返回状态码: %s", resp.status)
+                    return []
+                data = await resp.json()
+        except Exception as e:
+            logger.warning("PC 端 API 请求失败: %s", e)
             return []
-        data = await resp.json()
-    except Exception as e:
-        logger.warning("PC 端 API 请求失败: %s", e)
-        return []
-    finally:
-        if resp is not None:
-            resp.close()
 
     if not data.get("ok"):
         logger.debug("PC 端 API 返回失败: %s", data.get("msg", "unknown"))

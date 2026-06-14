@@ -100,7 +100,8 @@ class TestFetchWeiboCommentHighlights:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.comments.get_session", return_value=mock_session):
+        with patch("platforms.weibo.comments.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             results = await fetch_weibo_comment_highlights("post123", cfg)
 
         assert len(results) == 1
@@ -128,7 +129,8 @@ class TestFetchWeiboCommentHighlights:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.comments.get_session", return_value=mock_session):
+        with patch("platforms.weibo.comments.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             results = await fetch_weibo_comment_highlights("post123", cfg)
 
         assert results == []
@@ -159,7 +161,8 @@ class TestFetchWeiboCommentHighlights:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("platforms.weibo.comments.get_session", return_value=mock_session):
+        with patch("platforms.weibo.comments.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             results = await fetch_weibo_comment_highlights("post123", cfg)
 
         assert len(results) == 2

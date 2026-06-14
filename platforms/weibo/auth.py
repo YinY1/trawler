@@ -8,7 +8,6 @@ import time
 
 import aiohttp
 
-import shared.http  # noqa: E402 — module-level import for mock patching
 from shared.auth.base import (
     AuthStatus,
     BaseAuthenticator,
@@ -108,21 +107,21 @@ class WeiboAuthenticator(BaseAuthenticator):
     # ── BaseAuthenticator 接口 ────────────────────────────
 
     async def generate_qr_code(self) -> QRCodeResult:
-        session = await shared.http.get_session()
-        resp = await session.get(
-            QR_IMAGE_URL,
-            headers={
-                "User-Agent": _get_user_agent(),
-                "Referer": QR_REFERER,
-            },
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        )
-        try:
-            if resp.status != 200:
-                raise RuntimeError(f"生成二维码失败，状态码: {resp.status}")
-            data = await resp.json()
-        finally:
-            resp.close()
+        async with aiohttp.ClientSession(trust_env=False) as session:
+            resp = await session.get(
+                QR_IMAGE_URL,
+                headers={
+                    "User-Agent": _get_user_agent(),
+                    "Referer": QR_REFERER,
+                },
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            )
+            try:
+                if resp.status != 200:
+                    raise RuntimeError(f"生成二维码失败，状态码: {resp.status}")
+                data = await resp.json()
+            finally:
+                resp.close()
 
         qrid = data.get("data", {}).get("qrid", "")
         if not qrid:
@@ -133,27 +132,27 @@ class WeiboAuthenticator(BaseAuthenticator):
         return QRCodeResult(qr_url=qr_url, qr_key=qrid, expires_in=WEIBO_POLL_TIMEOUT)
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
-        session = await shared.http.get_session()
-        url = QR_CHECK_URL.format(qrid=qr_key)
-        resp = await session.get(
-            url,
-            headers={
-                "User-Agent": _get_user_agent(),
-                "Referer": QR_REFERER,
-            },
-            timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-        )
-        try:
-            if resp.status != 200:
-                logger.warning("轮询二维码状态失败，状态码: %s", resp.status)
-                return AuthStatus(success=False, status=QRStatus.WAITING, message="请求失败")
+        async with aiohttp.ClientSession(trust_env=False) as session:
+            url = QR_CHECK_URL.format(qrid=qr_key)
+            resp = await session.get(
+                url,
+                headers={
+                    "User-Agent": _get_user_agent(),
+                    "Referer": QR_REFERER,
+                },
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            )
             try:
-                data = await resp.json(content_type=None)
-            except Exception as json_err:
-                logger.warning("轮询二维码响应非 JSON: %s, 状态码: %s", json_err, resp.status)
-                return AuthStatus(success=False, status=QRStatus.WAITING, message="响应格式错误")
-        finally:
-            resp.close()
+                if resp.status != 200:
+                    logger.warning("轮询二维码状态失败，状态码: %s", resp.status)
+                    return AuthStatus(success=False, status=QRStatus.WAITING, message="请求失败")
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception as json_err:
+                    logger.warning("轮询二维码响应非 JSON: %s, 状态码: %s", json_err, resp.status)
+                    return AuthStatus(success=False, status=QRStatus.WAITING, message="响应格式错误")
+            finally:
+                resp.close()
 
         if not isinstance(data, dict):
             logger.warning("轮询二维码响应数据类型异常: %s", type(data).__name__)
@@ -189,7 +188,6 @@ class WeiboAuthenticator(BaseAuthenticator):
         - retcode=20000000
         - data.url: 跨域登录 URL（访问此 URL 获取 Set-Cookie）
         """
-        session = await shared.http.get_session()
         data = self._last_check_data
 
         if not isinstance(data, dict):
@@ -205,33 +203,35 @@ class WeiboAuthenticator(BaseAuthenticator):
             login_url = data["data"].get("url", "")
         if not login_url:
             # 降级: 直接请求 /check 尝试捕获 Set-Cookie（如 302 重定向）
-            resp = await session.get(
-                QR_CHECK_URL.format(qrid=qr_key),
-                headers={
-                    "User-Agent": _get_user_agent(),
-                    "Referer": QR_REFERER,
-                },
-                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-                allow_redirects=False,
-            )
-            try:
-                set_cookie = resp.headers.getall("Set-Cookie", [])
-            finally:
-                resp.close()
+            async with aiohttp.ClientSession(trust_env=False) as session:
+                resp = await session.get(
+                    QR_CHECK_URL.format(qrid=qr_key),
+                    headers={
+                        "User-Agent": _get_user_agent(),
+                        "Referer": QR_REFERER,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                    allow_redirects=False,
+                )
+                try:
+                    set_cookie = resp.headers.getall("Set-Cookie", [])
+                finally:
+                    resp.close()
             if not set_cookie:
                 raise RefreshFailedError("未获取到 Cookie 响应头")
         else:
             # 直接访问登录 URL 获取 Set-Cookie（不跟随重定向，捕获 302 中的 Set-Cookie）
-            resp = await session.get(
-                login_url,
-                headers={"User-Agent": _get_user_agent()},
-                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-                allow_redirects=False,
-            )
-            try:
-                set_cookie = resp.headers.getall("Set-Cookie", [])
-            finally:
-                resp.close()
+            async with aiohttp.ClientSession(trust_env=False) as session:
+                resp = await session.get(
+                    login_url,
+                    headers={"User-Agent": _get_user_agent()},
+                    timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                    allow_redirects=False,
+                )
+                try:
+                    set_cookie = resp.headers.getall("Set-Cookie", [])
+                finally:
+                    resp.close()
             if not set_cookie:
                 raise RefreshFailedError("未获取到 Cookie 响应头")
 
@@ -254,65 +254,65 @@ class WeiboAuthenticator(BaseAuthenticator):
         否则保持原有 tokens 不变。
         """
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
-        session = await shared.http.get_session()
-        try:
-            resp = await session.get(
-                KEEPALIVE_URL,
-                headers={
-                    "User-Agent": _get_user_agent(),
-                    "Cookie": cookie_str,
-                },
-                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-                allow_redirects=False,
-            )
+        async with aiohttp.ClientSession(trust_env=False) as session:
             try:
-                if resp.status != 200:
-                    return tokens
-                set_cookie = resp.headers.getall("Set-Cookie", [])
-            finally:
-                resp.close()
-
-            if set_cookie:
-                new_cookies = _parse_weibo_cookies(set_cookie)
-                # 仅更新实际有值的字段
-                updated_cookies = dict(tokens.cookies)
-                updated_cookies.update(new_cookies)
-                now = time.time()
-                return PlatformTokens(
-                    platform="weibo",
-                    cookies=updated_cookies,
-                    obtained_at=now,
-                    expires_at=now + 7 * 86400,
+                resp = await session.get(
+                    KEEPALIVE_URL,
+                    headers={
+                        "User-Agent": _get_user_agent(),
+                        "Cookie": cookie_str,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                    allow_redirects=False,
                 )
+                try:
+                    if resp.status != 200:
+                        return tokens
+                    set_cookie = resp.headers.getall("Set-Cookie", [])
+                finally:
+                    resp.close()
 
-            # 没有新 cookie，返回原有 tokens
-            return tokens
-        except Exception as e:
-            logger.warning("Keepalive 请求失败: %s", e)
-            return tokens
+                if set_cookie:
+                    new_cookies = _parse_weibo_cookies(set_cookie)
+                    # 仅更新实际有值的字段
+                    updated_cookies = dict(tokens.cookies)
+                    updated_cookies.update(new_cookies)
+                    now = time.time()
+                    return PlatformTokens(
+                        platform="weibo",
+                        cookies=updated_cookies,
+                        obtained_at=now,
+                        expires_at=now + 7 * 86400,
+                    )
+
+                # 没有新 cookie，返回原有 tokens
+                return tokens
+            except Exception as e:
+                logger.warning("Keepalive 请求失败: %s", e)
+                return tokens
 
     async def validate_tokens(self, tokens: PlatformTokens) -> bool:
         if tokens.expires_at < time.time():
             return False
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
-        session = await shared.http.get_session()
-        try:
-            resp = await session.get(
-                KEEPALIVE_URL,
-                headers={
-                    "User-Agent": _get_user_agent(),
-                    "Cookie": cookie_str,
-                },
-                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
-                allow_redirects=False,
-            )
+        async with aiohttp.ClientSession(trust_env=False) as session:
             try:
-                return resp.status == 200
-            finally:
-                resp.close()
-        except Exception as e:
-            logger.warning("微博 token 有效性检查失败: %s", e)
-            return False
+                resp = await session.get(
+                    KEEPALIVE_URL,
+                    headers={
+                        "User-Agent": _get_user_agent(),
+                        "Cookie": cookie_str,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+                    allow_redirects=False,
+                )
+                try:
+                    return resp.status == 200
+                finally:
+                    resp.close()
+            except Exception as e:
+                logger.warning("微博 token 有效性检查失败: %s", e)
+                return False
 
     def supports_refresh(self) -> bool:
         return True

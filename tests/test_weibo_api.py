@@ -54,10 +54,13 @@ class TestFetchUserPostsMobile:
             }
 
         mock_resp.json = AsyncMock(side_effect=json_side)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_mobile(cookie, user_id="12345")
 
         assert len(posts) == 1
@@ -73,10 +76,13 @@ class TestFetchUserPostsMobile:
             return {"ok": 0}
 
         mock_resp.json = AsyncMock(side_effect=json_side)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_mobile(cookie, user_id="12345")
 
         assert posts == []
@@ -86,10 +92,13 @@ class TestFetchUserPostsMobile:
         cookie = _make_cookie_str()
         mock_resp = MagicMock()
         mock_resp.status = 500
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_mobile(cookie, user_id="12345")
 
         assert posts == []
@@ -127,10 +136,13 @@ class TestFetchUserPostsPc:
             }
 
         mock_resp.json = AsyncMock(side_effect=json_side)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_pc(cookie, user_id="67890")
 
         assert len(posts) == 1
@@ -146,10 +158,13 @@ class TestFetchUserPostsPc:
             return {"ok": 0}
 
         mock_resp.json = AsyncMock(side_effect=json_side)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_session.get = MagicMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.api.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             posts = await fetch_user_posts_pc(cookie, user_id="67890")
 
         assert posts == []

@@ -19,7 +19,6 @@ from platforms.xiaohongshu.auth import (
 )
 from shared.config import Config
 from shared.constants import XHS_DOWNLOAD_TIMEOUT, XHS_REQUEST_TIMEOUT
-from shared.http import get_session
 from shared.protocols import NoteInfo, XhsDownloadResult
 
 logger = logging.getLogger("trawler.xiaohongshu.downloader")
@@ -160,18 +159,18 @@ async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> Optional[Xh
     try:
         note_url = f"https://www.xiaohongshu.com/explore/{note.note_id}"
 
-        session = await get_session()
-        # 提交下载任务
-        payload = {"url": note_url}
-        async with session.post(
-            f"{api_url.rstrip('/')}/api/download",
-            json=payload,
-            timeout=aiohttp.ClientTimeout(total=60),
-        ) as resp:
-            if resp.status != 200:
-                return None
+        async with aiohttp.ClientSession(trust_env=False) as session:
+            # 提交下载任务
+            payload = {"url": note_url}
+            async with session.post(
+                f"{api_url.rstrip('/')}/api/download",
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status != 200:
+                    return None
 
-            result = await resp.json(content_type=None)
+                result = await resp.json(content_type=None)
 
         if not result.get("success", False):
             return None
@@ -236,32 +235,32 @@ async def _fetch_note_detail(note: NoteInfo, cookie: str) -> Optional[dict[str, 
     signed = get_signed_params(params, cookie)
     headers.update(signed)
 
-    session = await get_session()
-    try:
-        async with session.get(
-            NOTE_FEED_API,
-            params=params,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-        ) as resp:
-            if resp.status != 200:
-                logger.debug(f"笔记详情 API 返回状态码: {resp.status}")
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                NOTE_FEED_API,
+                params=params,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug(f"笔记详情 API 返回状态码: {resp.status}")
+                    return None
+
+                data = await resp.json(content_type=None)
+
+            if not data.get("success", False):
+                logger.debug(f"笔记详情 API 失败: {data.get('msg', 'unknown')}")
                 return None
 
-            data = await resp.json(content_type=None)
+            items = data.get("data", {}).get("items", [])
+            if items and isinstance(items, list):
+                return items[0].get("note_card", items[0])
 
-        if not data.get("success", False):
-            logger.debug(f"笔记详情 API 失败: {data.get('msg', 'unknown')}")
             return None
-
-        items = data.get("data", {}).get("items", [])
-        if items and isinstance(items, list):
-            return items[0].get("note_card", items[0])
-
-        return None
-    except Exception as e:
-        logger.debug(f"获取笔记详情失败: {e}")
-        return None
+        except Exception as e:
+            logger.debug(f"获取笔记详情失败: {e}")
+            return None
 
 
 async def _download_file(url: str, dest: Path) -> bool:
@@ -274,27 +273,27 @@ async def _download_file(url: str, dest: Path) -> bool:
     Returns:
         是否成功
     """
-    session = await get_session()
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
 
-        async with session.get(
-            url,
-            timeout=aiohttp.ClientTimeout(total=XHS_DOWNLOAD_TIMEOUT),
-            ssl=None,
-        ) as resp:
-            if resp.status != 200:
-                logger.debug(f"下载文件失败，状态码: {resp.status}, URL: {url}")
-                return False
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=XHS_DOWNLOAD_TIMEOUT),
+                ssl=None,
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug(f"下载文件失败，状态码: {resp.status}, URL: {url}")
+                    return False
 
-            content = await resp.read()
+                content = await resp.read()
 
-        dest.write_bytes(content)
-        return True
+            dest.write_bytes(content)
+            return True
 
-    except Exception as e:
-        logger.debug(f"下载文件异常: {e}, URL: {url}")
-        return False
+        except Exception as e:
+            logger.debug(f"下载文件异常: {e}, URL: {url}")
+            return False
 
 
 async def _try_direct_download(note: NoteInfo, config: Config) -> XhsDownloadResult:

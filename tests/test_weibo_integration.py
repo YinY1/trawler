@@ -21,7 +21,6 @@ from platforms.weibo.api import (
 )
 from platforms.weibo.comments import fetch_weibo_comment_highlights
 from shared.config import Config, load_config
-from shared.http import close_session
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +86,7 @@ class TestMobileAPI:
             assert isinstance(p, dict)
             assert "id" in p, f"Post missing id: {list(p.keys())[:5]}"
             assert p.get("text"), f"Post {p.get('id')} has empty text"
-        await close_session()
+
 
     @pytest.mark.asyncio
     async def test_parse_mobile_posts(self):
@@ -109,7 +108,7 @@ class TestMobileAPI:
                 assert post.clean_text, "Parsed post missing clean_text"
 
         assert parsed_count > 0, "No posts could be parsed"
-        await close_session()
+
 
     @pytest.mark.asyncio
     async def test_fetch_user_posts_high_level(self):
@@ -125,7 +124,7 @@ class TestMobileAPI:
             assert p.post_id
             assert p.author
             assert p.pubdate > 0
-        await close_session()
+
 
 
 # ── Real API: fetch_user_posts_pc ────────────────────────────
@@ -145,7 +144,7 @@ class TestPCAPI:
             for p in posts:
                 assert isinstance(p, dict)
                 assert "idstr" in p or "id" in p
-        await close_session()
+
 
     @pytest.mark.asyncio
     async def test_parse_pc_posts(self):
@@ -167,7 +166,7 @@ class TestPCAPI:
                 assert post.pubdate > 0
 
         assert parsed_count > 0, "No PC posts could be parsed"
-        await close_session()
+
 
 
 # ── Real API: Comments ───────────────────────────────────────
@@ -195,7 +194,7 @@ class TestCommentsAPI:
             for h in highlights:
                 assert h.content, "Comment has empty content"
                 assert h.like_count >= 0, "Comment has negative like_count"
-        await close_session()
+
 
     @pytest.mark.asyncio
     async def test_parse_real_comments(self):
@@ -215,7 +214,7 @@ class TestCommentsAPI:
         # Highlight objects should already be parsed and valid
         assert all(isinstance(h.content, str) for h in highlights)
         assert all(isinstance(h.like_count, int) for h in highlights)
-        await close_session()
+
 
 
 # ── Config loading ───────────────────────────────────────────

@@ -67,7 +67,8 @@ class TestGenerateQrCode:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await auth.generate_qr_code()
 
         assert isinstance(result, QRCodeResult)
@@ -85,9 +86,10 @@ class TestGenerateQrCodeApiError:
         mock_session.get = AsyncMock(return_value=mock_resp)
 
         with (
-            patch("shared.http.get_session", return_value=mock_session),
+            patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls,
             pytest.raises(RuntimeError, match="生成二维码失败"),
         ):
+            mock_cls.return_value.__aenter__.return_value = mock_session
             await auth.generate_qr_code()
 
     @pytest.mark.asyncio
@@ -104,9 +106,10 @@ class TestGenerateQrCodeApiError:
         mock_session.get = AsyncMock(return_value=mock_resp)
 
         with (
-            patch("shared.http.get_session", return_value=mock_session),
+            patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls,
             pytest.raises(RuntimeError, match="未获取到 qrid"),
         ):
+            mock_cls.return_value.__aenter__.return_value = mock_session
             await auth.generate_qr_code()
 
 
@@ -128,7 +131,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.WAITING
@@ -141,7 +145,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.SCANNED
@@ -154,7 +159,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.SUCCESS
@@ -167,7 +173,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.EXPIRED
@@ -180,7 +187,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.WAITING
@@ -195,7 +203,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.WAITING
@@ -209,7 +218,8 @@ class TestPollQrStatus:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             status = await auth.poll_qr_status("qr_abc")
 
         assert status.status == QRStatus.WAITING
@@ -242,7 +252,8 @@ class TestGetTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=login_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             tokens = await auth.get_tokens("qr_abc")
 
         assert tokens.platform == "weibo"
@@ -283,9 +294,10 @@ class TestGetTokens:
         mock_session.get = AsyncMock(return_value=fallback_resp)
 
         with (
-            patch("shared.http.get_session", return_value=mock_session),
+            patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls,
             pytest.raises(RefreshFailedError, match="未获取到 Cookie"),
         ):
+            mock_cls.return_value.__aenter__.return_value = mock_session
             await auth.get_tokens("qr_abc")
 
     @pytest.mark.asyncio
@@ -303,7 +315,8 @@ class TestGetTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=fallback_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             tokens = await auth.get_tokens("qr_abc")
 
         assert tokens.cookies["SUB"] == "fallback_sub"
@@ -321,9 +334,10 @@ class TestGetTokens:
         mock_session.get = AsyncMock(return_value=login_resp)
 
         with (
-            patch("shared.http.get_session", return_value=mock_session),
+            patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls,
             pytest.raises(RefreshFailedError, match="未获取到 Cookie"),
         ):
+            mock_cls.return_value.__aenter__.return_value = mock_session
             await auth.get_tokens("qr_abc")
 
 
@@ -346,7 +360,8 @@ class TestRefreshTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await auth.refresh_tokens(tokens)
 
         # New cookies should be updated
@@ -367,7 +382,8 @@ class TestRefreshTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             result = await auth.refresh_tokens(tokens)
 
         assert result is tokens  # Same object, no change
@@ -398,7 +414,8 @@ class TestValidateTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             assert await auth.validate_tokens(tokens) is True
 
     @pytest.mark.asyncio
@@ -411,7 +428,8 @@ class TestValidateTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             assert await auth.validate_tokens(tokens) is False
 
     @pytest.mark.asyncio
@@ -422,7 +440,8 @@ class TestValidateTokens:
         mock_session = MagicMock()
         mock_session.get = AsyncMock(side_effect=Exception("connection error"))
 
-        with patch("shared.http.get_session", return_value=mock_session):
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
             assert await auth.validate_tokens(tokens) is False
 
 

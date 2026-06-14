@@ -182,6 +182,7 @@ class WeiboConfig:
 @dataclass
 class GeneralConfig:
     data_dir: str = "./data"
+    disable_ssl_verify: bool = False
 
 
 @dataclass

@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from rich.console import Console
 
@@ -24,42 +26,47 @@ from shared.protocols import Phase
 console = Console()
 logger = logging.getLogger(__name__)
 
-from shared.http import close_session  # noqa: E402
 
 # ═══════════════════════════════════════════════════════════
-# B站完整流程
-# ═══════════════════════════════════════════════════════════
-
-
-async def run_bili_check_once(config: Config, from_phase: Phase | None = None) -> None:
-    """B站完整检查流程（视频+动态统一通过 PipelineEngine 处理）"""
-    from core.engine import PipelineEngine
-
-    await PipelineEngine.run_platform(config, "bili", from_phase=from_phase)
-
-
-# ═══════════════════════════════════════════════════════════
-# 小红书完整流程
+# 平台注册表
 # ═══════════════════════════════════════════════════════════
 
 
-async def run_xhs_check_once(config: Config, from_phase: Phase | None = None) -> None:
-    """小红书完整检查流程"""
-    from core.engine import PipelineEngine
+@dataclass
+class PlatformDef:
+    """平台注册定义。
 
-    await PipelineEngine.run_platform(config, "xhs", from_phase=from_phase)
+    每个平台在 ``PLATFORM_REGISTRY`` 中注册一项即可自动接入
+    ``run_check_once`` 的统一编排。
+
+    Attributes:
+        platform_key: 引擎内标识符（如 ``"bili"``）
+        auth_name: Token 续期用平台名（如 ``"bilibili"``）
+        enabled_check: 接收 Config 返回是否启用
+    """
+
+    platform_key: str
+    auth_name: str
+    enabled_check: Callable[[Config], bool]
 
 
-# ═══════════════════════════════════════════════════════════
-# 微博完整流程
-# ═══════════════════════════════════════════════════════════
-
-
-async def run_weibo_check_once(config: Config, from_phase: Phase | None = None) -> None:
-    """微博完整检查流程"""
-    from core.engine import PipelineEngine
-
-    await PipelineEngine.run_platform(config, "weibo", from_phase=from_phase)
+PLATFORM_REGISTRY: dict[str, PlatformDef] = {
+    "bili": PlatformDef(
+        platform_key="bili",
+        auth_name="bilibili",
+        enabled_check=lambda _: True,
+    ),
+    "xhs": PlatformDef(
+        platform_key="xhs",
+        auth_name="xhs",
+        enabled_check=lambda c: c.xiaohongshu.enabled,
+    ),
+    "weibo": PlatformDef(
+        platform_key="weibo",
+        auth_name="weibo",
+        enabled_check=lambda c: c.weibo.enabled,
+    ),
+}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -73,11 +80,13 @@ async def run_check_once(
     config_path: str = "config/config.toml",
     from_phase: str | None = None,
 ) -> None:
-    """统一检查入口
+    """统一检查入口 — 遍历 ``PLATFORM_REGISTRY`` 执行各平台。
+
+    新增平台只需向 ``PLATFORM_REGISTRY`` 添加一项，无需修改此函数。
 
     Args:
         config: 全局配置
-        platform: "all" | "bili" | "xhs" | "weibo"
+        platform: ``"all"`` | 平台 key（如 ``"bili"``）
         config_path: 配置文件路径，用于 token 续期后的磁盘写入
         from_phase: 可选，从指定阶段重新开始处理
     """
@@ -90,23 +99,16 @@ async def run_check_once(
     console.rule("[bold]Trawler v0.1.0[/bold]")
     console.print()
 
-    if platform in ("all", "bili"):
+    for pkey, pdef in PLATFORM_REGISTRY.items():
+        if platform not in ("all", pkey):
+            continue
+        if not pdef.enabled_check(config):
+            continue
+
         from shared.auth.scheduler import check_and_renew_tokens
 
-        await check_and_renew_tokens("bilibili", config, config_path)
-        await run_bili_check_once(config, from_phase=_phase)
+        await check_and_renew_tokens(pdef.auth_name, config, config_path)
 
-    if platform in ("all", "xhs") and config.xiaohongshu.enabled:
-        from shared.auth.scheduler import check_and_renew_tokens
+        from core.engine import PipelineEngine
 
-        await check_and_renew_tokens("xhs", config, config_path)
-        await run_xhs_check_once(config, from_phase=_phase)
-
-    if platform in ("all", "weibo") and config.weibo.enabled:
-        from shared.auth.scheduler import check_and_renew_tokens
-
-        await check_and_renew_tokens("weibo", config, config_path)
-        await run_weibo_check_once(config, from_phase=_phase)
-
-    # 关闭全局 aiohttp session
-    await close_session()
+        await PipelineEngine.run_platform(config, pkey, from_phase=_phase)
