@@ -17,7 +17,7 @@ from shared.config import Config
 logger = logging.getLogger(__name__)
 
 
-# ── 向后兼容 helper ───────────────────────────────────────────
+# ═══════════════
 
 
 def get_credential(config: Config):

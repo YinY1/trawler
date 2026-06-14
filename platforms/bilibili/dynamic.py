@@ -6,7 +6,6 @@ import logging
 from typing import Optional
 
 from shared.config import Config
-from shared.message_store import MessageStore as SubscriptionStore
 from shared.protocols import DynamicInfo
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ def _parse_dynamic(item: dict, uid: int) -> Optional[DynamicInfo]:
     # ── 作者信息 ──
     author_module = modules.get("module_author", {})
     author = author_module.get("name", "")
-    timestamp = author_module.get("pub_ts", 0)
+    timestamp = int(author_module.get("pub_ts", 0))
 
     # ── 动态类型 ──
     dynamic_type_str = item.get("type", "")
@@ -118,7 +117,7 @@ def _parse_dynamic(item: dict, uid: int) -> Optional[DynamicInfo]:
         orig = item.get("orig")
         if orig:
             orig_major = orig.get("modules", {}).get("module_dynamic", {}).get("major") or {}
-            orig_archive = orig_major.get("archive", {})
+            orig_archive = orig_major.get("archive") or {}
             if orig_archive.get("bvid"):
                 linked_bvid = orig_archive["bvid"]
 
@@ -144,30 +143,31 @@ def _parse_dynamic(item: dict, uid: int) -> Optional[DynamicInfo]:
     )
 
 
-async def check_new_dynamics(
+async def fetch_new_dynamics(
     uid: int,
     config: Config,
-    store: SubscriptionStore,
+    max_count: int | None = None,
 ) -> list[DynamicInfo]:
-    """检查 UP 主的新动态。
+    """获取 UP 主最近动态（纯检测，不去重）。
 
-    调用 bilibili_api 获取 UP 主最近动态列表，与 store 中已知的动态 ID 对比，
-    返回尚未记录的新动态列表。
+    PipelineEngine detector 使用此函数获取动态原始列表，
+    去重由 store.add_new() 内部处理。
 
     Args:
         uid: UP 主 UID
         config: 全局配置
-        store: 已知视频/动态存储（用 bvid/dynamic_id 去重）
+        max_count: 最大获取数量，默认使用 config 中的配置
 
     Returns:
-        新动态列表（按发布时间从新到旧排序）
+        动态列表（按发布时间从新到旧排序）
     """
     from platforms.bilibili.auth import get_credential
 
     credential = get_credential(config)
-    max_count = config.bilibili.monitor.max_videos_per_check
+    if max_count is None:
+        max_count = config.bilibili.monitor.max_videos_per_check
 
-    logger.info(f"检查 UP 主 {uid} 的新动态 (最多 {max_count} 条)")
+    logger.info(f"获取 UP 主 {uid} 的动态列表 (最多 {max_count} 条)")
 
     try:
         cards = await _fetch_user_dynamics(uid, credential, max_count)
@@ -179,25 +179,18 @@ async def check_new_dynamics(
         logger.info(f"UP 主 {uid} 没有动态或获取失败")
         return []
 
-    new_dynamics: list[DynamicInfo] = []
+    dynamics: list[DynamicInfo] = []
     for card in cards:
         dyn = _parse_dynamic(card, uid)
         if dyn is None:
             continue
-        # 用 dynamic_id 做去重 (复用 store 的 bvid 机制，以 "dyn_" 前缀区分)
-        dedup_key = f"dyn_{dyn.dynamic_id}"
-        if store.is_known(dedup_key):
-            continue
-        # 同时检查关联的 BV 号是否已知（仅去重，不阻止动态通知）
-        # 注：linked_bvid 已知时跳过是为了避免重复处理视频，但动态通知仍会发送
-        new_dynamics.append(dyn)
+        dynamics.append(dyn)
 
-    # 按发布时间降序
-    new_dynamics.sort(key=lambda d: d.pubdate, reverse=True)
+    dynamics.sort(key=lambda d: d.pubdate, reverse=True)
 
-    if new_dynamics:
-        logger.info(f"UP 主 {uid} 发现 {len(new_dynamics)} 条新动态")
+    if dynamics:
+        logger.info(f"UP 主 {uid} 获取到 {len(dynamics)} 条动态")
     else:
-        logger.debug(f"UP 主 {uid} 无新动态")
+        logger.debug(f"UP 主 {uid} 无动态")
 
-    return new_dynamics
+    return dynamics

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from rich.console import Console
 
@@ -48,6 +47,27 @@ async def bili_detector(config: Config, store: MessageStore) -> None:
                 pubdate=v.pubdate,
                 title=v.title,
                 author=v.author,
+            )
+
+
+@PipelineEngine.register_detector("bili_dynamic")
+async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
+    """检测 B站 UP 主动态并加入 store。"""
+    if not config.bilibili.monitor.watch_dynamic:
+        return
+
+    from platforms.bilibili.dynamic import fetch_new_dynamics
+
+    for sub in config.bilibili.subscriptions:
+        dynamics = await fetch_new_dynamics(uid=sub.uid, config=config)
+        for dyn in dynamics:
+            store.add_new(
+                msg_id=f"bili_dyn:{dyn.dynamic_id}",
+                platform="bili",
+                content_type=ContentType.DYNAMIC,
+                pubdate=dyn.pubdate,
+                title=dyn.title,
+                author=dyn.author,
             )
 
 
@@ -161,7 +181,7 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
     source_id = ctx.msg.msg_id
     console.print("  [dim]💬 获取评论亮点...[/]")
 
-    if ctx.msg.platform == "bili":
+    if ctx.msg.platform == "bili" and ctx.msg.content_type == ContentType.VIDEO:
         bvid = source_id.replace("bili:", "")
         try:
             highlights = await fetch_comment_highlights(bvid=bvid, config=ctx.config)
@@ -205,7 +225,29 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
 
 @PipelineEngine.register("bili", Phase.PUSHED)
 async def bili_push(ctx: PhaseContext) -> bool:
-    """推送 B站视频通知。"""
+    """推送 B站通知（视频 / 动态）。"""
+    if ctx.msg.content_type == ContentType.DYNAMIC:
+        from core.notifier import notify_dynamic
+
+        console.print("  [dim]🔔 推送动态通知...[/]")
+        dynamic_id = ctx.msg.msg_id.replace("bili_dyn:", "")
+        try:
+            await notify_dynamic(
+                dynamic_info={
+                    "user": ctx.msg.author,
+                    "content": ctx.summary_text or ctx.msg.title,
+                    "dynamic_id": dynamic_id,
+                    "type": "动态",
+                    "url": f"https://t.bilibili.com/{dynamic_id}",
+                },
+                config=ctx.config.bilibili.notification,
+            )
+            console.print("  [green]✓ 动态通知推送完成[/]")
+        except Exception as exc:
+            console.print(f"  [yellow]⚠️  动态通知推送失败: {exc}[/]")
+            logger.warning("Dynamic notify failed for %s: %s", ctx.msg.msg_id, exc)
+        return True
+
     bvid = ctx.msg.msg_id.replace("bili:", "")
     console.print("  [dim]🔔 推送通知...[/]")
 
