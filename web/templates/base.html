@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trawler Web UI</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <nav class="sidebar">
+    <h1>Trawler</h1>
+    <a href="/" class="{% if active_nav == 'dashboard' %}active{% endif %}">📊 仪表盘</a>
+    <a href="/subscriptions" class="{% if active_nav == 'subscriptions' %}active{% endif %}">📋 订阅管理</a>
+    <a href="/check" class="{% if active_nav == 'check' %}active{% endif %}">🔍 内容检查</a>
+    <a href="/auth" class="{% if active_nav == 'auth' %}active{% endif %}">🔑 登录管理</a>
+    <a href="/settings" class="{% if active_nav == 'settings' %}active{% endif %}">⚙️ 设置</a>
+  </nav>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

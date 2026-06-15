@@ -25,6 +25,14 @@ dev = [
     "ruff>=0.4",
     "pyright>=1.1",
 ]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.0",
+    "httpx>=0.27.0",
+    "python-multipart>=0.0.12",
+    "qrcode>=7.4",
+]
 
 [tool.pyright]
 include = ["core", "shared", "platforms", "run_check.py"]

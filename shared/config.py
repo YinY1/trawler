@@ -307,7 +307,7 @@ def _apply_env_overrides(cfg: Config) -> None:
         cfg.analysis.api_base = v
 
 
-def load_config(path: str | Path = "config/config.toml") -> Config:
+async def load_config(path: str | Path = "config/config.toml") -> Config:
     """从 TOML 文件加载配置并应用环境变量覆盖。
 
     配置从三个文件合并加载（均位于 ``config/`` 目录下）：

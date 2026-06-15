@@ -79,6 +79,7 @@ async def run_check_once(
     platform: str = "all",
     config_path: str = "config/config.toml",
     from_phase: str | None = None,
+    log_callback: Callable[[str, str], None] | None = None,
 ) -> None:
     """统一检查入口 — 遍历 ``PLATFORM_REGISTRY`` 执行各平台。
 
@@ -89,6 +90,7 @@ async def run_check_once(
         platform: ``"all"`` | 平台 key（如 ``"bili"``）
         config_path: 配置文件路径，用于 token 续期后的磁盘写入
         from_phase: 可选，从指定阶段重新开始处理
+        log_callback: 可选，``(event_type, message)`` 回调，用于流式日志输出
     """
     # 将字符串转换为 Phase 枚举
     _phase: Phase | None = None
@@ -111,4 +113,6 @@ async def run_check_once(
 
         from core.engine import PipelineEngine
 
-        await PipelineEngine.run_platform(config, pkey, from_phase=_phase)
+        await PipelineEngine.run_platform(
+            config, pkey, from_phase=_phase, log_callback=log_callback
+        )

@@ -1,0 +1,17 @@
+{% if candidates %}
+<ul>
+  {% for c in candidates %}
+  <li>
+    {{ c.get("name", "?") }} (ID: {{ c.get("uid") or c.get("user_id", "?") }})
+    <form action="/subscriptions/add" method="post" style="display:inline;">
+      <input type="hidden" name="platform" value="{{ search_platform }}">
+      <input type="hidden" name="identifier" value="{{ c.get('uid') or c.get('user_id', '') }}">
+      <input type="hidden" name="name" value="{{ c.get('name', '') }}">
+      <button type="submit" class="btn-primary btn-small">添加</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p style="color:#999;">{{ search_msg }}</p>
+{% endif %}

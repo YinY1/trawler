@@ -148,7 +148,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
         from shared.config import load_config
 
-        cfg = load_config(self._config_path)
+        cfg = await load_config(self._config_path)
         refresh_token = cfg.bilibili.auth.refresh_token
         if not refresh_token:
             logger.warning("缺少 refresh_token，跳过 token 续期")

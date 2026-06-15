@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>📋 订阅管理</h2>
+
+{% if flash_msg %}
+<div class="toast {{ flash_type }}">{{ flash_msg }}</div>
+<script>setTimeout(function(){ document.querySelector('.toast').remove(); }, 3000);</script>
+{% endif %}
+
+{% for p in platforms %}
+<div class="card">
+  <h3>{{ p.name }} ({{ p["items"] | length }})</h3>
+  {% if p["items"] %}
+  <table>
+    <thead><tr><th>标识</th><th>名称</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for item in p["items"] %}
+      <tr>
+        <td>{{ item.get("uid") or item.get("user_id", "-") }}</td>
+        <td>{{ item.get("name", "-") }}</td>
+        <td>
+          <form action="/subscriptions/remove" method="post" style="display:inline;">
+            <input type="hidden" name="platform" value="{{ p.key }}">
+            <input type="hidden" name="identifier" value="{{ item.get('uid') or item.get('user_id', '') }}">
+            <button type="submit" class="btn-danger">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: #999;">暂无订阅</p>
+  {% endif %}
+
+  <hr style="margin: 1rem 0;">
+  <h4>添加订阅</h4>
+  <form action="/subscriptions/add" method="post">
+    <input type="hidden" name="platform" value="{{ p.key }}">
+    <input type="text" name="identifier" placeholder="UID / user_id" required>
+    <input type="text" name="name" placeholder="显示名称" required>
+    <button type="submit" class="btn-primary">添加</button>
+  </form>
+
+  <h4 style="margin-top:.8rem;">按名称搜索</h4>
+  <form hx-post="/subscriptions/search" hx-target="#search-{{ p.key }}" hx-swap="innerHTML">
+    <input type="hidden" name="platform" value="{{ p.key }}">
+    <input type="text" name="name" placeholder="搜索名称" required>
+    <button type="submit" class="btn-primary">搜索</button>
+  </form>
+  <div id="search-{{ p.key }}"></div>
+</div>
+{% endfor %}
+{% endblock %}

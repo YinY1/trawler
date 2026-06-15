@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>⚙️ 设置</h2>
+<div class="card">
+  <form action="/settings" method="post">
+    <h3>通用设置</h3>
+    <p><label>数据目录: <input type="text" name="data_dir" value="{{ config.general.data_dir }}" style="width:300px;"></label></p>
+    <p><label><input type="checkbox" name="disable_ssl_verify" {% if config.general.disable_ssl_verify %}checked{% endif %}> 禁用 SSL 验证</label></p>
+
+    <h3>通知</h3>
+    <p><label>Gotify URL: <input type="text" name="gotify_url" value="{{ config.bilibili.notification.gotify_url }}" style="width:400px;"></label></p>
+    <p><label>Gotify Token (B站): <input type="text" name="gotify_token_bili" value="{{ config.bilibili.notification.gotify_token }}" style="width:300px;"></label></p>
+    <p><label>Gotify Token (小红书): <input type="text" name="gotify_token_xhs" value="{{ config.xiaohongshu.notification.gotify_token }}" style="width:300px;"></label></p>
+    <p><label>Gotify Token (微博): <input type="text" name="gotify_token_weibo" value="{{ config.weibo.notification.gotify_token }}" style="width:300px;"></label></p>
+
+    <h3>平台启用</h3>
+    <p><label><input type="checkbox" name="xhs_enabled" {% if config.xiaohongshu.enabled %}checked{% endif %}> 启用小红书</label></p>
+    <p><label><input type="checkbox" name="weibo_enabled" {% if config.weibo.enabled %}checked{% endif %}> 启用微博</label></p>
+    <p><em>B站始终启用</em></p>
+
+    <button type="submit" class="btn-primary" style="margin-top:1rem;">保存</button>
+  </form>
+</div>
+{% endblock %}

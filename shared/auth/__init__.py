@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 # pyright: basic
+from typing import Any
+
 from shared.auth.base import (
     AuthError,
     AuthStatus,
@@ -52,9 +54,11 @@ def get_authenticator(platform: str) -> BaseAuthenticator:
     raise ValueError(f"Unsupported platform: {platform}")
 
 
-def update_auth_section(platform: str, auth_dict: dict, config_path: str = "config/config.toml") -> None:
+async def update_auth_section(
+    platform: str, auth_dict: dict[str, Any], config_path: str = "config/config.toml"
+) -> None:
     """Update [platform.auth] section in cookies.toml (derived from config_path)."""
     from shared.auth.token_store import update_auth_section as _update
 
     table = _PLATFORM_TABLE.get(platform, platform)
-    _update(config_path=config_path, platform=table, auth_dict=auth_dict)
+    await _update(config_path=config_path, platform=table, auth_dict=auth_dict)
