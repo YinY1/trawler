@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from platforms.xiaohongshu.search import (
-    _generate_search_id,
-    _generate_search_request_id,
-    search_xhs_user_by_name,
-)
+from platforms.xiaohongshu.client import _generate_search_id, _generate_search_request_id
+from platforms.xiaohongshu.search import search_xhs_user_by_name
 
 
 class TestGenerateSearchId:
@@ -36,44 +33,21 @@ class TestGenerateSearchRequestId:
 
 
 class TestSearchXhsUserByName:
-    def _mock_response(self, status: int, json_data: dict) -> MagicMock:
-        mock_resp = MagicMock()
-        mock_resp.status = status
-        mock_resp.json = AsyncMock(return_value=json_data)
-        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_resp.__aexit__ = AsyncMock(return_value=None)
-        return mock_resp
-
-    def _setup_mocks(self, mock_resp: MagicMock) -> MagicMock:
-        mock_session = MagicMock()
-        mock_session.post = MagicMock(return_value=mock_resp)
-        mock_cls = MagicMock()
-        mock_cls.return_value.__aenter__.return_value = mock_session
-        return mock_cls
+    """search_xhs_user_by_name uses XhsClient.search_users; tests mock that entry."""
 
     @pytest.mark.asyncio
     async def test_returns_matching_users(self):
-        mock_resp = self._mock_response(
-            200,
-            {
-                "success": True,
-                "data": {
-                    "users": [
-                        {
-                            "user_id": "5a7d3ed311be106d0306e7d6",
-                            "nickname": "Angelababy",
-                            "avatar": "https://avatar.com/1.jpg",
-                        }
-                    ],
-                    "has_more": False,
-                },
-            },
-        )
-        mock_cls = self._setup_mocks(mock_resp)
-
-        with (
-            patch("platforms.xiaohongshu.search.aiohttp.ClientSession", mock_cls),
-            patch("platforms.xiaohongshu.signer.get_xhs_sign", return_value={"xs": "x", "xt": "t", "xs_common": "c"}),
+        with patch(
+            "platforms.xiaohongshu.client.XhsClient.search_users",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "user_id": "5a7d3ed311be106d0306e7d6",
+                        "nickname": "Angelababy",
+                        "avatar": "https://avatar.com/1.jpg",
+                    }
+                ],
+            ),
         ):
             users = await search_xhs_user_by_name("a1=xxx; web_session=yyy", "Angelababy")
 
@@ -83,51 +57,33 @@ class TestSearchXhsUserByName:
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_no_match(self):
-        mock_resp = self._mock_response(
-            200,
-            {
-                "success": True,
-                "data": {"users": [], "has_more": False},
-            },
-        )
-        mock_cls = self._setup_mocks(mock_resp)
-
-        with (
-            patch("platforms.xiaohongshu.search.aiohttp.ClientSession", mock_cls),
-            patch("platforms.xiaohongshu.signer.get_xhs_sign", return_value={"xs": "x", "xt": "t", "xs_common": "c"}),
+        with patch(
+            "platforms.xiaohongshu.client.XhsClient.search_users",
+            new=AsyncMock(return_value=[]),
         ):
-            users = await search_xhs_user_by_name("cookie", "未知用户")
+            users = await search_xhs_user_by_name("a1=xxx", "未知用户")
 
         assert users == []
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_api_error(self):
-        mock_resp = self._mock_response(500, {})
-        mock_cls = self._setup_mocks(mock_resp)
-
-        with (
-            patch("platforms.xiaohongshu.search.aiohttp.ClientSession", mock_cls),
-            patch("platforms.xiaohongshu.signer.get_xhs_sign", return_value={"xs": "x", "xt": "t", "xs_common": "c"}),
+        """XhsClient.search_users raises; search must catch and return []."""
+        with patch(
+            "platforms.xiaohongshu.client.XhsClient.search_users",
+            new=AsyncMock(side_effect=RuntimeError("API error")),
         ):
-            users = await search_xhs_user_by_name("cookie", "test")
+            users = await search_xhs_user_by_name("a1=xxx", "test")
 
         assert users == []
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_success_false(self):
-        mock_resp = self._mock_response(
-            200,
-            {
-                "success": False,
-                "msg": "rate limited",
-            },
-        )
-        mock_cls = self._setup_mocks(mock_resp)
-
-        with (
-            patch("platforms.xiaohongshu.search.aiohttp.ClientSession", mock_cls),
-            patch("platforms.xiaohongshu.signer.get_xhs_sign", return_value={"xs": "x", "xt": "t", "xs_common": "c"}),
-        ):
-            users = await search_xhs_user_by_name("cookie", "test")
+    async def test_returns_empty_when_a1_missing(self):
+        """No a1 cookie → early return without calling search_users."""
+        with patch(
+            "platforms.xiaohongshu.client.XhsClient.search_users",
+            new=AsyncMock(),
+        ) as mock_req:
+            users = await search_xhs_user_by_name("web_session=yyy", "test")
 
         assert users == []
+        mock_req.assert_not_called()

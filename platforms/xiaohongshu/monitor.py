@@ -5,20 +5,12 @@ from __future__ import annotations
 # pyright: basic
 import logging
 from typing import Any, Optional
-from urllib.parse import urlencode
 
-import aiohttp
 from rich.console import Console
 
-from platforms.xiaohongshu.auth import (
-    DEFAULT_USER_AGENT,
-    XHS_API_BASE,
-    XHS_HOME_URL,
-    get_xhs_cookie,
-)
-from platforms.xiaohongshu.signer import get_xhs_sign
+from platforms.xiaohongshu.auth import get_xhs_cookie
+from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
-from shared.constants import XHS_REQUEST_TIMEOUT
 from shared.protocols import NoteInfo
 
 logger = logging.getLogger("trawler.xiaohongshu.monitor")
@@ -26,16 +18,6 @@ console = Console()
 
 # 默认每页笔记数
 DEFAULT_PAGE_SIZE = 20
-
-
-def _extract_a1(cookie: str) -> str:
-    """从 Cookie 字符串中提取 a1 值。"""
-    for part in cookie.split(";"):
-        if "=" in part:
-            k, v = part.strip().split("=", 1)
-            if k.strip() == "a1":
-                return v.strip()
-    return ""
 
 
 def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: str) -> Optional[NoteInfo]:
@@ -126,7 +108,7 @@ async def _fetch_notes_via_api(
     cursor: str = "",
     num: int = DEFAULT_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
-    """通过小红书 API 获取用户笔记列表 (GET with query params)。
+    """通过小红书 API 获取用户笔记列表 (via XhsClient)。
 
     Args:
         user_id: 小红书用户 ID
@@ -137,114 +119,14 @@ async def _fetch_notes_via_api(
     Returns:
         笔记数据列表
     """
-    api = "/api/sns/web/v1/user_posted"
-    params = {
-        "num": str(num),
-        "cursor": cursor,
-        "user_id": user_id,
-        "image_formats": "jpg,webp,avif",
-        "xsec_token": "",
-        "xsec_source": "pc_feed",
-    }
-    # 注意：必须保持逗号不被编码（image_formats），否则签名不匹配 → 406
-    query = urlencode(params, doseq=True, safe=",")
-    full_api = f"{api}?{query}"
-
-    # Build signed headers (same pattern as Spider_XHS vendor)
-    a1 = _extract_a1(cookie)
-    sign = get_xhs_sign(full_api, a1=a1, method="GET")
-    headers: dict[str, str] = {
-        "User-Agent": DEFAULT_USER_AGENT,
-        "Origin": XHS_HOME_URL,
-        "Referer": f"{XHS_HOME_URL}/",
-        "x-s": sign["xs"],
-        "x-t": sign["xt"],
-        "x-s-common": sign["xs_common"],
-        "Cookie": cookie,
-    }
-
-    async with aiohttp.ClientSession(trust_env=False) as session:
-        try:
-            async with session.get(
-                XHS_API_BASE + full_api,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning(f"小红书笔记列表 API 返回状态码: {resp.status}")
-                    return []
-
-                data = await resp.json(content_type=None)
-
-            if not data.get("success", False):
-                msg = data.get("msg", "unknown")
-                logger.warning(f"小红书笔记列表 API 失败: {msg}")
-                return []
-
-            notes = data.get("data", {}).get("notes", [])
-            return notes if isinstance(notes, list) else []
-        except Exception as e:
-            logger.warning(f"小红书笔记列表 API 请求异常: {e}")
-            return []
-
-
-async def _fetch_notes_fallback(
-    user_id: str,
-    cookie: str,
-    cursor: str = "",
-    num: int = DEFAULT_PAGE_SIZE,
-) -> list[dict[str, Any]]:
-    """降级方案：使用无签名请求获取笔记列表（可能不生效）。
-
-    Args:
-        user_id: 小红书用户 ID
-        cookie: Cookie 字符串
-        cursor: 分页游标
-        num: 每页数量
-
-    Returns:
-        笔记数据列表
-    """
-    api = "/api/sns/web/v1/user_posted"
-    params = {
-        "num": str(num),
-        "cursor": cursor,
-        "user_id": user_id,
-        "image_formats": "jpg,webp,avif",
-        "xsec_token": "",
-        "xsec_source": "pc_feed",
-    }
-    # 保持逗号不被编码，确保签名一致性
-    query = urlencode(params, doseq=True, safe=",")
-    full_api = f"{api}?{query}"
-
-    headers: dict[str, str] = {
-        "User-Agent": DEFAULT_USER_AGENT,
-        "Referer": f"{XHS_HOME_URL}/",
-        "Cookie": cookie,
-    }
-
-    async with aiohttp.ClientSession(trust_env=False) as session:
-        try:
-            async with session.get(
-                XHS_API_BASE + full_api,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    logger.debug(f"降级请求返回状态码: {resp.status}")
-                    return []
-
-                data = await resp.json(content_type=None)
-
-            if not data.get("success", False):
-                return []
-
-            notes = data.get("data", {}).get("notes", [])
-            return notes if isinstance(notes, list) else []
-        except Exception as e:
-            logger.debug(f"降级请求失败: {e}")
-            return []
+    client = XhsClient(cookie=cookie)
+    try:
+        return await client.get_user_notes(user_id, cursor=cursor, num=num)
+    except Exception as e:
+        logger.warning(f"小红书笔记列表 API 请求异常: {e}")
+        return []
+    finally:
+        await client.close()
 
 
 async def fetch_user_notes(
@@ -269,21 +151,13 @@ async def fetch_user_notes(
         logger.error(f"[{name}] 缺少 Cookie，无法检查笔记")
         return []
 
-    # 方式1：使用签名 API
+    # XhsClient 统一入口（签名 + 错误转译）
     raw_notes: list[dict[str, Any]] = []
     try:
         raw_notes = await _fetch_notes_via_api(user_id, cookie)
         logger.debug(f"[{name}] 签名 API 获取到 {len(raw_notes)} 条笔记")
     except Exception as e:
         logger.warning(f"[{name}] 签名 API 请求失败: {e}")
-
-    # 方式2：降级请求
-    if not raw_notes:
-        try:
-            raw_notes = await _fetch_notes_fallback(user_id, cookie)
-            logger.debug(f"[{name}] 降级请求获取到 {len(raw_notes)} 条笔记")
-        except Exception as e:
-            logger.warning(f"[{name}] 降级请求也失败: {e}")
 
     if not raw_notes:
         logger.info(f"[{name}] 未获取到任何笔记数据")
