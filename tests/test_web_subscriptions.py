@@ -28,7 +28,7 @@ class TestSubscriptions:
             "/subscriptions/add", data={"platform": "bili", "identifier": "123", "name": "test"}
         )
         assert resp.status_code == 303
-        assert resp.headers["location"] == "/subscriptions"
+        assert resp.headers["location"].startswith("/subscriptions?msg=")
 
     @patch("web.routes.subscriptions.remove_subscription", new_callable=AsyncMock)
     async def test_remove_redirects(self, mock_remove, client: AsyncClient) -> None:
@@ -37,7 +37,7 @@ class TestSubscriptions:
             "/subscriptions/remove", data={"platform": "bili", "identifier": "123"}
         )
         assert resp.status_code == 303
-        assert resp.headers["location"] == "/subscriptions"
+        assert resp.headers["location"].startswith("/subscriptions?msg=")
 
     @patch("web.routes.subscriptions.search_by_name", new_callable=AsyncMock)
     async def test_search_returns_html(self, mock_search, client: AsyncClient) -> None:

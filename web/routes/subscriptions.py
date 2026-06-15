@@ -18,10 +18,17 @@ async def subscriptions_page(request: Request) -> HTMLResponse:
         {"key": "xhs", "name": "小红书", "items": subs.get("xiaohongshu", [])},
         {"key": "weibo", "name": "微博", "items": subs.get("weibo", [])},
     ]
+    flash_msg = request.query_params.get("msg", "")
+    flash_type = request.query_params.get("type", "")
     return TEMPLATES.TemplateResponse(
         request,
         "subscriptions.html",
-        {"active_nav": "subscriptions", "platforms": platforms_data},
+        {
+            "active_nav": "subscriptions",
+            "platforms": platforms_data,
+            "flash_msg": flash_msg,
+            "flash_type": flash_type,
+        },
     )
 
 
@@ -32,8 +39,9 @@ async def subscriptions_add(
     name: str = Form(...),
 ) -> RedirectResponse:
     """Add a subscription."""
-    _ok, _msg = await add_subscription(platform, identifier, name)
-    return RedirectResponse(url="/subscriptions", status_code=303)
+    ok, msg = await add_subscription(platform, identifier, name)
+    t = "success" if ok else "error"
+    return RedirectResponse(url=f"/subscriptions?msg={msg}&type={t}", status_code=303)
 
 
 @router.post("/subscriptions/remove")
@@ -42,8 +50,9 @@ async def subscriptions_remove(
     identifier: str = Form(...),
 ) -> RedirectResponse:
     """Remove a subscription."""
-    _ok, _msg = await remove_subscription(platform, identifier)
-    return RedirectResponse(url="/subscriptions", status_code=303)
+    ok, msg = await remove_subscription(platform, identifier)
+    t = "success" if ok else "error"
+    return RedirectResponse(url=f"/subscriptions?msg={msg}&type={t}", status_code=303)
 
 
 @router.post("/subscriptions/search")
@@ -53,23 +62,9 @@ async def subscriptions_search(
     name: str = Form(...),
 ) -> HTMLResponse:
     """Search for a user by name and show candidates (HTMX target)."""
-    ok, msg, candidates = await search_by_name(platform, name)
-
-    # Render minimal HTML fragment — Jinja2 doesn't support `#fragment` syntax
-    items_html = ""
-    if candidates:
-        for c in candidates:
-            cid = c.get("uid") or c.get("user_id", "")
-            cname = c.get("name", "?")
-            items_html += f"<li>{cname} (ID: {cid}) "
-            items_html += f"""<form action="/subscriptions/add" method="post" style="display:inline;">
-                <input type="hidden" name="platform" value="{platform}">
-                <input type="hidden" name="identifier" value="{cid}">
-                <input type="hidden" name="name" value="{cname}">
-                <button type="submit" class="btn-primary btn-small">添加</button>
-            </form></li>"""
-
-    return HTMLResponse(
-        f"<p>{msg}</p><ul>{items_html}</ul>"
-        + ('<p style="color:#999;">未找到匹配</p>' if not candidates and ok else "")
+    _ok, msg, candidates = await search_by_name(platform, name)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "_candidates.html",
+        {"search_platform": platform, "candidates": candidates, "search_msg": msg},
     )

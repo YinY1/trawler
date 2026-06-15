@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+import tomlkit
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -37,35 +37,33 @@ async def settings_save(
     weibo_enabled: bool = Form(False),
 ) -> RedirectResponse:
     """Save settings to config.toml."""
-    import tomllib
-
     p = Path(CONFIG_PATH)
-    raw: dict[str, Any] = {}
     if p.exists():
-        with open(p, "rb") as f:
-            raw = tomllib.load(f)
+        raw = tomlkit.parse(p.read_text(encoding="utf-8"))
+    else:
+        raw = tomlkit.document()
 
     # Update general
-    raw.setdefault("general", {})["data_dir"] = data_dir
+    raw.setdefault("general", tomlkit.table())["data_dir"] = data_dir
     raw["general"]["disable_ssl_verify"] = disable_ssl_verify
 
-    # Update notifications
-    if gotify_url:
-        for plat in ("bilibili", "xiaohongshu", "weibo"):
-            raw.setdefault(plat, {}).setdefault("notification", {})["gotify_url"] = gotify_url
-    if gotify_token_bili:
-        raw.setdefault("bilibili", {}).setdefault("notification", {})["gotify_token"] = gotify_token_bili
-    if gotify_token_xhs:
-        raw.setdefault("xiaohongshu", {}).setdefault("notification", {})["gotify_token"] = gotify_token_xhs
-    if gotify_token_weibo:
-        raw.setdefault("weibo", {}).setdefault("notification", {})["gotify_token"] = gotify_token_weibo
+    # Update notifications — always write so fields can be cleared via the UI
+    tokens = {
+        "bilibili": gotify_token_bili,
+        "xiaohongshu": gotify_token_xhs,
+        "weibo": gotify_token_weibo,
+    }
+    for plat in ("bilibili", "xiaohongshu", "weibo"):
+        raw.setdefault(plat, tomlkit.table()).setdefault(
+            "notification", tomlkit.table()
+        )["gotify_url"] = gotify_url
+        raw[plat]["notification"]["gotify_token"] = tokens[plat]
 
     # Update platform enabled flags
-    raw.setdefault("xiaohongshu", {})["enabled"] = xhs_enabled
-    raw.setdefault("weibo", {})["enabled"] = weibo_enabled
+    raw.setdefault("xiaohongshu", tomlkit.table())["enabled"] = xhs_enabled
+    raw.setdefault("weibo", tomlkit.table())["enabled"] = weibo_enabled
 
-    # Write back with tomlkit to preserve formatting
-    import tomlkit
+    # Write back with tomlkit to preserve comments and formatting
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(tomlkit.dumps(raw), encoding="utf-8")
 

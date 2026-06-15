@@ -4,13 +4,14 @@ from __future__ import annotations
 
 # pyright: basic
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 
 COOKIES_FILENAME = "cookies.toml"
 
 
-async def update_auth_section(config_path: str | Path, platform: str, auth_dict: dict) -> None:
+async def update_auth_section(config_path: str | Path, platform: str, auth_dict: dict[str, Any]) -> None:
     """Update only the [platform.auth] section in cookies.toml, preserving all other content.
 
     The target file is ``cookies.toml`` in the same directory as ``config_path``.

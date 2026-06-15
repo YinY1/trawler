@@ -8,7 +8,7 @@ import qrcode
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
-from shared.auth import get_authenticator, update_auth_section  # pyright: ignore[reportUnknownVariableType]
+from shared.auth import get_authenticator, update_auth_section
 from shared.auth.base import QRStatus
 from shared.config import Config, load_config
 from web.app import TEMPLATES
@@ -85,19 +85,35 @@ async def auth_poll(platform_key: str) -> dict[str, Any]:
     session = _qr_sessions.get(platform_key)
     if session is None:
         return {"status": "no_session"}
-    status = await auth.poll_qr_status(session["qr_key"])
-    if status.status == QRStatus.SUCCESS:
+    try:
+        status = await auth.poll_qr_status(session["qr_key"])
+    except Exception as exc:
+        return {"status": "error", "message": f"轮询失败: {exc}"}
+
+    if status.status != QRStatus.SUCCESS:
+        return {"status": status.status.value}
+
+    # Status is SUCCESS — get tokens
+    try:
         tokens = await auth.get_tokens(session["qr_key"])
-        # Build auth_dict
-        if platform_key in ("weibo", "xhs"):
-            cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
-            auth_dict: dict[str, Any] = {"cookie": cookie_str, "expires_at": tokens.expires_at}
-        else:
-            auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
-        rt_val = auth.refresh_token
-        if platform_key == "bili" and rt_val:
-            auth_dict["refresh_token"] = rt_val
-        await update_auth_section(platform_key, auth_dict)
+    except Exception as exc:
+        # QR consumed but tokens not obtained — session will expire naturally
         _qr_sessions.pop(platform_key, None)
-        return {"status": "success", "message": "登录成功"}
-    return {"status": status.status.value}
+        return {"status": "error", "message": f"获取凭证失败: {exc}"}
+
+    # Build auth_dict
+    if platform_key in ("weibo", "xhs"):
+        cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
+        auth_dict: dict[str, Any] = {"cookie": cookie_str, "expires_at": tokens.expires_at}
+    else:
+        auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
+    rt_val = getattr(auth, "refresh_token", None)
+    if platform_key == "bili" and rt_val:
+        auth_dict["refresh_token"] = rt_val
+    try:
+        await update_auth_section(platform_key, auth_dict)
+    except Exception as exc:
+        _qr_sessions.pop(platform_key, None)
+        return {"status": "error", "message": f"保存凭证失败: {exc}"}
+    _qr_sessions.pop(platform_key, None)
+    return {"status": "success", "message": "登录成功"}

@@ -2,6 +2,11 @@
 {% block content %}
 <h2>📋 订阅管理</h2>
 
+{% if flash_msg %}
+<div class="toast {{ flash_type }}">{{ flash_msg }}</div>
+<script>setTimeout(function(){ document.querySelector('.toast').remove(); }, 3000);</script>
+{% endif %}
+
 {% for p in platforms %}
 <div class="card">
   <h3>{{ p.name }} ({{ p["items"] | length }})</h3>
