@@ -2,27 +2,20 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 from typing import Any
 
-import aiohttp
 from rich.console import Console
 
-from platforms.xiaohongshu.auth import (
-    XHS_BASE_URL,
-    get_request_headers,
-    get_signed_params,
-    get_xhs_cookie,
-)
+from platforms.xiaohongshu.auth import get_xhs_cookie
+from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS
 from shared.protocols import CommentHighlight
 
 logger = logging.getLogger("trawler.xiaohongshu.comments")
 console = Console()
-
-# 评论 API
-COMMENT_API = f"{XHS_BASE_URL}/api/sns/web/v2/comment/page"
 
 # 最大返回评论数
 MAX_HIGHLIGHT_COMMENTS = MAX_COMMENT_HIGHLIGHTS
@@ -51,7 +44,7 @@ def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> Co
         like_str = comment_data.get("like_count", "0")
         try:
             like_count = int(like_str) if like_str else 0
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             like_count = 0
 
         is_author = bool(author_user_id and user_id == author_user_id)
@@ -73,6 +66,7 @@ async def fetch_xhs_comment_highlights(
     *,
     author_user_id: str = "",
     max_count: int = MAX_HIGHLIGHT_COMMENTS,
+    xsec_token: str = "",
 ) -> list[CommentHighlight]:
     """获取小红书笔记的评论亮点（热门评论）。
 
@@ -93,85 +87,39 @@ async def fetch_xhs_comment_highlights(
         logger.debug(f"[评论] 缺少 Cookie，跳过评论抓取: {note_id}")
         return []
 
-    params: dict[str, Any] = {
-        "note_id": note_id,
-        "cursor": "",
-        "top_comment_id": "",
-        "image_scenes": "",
-    }
+    client = XhsClient(cookie=cookie)
+    try:
+        data = await client.get_comments(note_id, xsec_token=xsec_token)
+    except Exception as e:
+        logger.debug(f"[评论] 请求失败: {e}, note_id: {note_id}")
+        return []
+    finally:
+        await client.close()
 
-    headers = get_request_headers(cookie)
-    signed = get_signed_params(params, cookie)
-    headers.update(signed)
+    comments_raw = data.get("comments", [])
+    if not isinstance(comments_raw, list):
+        return []
 
     all_comments: list[CommentHighlight] = []
+    for raw in comments_raw:
+        comment = _parse_comment(raw, author_user_id)
+        if comment is None or comment.is_author:
+            continue
+        all_comments.append(comment)
 
-    async with aiohttp.ClientSession(trust_env=False) as session:
+    # 尝试获取第二页（如果需要）
+    has_more = data.get("has_more", False)
+    cursor = data.get("cursor", "")
+    if has_more and cursor and len(all_comments) < max_count:
         try:
-            # 获取第一页评论
-            async with session.get(
-                COMMENT_API,
-                params=params,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                if resp.status != 200:
-                    logger.debug(f"[评论] API 返回状态码: {resp.status}, note_id: {note_id}")
-                    return []
-
-                data = await resp.json(content_type=None)
-
-            if not data.get("success", False):
-                logger.debug(f"[评论] API 失败: {data.get('msg', 'unknown')}, note_id: {note_id}")
-                return []
-
-            comments_raw = data.get("data", {}).get("comments", [])
-            if not isinstance(comments_raw, list):
-                return []
-
-            for raw in comments_raw:
+            data2 = await client.get_comments(note_id, cursor=cursor, xsec_token=xsec_token)
+            for raw in data2.get("comments", []):
                 comment = _parse_comment(raw, author_user_id)
-                if comment is None:
+                if comment is None or comment.is_author:
                     continue
-
-                # 过滤笔记作者本人的评论
-                if comment.is_author:
-                    continue
-
                 all_comments.append(comment)
-
-            # 尝试获取第二页（如果需要）
-            has_more = data.get("data", {}).get("has_more", False)
-            cursor = data.get("data", {}).get("cursor", "")
-
-            if has_more and cursor and len(all_comments) < max_count:
-                params["cursor"] = cursor
-                try:
-                    async with session.get(
-                        COMMENT_API,
-                        params=params,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=15),
-                    ) as resp2:
-                        if resp2.status == 200:
-                            data2 = await resp2.json(content_type=None)
-                            if data2.get("success", False):
-                                comments_raw2 = data2.get("data", {}).get("comments", [])
-                                if isinstance(comments_raw2, list):
-                                    for raw in comments_raw2:
-                                        comment = _parse_comment(raw, author_user_id)
-                                        if comment is None or comment.is_author:
-                                            continue
-                                        all_comments.append(comment)
-                except Exception:
-                    pass  # 第二页获取失败不影响结果
-
-        except aiohttp.ClientError as e:
-            logger.debug(f"[评论] 网络请求失败: {e}, note_id: {note_id}")
-            return []
-        except Exception as e:
-            logger.warning(f"[评论] 抓取评论异常: {e}, note_id: {note_id}")
-            return []
+        except Exception:
+            pass  # 第二页获取失败不影响结果
 
     # 按点赞数降序排列
     all_comments.sort(key=lambda c: c.like_count, reverse=True)

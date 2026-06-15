@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 
 from rich.console import Console

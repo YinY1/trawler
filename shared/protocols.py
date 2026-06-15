@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import json
 import logging
 from dataclasses import dataclass, field

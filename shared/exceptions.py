@@ -57,6 +57,18 @@ class NotFoundError(DataError):
     """资源不存在（视频/笔记/帖子已被删除）"""
 
 
+class IpBlockError(TrawlerError):
+    """IP 被平台封禁（XHS code 300012 等）"""
+
+
+class CaptchaError(TrawlerError):
+    """触发了平台验证码（HTTP 461/471 等）"""
+
+
+class RetryableError(TrawlerError):
+    """可重试的临时错误（HTTP 403/429/5xx、网络抖动的基类）"""
+
+
 # ═══════════════════════════════════════════════════════════
 # 异步重试装饰器
 # ═══════════════════════════════════════════════════════════

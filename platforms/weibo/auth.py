@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import http.cookies
 import logging
 import time

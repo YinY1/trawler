@@ -11,9 +11,9 @@ Multi-platform creator content trawler. Monitor Bilibili, Xiaohongshu, and Weibo
 ## Features
 
 - **Multi-platform monitoring** — Subscribe to Bilibili UP主 (RSS/API), Xiaohongshu bloggers, and Weibo users
-- **Auto download** — Video download via yt-dlp, note/image download for Xiaohongshu
-- **Speech-to-text** — SenseVoice (ModelScope) voice recognition with auto language detection
-- **AI summarization** — AI-generated summaries and keyword extraction (CodeBuddy / OpenAI / Ollama / local fallback)
+- **Auto download** — Video/audio download via bilibili_api, note/image download for Xiaohongshu
+- **Speech-to-text** — faster-whisper voice recognition with auto language detection
+- **AI summarization** — AI-generated summaries and keyword extraction (OpenAI / Ollama / local fallback)
 - **Push notifications** — Gotify-based notification with Markdown formatting
 - **Comment highlights** — Extract top comments for Bilibili and Xiaohongshu
 - **QR login** — Bilibili QR code authentication with auto token refresh
@@ -26,28 +26,51 @@ Multi-platform creator content trawler. Monitor Bilibili, Xiaohongshu, and Weibo
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.14+
 - FFmpeg (for audio extraction)
 - Gotify server (optional, for push notifications)
 
 ### Installation
 
 ```bash
-pip install trawler
+# Install with dev tools (recommended)
+uv venv --python 3.14
+uv pip install -e ".[dev]"
 
 # Optional: Xiaohongshu support
-pip install trawler[xhs]
+uv pip install -e ".[xhs]"
 ```
 
 ### Configuration
 
-Create `config.toml` (see `config.toml.example`):
+Copy `config/config.toml.example` to `config/config.toml` and edit:
 
 ```toml
-[bilibili]
-  [bilibili.subscriptions]
-  uid = 123456
-  name = "UP主名称"
+[general]
+data_dir = "./data"
+
+[download]
+dir = "./downloads"
+quality = "worst"
+max_concurrent = 3
+
+[transcribe]
+model = "base"
+language = "zh"
+
+[analysis]
+enabled = true
+
+[bilibili.monitor]
+mode = "rss"
+interval_minutes = 3
+watch_dynamic = true
+
+[xiaohongshu]
+enabled = false
+
+[weibo]
+enabled = false
 ```
 
 ### Usage
@@ -75,10 +98,11 @@ trawler/
 │   ├── pipeline.py    # Workflow pipeline
 │   ├── notifier.py    # Gotify push notifications
 │   ├── summarizer.py  # AI summary & keyword extraction
-│   └── transcriber.py # Speech-to-text (SenseVoice)
+│   └── transcriber.py # Speech-to-text (faster-whisper)
 ├── platforms/
-│   ├── bilibili/      # B站: auth, monitor, comments, dynamic, rss
-│   └── xiaohongshu/   # 小红书: auth, monitor, comments, downloader, parser
+│   ├── bilibili/      # B站: auth, monitor, comments, dynamic
+│   ├── xiaohongshu/   # 小红书: auth, monitor, comments, downloader, parser
+│   └── weibo/         # 微博: auth, monitor, comments, downloader, parser
 ├── shared/
 │   ├── auth/          # Shared auth infrastructure (QR, token store, scheduler)
 │   ├── config.py      # TOML-driven configuration
@@ -86,7 +110,7 @@ trawler/
 │   ├── downloader.py  # Shared download utilities
 │   └── http.py        # Shared aiohttp session
 ├── run_check.py       # CLI entry point (Click)
-└── tests/             # Test suite (pytest, 8 modules)
+└── tests/             # Test suite (pytest, 259+ tests)
 ```
 
 ### Pipeline
@@ -111,13 +135,13 @@ Content Detected → Download → Transcribe → Summarize → Notify → Mark D
 
 ### Repository Overview
 
-Trawler is a Python 3.12 async project with this structure:
+Trawler is a Python 3.14 async project (uv-managed) with this structure:
 
 - **`run_check.py`** — Click CLI entry point with `login`, `token`, `check` commands
 - **`core/`** — Orchestration logic (pipeline, notifier, summarizer, transcriber)
-- **`platforms/`** — Platform adapters (bilibili/, xiaohongshu/)
+- **`platforms/`** — Platform adapters (bilibili/, xiaohongshu/, weibo/)
 - **`shared/`** — Config, data models (protocols.py), auth infrastructure, HTTP client
-- **`tests/`** — pytest tests (8 modules, asyncio mode)
+- **`tests/`** — pytest tests (asyncio mode)
 
 ### Key Design Decisions
 
@@ -125,16 +149,16 @@ Trawler is a Python 3.12 async project with this structure:
 2. **All cross-module contracts in `shared/protocols.py`** — dataclasses + Protocols
 3. **TOML config with env override** — `Config` dataclass hierarchy, env vars take priority
 4. **JsonSetStore for dedup** — `mark_known()` is memory-only, `save()` writes to disk
-5. **AI fallback chain** — CodeBuddy → OpenAI → Ollama → local TF-IDF extraction
+5. **AI fallback chain** — OpenAI → Ollama → local TF-IDF extraction
 6. **RSS-first, API fallback** for Bilibili; API-only for Xiaohongshu/Weibo
 
 ### Development
 
 ```bash
-ruff check .          # lint
-ruff format .         # format
-pyright .             # type check
-pytest -x             # test (fail fast)
+uv run ruff check .          # lint
+uv run ruff format .         # format
+uv run pyright               # type check (uses include paths)
+uv run pytest -x             # test (fail fast)
 ```
 
 ### Adding a New Platform

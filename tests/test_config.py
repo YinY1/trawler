@@ -104,7 +104,7 @@ sessdata = "bili_sess"
 bili_jct = "bili_jct_val"
 buvid3 = "buvid3_val"
 dedeuserid = "12345"
-ac_time_value = "ac123"
+refresh_token = "ac123"
 expires_at = 1735689600.0
 
 [xiaohongshu.auth]
@@ -238,7 +238,7 @@ class TestFullToml:
         assert cfg.bilibili.auth.bili_jct == "bili_jct_val"
         assert cfg.bilibili.auth.buvid3 == "buvid3_val"
         assert cfg.bilibili.auth.dedeuserid == "12345"
-        assert cfg.bilibili.auth.ac_time_value == "ac123"
+        assert cfg.bilibili.auth.refresh_token == "ac123"
         assert cfg.bilibili.auth.expires_at == 1735689600.0
 
     def test_bilibili_monitor(self, tmp_path):
@@ -399,7 +399,7 @@ class TestDataclassDefaults:
         assert a.bili_jct == ""
         assert a.buvid3 == ""
         assert a.dedeuserid == ""
-        assert a.ac_time_value == ""
+        assert a.refresh_token == ""
         assert a.expires_at == 0.0
 
     def test_xhs_auth_defaults(self):

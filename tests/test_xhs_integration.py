@@ -43,12 +43,18 @@ async def main():
     # 保存凭证供后续分析
     # 使用 write_text 而非 JsonSetStore，因为 tokens 是键值凭证存储而非去重集合
     out = Path("tests/xhs_debug_tokens.json")
-    out.write_text(json.dumps({
-        "platform": "xhs",
-        "cookies": tokens.cookies,
-        "obtained_at": tokens.obtained_at,
-        "expires_at": tokens.expires_at,
-    }, indent=2, ensure_ascii=False))
+    out.write_text(
+        json.dumps(
+            {
+                "platform": "xhs",
+                "cookies": tokens.cookies,
+                "obtained_at": tokens.obtained_at,
+                "expires_at": tokens.expires_at,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
     console.print(f"  凭证已保存到 {out}")
 
     # ── Step 2: 验证 validate_tokens + refresh_tokens ──

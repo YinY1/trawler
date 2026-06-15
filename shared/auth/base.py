@@ -79,8 +79,8 @@ class BaseAuthenticator(ABC):
         return False
 
     @property
-    def ac_time_value(self) -> str | None:
-        """Platform-specific additional auth value (e.g. B站 ac_time_value). Returns None by default."""
+    def refresh_token(self) -> str | None:
+        """Platform-specific additional auth value (e.g. B站 refresh_token). Returns None by default."""
         return None
 
     async def qr_login(self, on_status: Callable[[AuthStatus], None] | None = None) -> PlatformTokens:

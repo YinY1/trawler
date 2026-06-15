@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from shared.config import Config
 from shared.protocols import DynamicInfo
+
+if TYPE_CHECKING:
+    from bilibili_api.utils.network import Credential
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +24,7 @@ _DYNAMIC_TYPE_MAP = {
 
 async def _fetch_user_dynamics(
     uid: int,
-    credential: object,
+    credential: Credential,
     max_count: int = 10,
 ) -> list[dict]:
     """获取 UP 主最近动态的原始数据。

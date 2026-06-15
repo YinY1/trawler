@@ -11,6 +11,7 @@ from platforms.weibo.api import (
     _parse_pc_post,
     fetch_user_posts_mobile,
     fetch_user_posts_pc,
+    search_user_by_name,
 )
 
 # ── Cookie helper ─────────────────────────────────────────
@@ -271,3 +272,85 @@ class TestParsePcPost:
         raw = {"text": "no id"}
         result = _parse_pc_post(raw)
         assert result is None
+
+
+# ── search_user_by_name ─────────────────────────────────────────
+
+
+class TestSearchUserByName:
+    def _mock_response(self, status: int, json_data: dict) -> MagicMock:
+        mock_resp = MagicMock()
+        mock_resp.status = status
+        mock_resp.json = AsyncMock(return_value=json_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=None)
+        return mock_resp
+
+    def _setup_mocks(self, mock_resp: MagicMock) -> tuple[MagicMock, MagicMock]:
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_resp)
+        mock_cls = MagicMock()
+        mock_cls.return_value.__aenter__.return_value = mock_session
+        return mock_cls, mock_session
+
+    @pytest.mark.asyncio
+    async def test_returns_matching_users(self):
+        mock_resp = self._mock_response(
+            200,
+            {
+                "ok": 1,
+                "data": {
+                    "cards": [
+                        {
+                            "card_group": [
+                                {
+                                    "user": {
+                                        "id": 2803301701,
+                                        "screen_name": "人民日报",
+                                        "description": "人民日报官方微博",
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+            },
+        )
+        mock_cls, _session = self._setup_mocks(mock_resp)
+
+        with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
+            users = await search_user_by_name("cookie", "人民日报")
+
+        assert len(users) == 1
+        assert users[0]["id"] == 2803301701
+        assert users[0]["screen_name"] == "人民日报"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_no_match(self):
+        mock_resp = self._mock_response(200, {"ok": 1, "data": {"cards": []}})
+        mock_cls, _session = self._setup_mocks(mock_resp)
+
+        with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
+            users = await search_user_by_name("cookie", "未知用户")
+
+        assert users == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_api_error(self):
+        mock_resp = self._mock_response(500, {})
+        mock_cls, _session = self._setup_mocks(mock_resp)
+
+        with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
+            users = await search_user_by_name("cookie", "test")
+
+        assert users == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_not_ok(self):
+        mock_resp = self._mock_response(200, {"ok": 0})
+        mock_cls, _session = self._setup_mocks(mock_resp)
+
+        with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
+            users = await search_user_by_name("cookie", "test")
+
+        assert users == []

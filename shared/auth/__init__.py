@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# pyright: basic
 from shared.auth.base import (
     AuthError,
     AuthStatus,

@@ -29,7 +29,7 @@ _COMMENT_MODULES: dict[str, str] = {
 }
 
 
-def register(platform: str) -> Callable:
+def register(platform: str) -> Callable[..., Any]:
     """装饰器：注册某平台的评论获取器。
 
     被装饰的函数必须接受 ``(content_id: str, config: Config, **kwargs)`` 并返回
@@ -42,7 +42,7 @@ def register(platform: str) -> Callable:
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         _FETCHERS[platform] = func
         return func
 

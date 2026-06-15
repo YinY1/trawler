@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# pyright: basic
 import logging
 import time
 from dataclasses import dataclass
@@ -127,7 +128,7 @@ def _build_tokens_from_config(platform: str, config: Config) -> PlatformTokens |
     try:
         mod = importlib.import_module(module_name)
         return mod.build_tokens_from_config(config)
-    except (ImportError, AttributeError):
+    except ImportError, AttributeError:
         return None
 
 
@@ -161,8 +162,8 @@ def _tokens_to_auth_dict(platform: str, tokens: PlatformTokens, authenticator: A
             "dedeuserid": tokens.cookies.get("dedeuserid", ""),
             "expires_at": tokens.expires_at,
         }
-        if hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-            d["ac_time_value"] = authenticator._last_ac_time_value
+        if hasattr(authenticator, "_last_refresh_token") and authenticator._last_refresh_token:
+            d["refresh_token"] = authenticator._last_refresh_token
         return d
     elif platform in ("weibo", "xhs"):
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
@@ -178,8 +179,8 @@ def _update_config_memory(platform: str, config: Config, tokens: PlatformTokens,
         config.bilibili.auth.buvid3 = tokens.cookies.get("buvid3", "")
         config.bilibili.auth.dedeuserid = tokens.cookies.get("dedeuserid", "")
         config.bilibili.auth.expires_at = tokens.expires_at
-        if authenticator and hasattr(authenticator, "_last_ac_time_value") and authenticator._last_ac_time_value:
-            config.bilibili.auth.ac_time_value = authenticator._last_ac_time_value
+        if authenticator and hasattr(authenticator, "_last_refresh_token") and authenticator._last_refresh_token:
+            config.bilibili.auth.refresh_token = authenticator._last_refresh_token
     elif platform == "weibo":
         config.weibo.auth.cookie = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         config.weibo.auth.expires_at = tokens.expires_at

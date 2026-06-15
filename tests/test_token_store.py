@@ -95,12 +95,12 @@ class TestUpdateAuthSection:
             config_path,
             "bilibili",
             {
-                "ac_time_value": "new_ac_time",
+                "refresh_token": "new_rt",
             },
         )
 
         data = tomllib.loads(_cookies_path(tmp_path).read_text(encoding="utf-8"))
-        assert data["bilibili"]["auth"]["ac_time_value"] == "new_ac_time"
+        assert data["bilibili"]["auth"]["refresh_token"] == "new_rt"
         # Existing fields still present
         assert data["bilibili"]["auth"]["sessdata"] == "old_sess"
 

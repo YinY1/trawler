@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 import re
 from typing import Any

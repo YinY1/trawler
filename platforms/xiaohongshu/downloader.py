@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: basic
 import logging
 import os
 from pathlib import Path
@@ -12,20 +13,15 @@ import aiohttp
 from rich.console import Console
 
 from platforms.xiaohongshu.auth import (
-    XHS_BASE_URL,
-    get_request_headers,
-    get_signed_params,
     get_xhs_cookie,
 )
+from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
-from shared.constants import XHS_DOWNLOAD_TIMEOUT, XHS_REQUEST_TIMEOUT
+from shared.constants import XHS_DOWNLOAD_TIMEOUT
 from shared.protocols import NoteInfo, XhsDownloadResult
 
 logger = logging.getLogger("trawler.xiaohongshu.downloader")
 console = Console()
-
-# 笔记详情 API
-NOTE_FEED_API = f"{XHS_BASE_URL}/api/sns/web/v1/feed"
 
 # 图片下载基础 URL
 IMAGE_CDN_BASE = "https://sns-img-bd.xhscdn.com/"
@@ -215,7 +211,7 @@ async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> Optional[Xh
 
 
 async def _fetch_note_detail(note: NoteInfo, cookie: str) -> Optional[dict[str, Any]]:
-    """直接请求笔记详情 API。
+    """直接请求笔记详情 API (via XhsClient)。
 
     Args:
         note: 笔记信息
@@ -224,43 +220,14 @@ async def _fetch_note_detail(note: NoteInfo, cookie: str) -> Optional[dict[str, 
     Returns:
         笔记详情数据或 None
     """
-    params = {
-        "source_note_id": note.note_id,
-        "image_scenes": ["CRD_WM_WEBP"],
-        "xsec_source": "pc_share",
-        "xsec_token": note.xsec_token,
-    }
-
-    headers = get_request_headers(cookie)
-    signed = get_signed_params(params, cookie)
-    headers.update(signed)
-
-    async with aiohttp.ClientSession(trust_env=False) as session:
-        try:
-            async with session.get(
-                NOTE_FEED_API,
-                params=params,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=XHS_REQUEST_TIMEOUT),
-            ) as resp:
-                if resp.status != 200:
-                    logger.debug(f"笔记详情 API 返回状态码: {resp.status}")
-                    return None
-
-                data = await resp.json(content_type=None)
-
-            if not data.get("success", False):
-                logger.debug(f"笔记详情 API 失败: {data.get('msg', 'unknown')}")
-                return None
-
-            items = data.get("data", {}).get("items", [])
-            if items and isinstance(items, list):
-                return items[0].get("note_card", items[0])
-
-            return None
-        except Exception as e:
-            logger.debug(f"获取笔记详情失败: {e}")
-            return None
+    client = XhsClient(cookie=cookie)
+    try:
+        return await client.get_note_detail(note.note_id, note.xsec_token)
+    except Exception as e:
+        logger.debug(f"获取笔记详情失败: {e}")
+        return None
+    finally:
+        await client.close()
 
 
 async def _download_file(url: str, dest: Path) -> bool:
@@ -280,7 +247,7 @@ async def _download_file(url: str, dest: Path) -> bool:
             async with session.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=XHS_DOWNLOAD_TIMEOUT),
-                ssl=None,
+                ssl=False,
             ) as resp:
                 if resp.status != 200:
                     logger.debug(f"下载文件失败，状态码: {resp.status}, URL: {url}")

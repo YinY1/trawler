@@ -1,244 +1,207 @@
-"""Tests for platforms.xiaohongshu.signer — Node.js subprocess signing."""
+"""Tests for platforms.xiaohongshu.signer — pure-Python xhshow signing.
 
+Spike result (2026-06-15, xhshow 0.2.0):
+- sign_headers(method, uri, cookies, params|payload) works for both GET and POST
+- Returns 7 headers: x-s, x-t, x-s-common, x-b3-traceid, x-mns, x-xray-traceid, xy-direction
+- No a3_hash workaround needed (fixed upstream in 0.2.0)
+"""
+
+# pyright: basic
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from platforms.xiaohongshu.signer import _SIGN_WRAPPER, _VENDOR_DIR, _check_node, get_xhs_sign
+from platforms.xiaohongshu.signer import (
+    _xhs,
+    get_xhs_sign,
+    get_xhs_sign_full,
+)
 
 # ═══════════════════════════════════════════════════════════════
-# _check_node()
+# xhshow availability
 # ═══════════════════════════════════════════════════════════════
 
 
-class TestCheckNode:
-    """Tests for _check_node()."""
+class TestXhshowAvailable:
+    """The signer module loads xhshow at import time."""
 
-    def test_node_exists(self):
-        """Returns True when Node.js is on PATH."""
-        with patch("shutil.which", return_value="/usr/bin/node"):
-            assert _check_node() is True
+    def test_xhs_instance_exists(self):
+        """Module-level _xhs is a real Xhshow instance."""
+        from xhshow import Xhshow
 
-    def test_node_missing(self):
-        """Returns False when Node.js is not on PATH."""
-        with patch("shutil.which", return_value=None):
-            assert _check_node() is False
+        assert isinstance(_xhs, Xhshow)
 
 
 # ═══════════════════════════════════════════════════════════════
-# get_xhs_sign()
+# get_xhs_sign() — short-form 3-key contract (backward compat)
 # ═══════════════════════════════════════════════════════════════
 
 
 class TestGetXhsSign:
-    """Tests for get_xhs_sign()."""
+    """get_xhs_sign returns {xs, xt, xs_common} short-form keys."""
 
     API = "/api/sns/web/v1/login/qrcode/create"
-    VALID_RESULT = {"xs": "xs_value", "xt": 12345, "xs_common": "common_value"}
+    SAMPLE_HEADERS = {
+        "x-s": "XYS_abcdef123",
+        "x-t": "1700000000000",
+        "x-s-common": "CmnABC",
+        "x-b3-traceid": "b3tid",
+        "x-mns": "mns_val",
+        "x-xray-traceid": "xray_tid",
+        "xy-direction": "dy",
+    }
 
-    def test_success(self):
-        """Returns correct dict with xs, xt, xs_common on success."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps(self.VALID_RESULT),
-                stderr="",
-            )
+    def test_returns_three_short_keys_post(self):
+        """POST returns dict with exactly xs, xt, xs_common."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)):
+            result = get_xhs_sign(self.API, data={"qrcode_id": "abc"}, a1="a1_token", method="POST")
+        assert set(result.keys()) == {"xs", "xt", "xs_common"}
+        assert result["xs"] == "XYS_abcdef123"
+        assert result["xt"] == "1700000000000"
+        assert result["xs_common"] == "CmnABC"
 
-            result = get_xhs_sign(self.API, data={"qrcode_id": "abc"}, a1="a1_token")
+    def test_returns_three_short_keys_get(self):
+        """GET also returns the 3-key short form."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)):
+            result = get_xhs_sign("/api/sns/web/v1/user_posted", data="num=20", a1="a1_token", method="GET")
+        assert set(result.keys()) == {"xs", "xt", "xs_common"}
 
-            assert result == {
-                "xs": "xs_value",
-                "xt": "12345",  # xt is always converted to str
-                "xs_common": "common_value",
-            }
+    def test_default_method_is_post(self):
+        """Default method is POST."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
+            get_xhs_sign(self.API, data={"k": "v"}, a1="a1")
+        # Inspect the method= passed to xhshow
+        _, kwargs = mock_sign.call_args
+        assert kwargs["method"] == "POST"
 
-    def test_success_with_empty_data_and_a1(self):
+    def test_empty_data_and_a1(self):
         """Works with empty data and empty a1."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps(self.VALID_RESULT),
-                stderr="",
-            )
-
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
             result = get_xhs_sign(self.API)
+        assert result == {"xs": "XYS_abcdef123", "xt": "1700000000000", "xs_common": "CmnABC"}
+        _, kwargs = mock_sign.call_args
+        assert kwargs["cookies"] == ""
 
-            assert result == {
-                "xs": "xs_value",
-                "xt": "12345",
-                "xs_common": "common_value",
-            }
+    def test_cookies_string_built_from_a1(self):
+        """cookies argument to xhshow is 'a1=<value>' when a1 is provided."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
+            get_xhs_sign(self.API, a1="my_a1_value")
+        _, kwargs = mock_sign.call_args
+        assert kwargs["cookies"] == "a1=my_a1_value"
 
-    def test_method_get(self):
-        """Passes 'GET' as method argument to subprocess."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps(self.VALID_RESULT),
-                stderr="",
+    def test_post_payload_passed_through(self):
+        """POST with dict data passes it as `payload` to xhshow."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
+            get_xhs_sign(self.API, data={"k": "v"}, a1="a1", method="POST")
+        _, kwargs = mock_sign.call_args
+        assert kwargs["payload"] == {"k": "v"}
+        assert kwargs["params"] is None
+
+    def test_get_with_query_string_data(self):
+        """GET with str data parses it into params dict for xhshow."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
+            get_xhs_sign("/api/sns/web/v1/user_posted", data="num=20&cursor=abc", a1="a1", method="GET")
+        _, kwargs = mock_sign.call_args
+        assert kwargs["params"] == {"num": "20", "cursor": "abc"}
+        assert kwargs["payload"] is None
+
+    def test_get_with_dict_data(self):
+        """GET with dict data passes it directly as params."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
+            get_xhs_sign(
+                "/api/sns/web/v1/user_posted",
+                data={"num": "20", "user_id": "u1"},
+                a1="a1",
+                method="GET",
             )
+        _, kwargs = mock_sign.call_args
+        assert kwargs["params"] == {"num": "20", "user_id": "u1"}
 
-            get_xhs_sign(self.API, data={"a": "1"}, method="GET")
+    def test_uri_always_passed(self):
+        """api arg is forwarded as uri to xhshow."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)) as mock_sign:
+            get_xhs_sign("/api/sns/web/v2/user/me", a1="a1", method="GET")
+        _, kwargs = mock_sign.call_args
+        assert kwargs["uri"] == "/api/sns/web/v2/user/me"
 
-            args = mock_run.call_args[0][0]
-            assert args[0] == "node"
-            assert str(_SIGN_WRAPPER) in str(args[1])
-            assert args[2] == self.API
-            assert args[3] == "GET"
 
-    def test_subprocess_input_json(self):
-        """stdin payload is correct JSON with a1 and data."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps(self.VALID_RESULT),
-                stderr="",
-            )
+# ═══════════════════════════════════════════════════════════════
+# get_xhs_sign_full() — full 7-key set for new code
+# ═══════════════════════════════════════════════════════════════
 
-            get_xhs_sign(self.API, data={"k": "v"}, a1="my_a1")
 
-            stdin_str = mock_run.call_args[1]["input"]
-            stdin_data = json.loads(stdin_str)
-            assert stdin_data == {"a1": "my_a1", "data": {"k": "v"}}
+class TestGetXhsSignFull:
+    """get_xhs_sign_full returns the complete 7-key header set."""
 
-    def test_subprocess_cwd_set_to_vendor_dir(self):
-        """cwd is set to _VENDOR_DIR."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps(self.VALID_RESULT),
-                stderr="",
-            )
+    SAMPLE_HEADERS = {
+        "x-s": "XYS_abcdef",
+        "x-t": "1700000000000",
+        "x-s-common": "CmnABC",
+        "x-b3-traceid": "b3tid",
+        "x-mns": "mns_val",
+        "x-xray-traceid": "xray_tid",
+        "xy-direction": "dy",
+    }
 
-            get_xhs_sign(self.API)
+    def test_returns_full_header_set(self):
+        """Returns all 7 headers xhshow produces."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)):
+            result = get_xhs_sign_full("/api/sns/web/v2/user/me", a1="a1", method="GET")
+        assert set(result.keys()) == {
+            "x-s",
+            "x-t",
+            "x-s-common",
+            "x-b3-traceid",
+            "x-mns",
+            "x-xray-traceid",
+            "xy-direction",
+        }
 
-            assert mock_run.call_args[1]["cwd"] == str(_VENDOR_DIR)
+    def test_passthrough_no_key_remapping(self):
+        """Full variant does NOT remap to short-form keys."""
+        with patch.object(_xhs, "sign_headers", return_value=dict(self.SAMPLE_HEADERS)):
+            result = get_xhs_sign_full("/api/x", a1="a1", method="POST")
+        # hyphenated keys preserved verbatim
+        assert result["x-s"] == "XYS_abcdef"
+        assert result["x-s-common"] == "CmnABC"
 
-    def test_missing_node_raises(self):
-        """Raises RuntimeError when Node.js is not installed."""
-        with patch("shutil.which", return_value=None):
-            with pytest.raises(RuntimeError, match="Node.js is required"):
-                get_xhs_sign(self.API)
 
-    def test_missing_wrapper_raises(self):
-        """Raises RuntimeError when sign_wrapper.js is missing."""
-        with patch("shutil.which", return_value="/usr/bin/node"), patch.object(Path, "exists", return_value=False):
-            with pytest.raises(RuntimeError, match="Sign wrapper not found"):
-                get_xhs_sign(self.API)
+# ═══════════════════════════════════════════════════════════════
+# Real xhshow integration (no mocks) — verifies signing actually runs
+# ═══════════════════════════════════════════════════════════════
 
-    def test_nonzero_return_code_with_json_stderr(self):
-        """Raises RuntimeError with error message from JSON stderr."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr='{"error": "invalid a1 token"}',
-            )
 
-            with pytest.raises(RuntimeError, match="invalid a1 token"):
-                get_xhs_sign(self.API)
+class TestXhshowIntegration:
+    """End-to-end signing via real xhshow library (no server contact)."""
 
-    def test_nonzero_return_code_with_plain_text_stderr(self):
-        """Raises RuntimeError with raw stderr when it's not valid JSON."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Node.js runtime error\n",
-            )
+    def test_real_post_signing_returns_nonempty_values(self):
+        result = get_xhs_sign("/api/sns/web/v1/login/qrcode/create", data={"x": 1}, a1="1900000000000abc")
+        assert result["xs"]
+        assert result["xs"].startswith(("XYS_", "XYW_"))
+        assert result["xt"]
+        assert result["xs_common"]
 
-            with pytest.raises(RuntimeError, match="Node.js runtime error"):
-                get_xhs_sign(self.API)
+    def test_real_get_signing_returns_nonempty_values(self):
+        result = get_xhs_sign(
+            "/api/sns/web/v1/user_posted",
+            data="num=20&cursor=&user_id=abc",
+            a1="1900000000000abc",
+            method="GET",
+        )
+        assert result["xs"]
+        assert result["xs"].startswith(("XYS_", "XYW_"))
+        assert result["xt"]
+        assert result["xs_common"]
 
-    def test_nonzero_return_code_with_empty_stderr(self):
-        """Raises RuntimeError with exit code message when stderr is empty/blank."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=2,
-                stdout="",
-                stderr="",
-            )
+    def test_real_full_signing_returns_seven_keys(self):
+        result = get_xhs_sign_full("/api/sns/web/v2/user/me", a1="abc", method="GET")
+        assert "x-b3-traceid" in result
+        assert "x-xray-traceid" in result
+        assert "x-mns" in result
+        assert "xy-direction" in result
 
-            with pytest.raises(RuntimeError, match="exit code 2"):
-                get_xhs_sign(self.API)
-
-    def test_invalid_json_stdout_raises(self):
-        """Raises RuntimeError when stdout is not valid JSON."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="not json here",
-                stderr="",
-            )
-
-            with pytest.raises(RuntimeError, match="Invalid sign output"):
-                get_xhs_sign(self.API)
-
-    def test_result_missing_keys_default_to_empty(self):
-        """Missing keys in output default to empty string or '0'."""
-        with (
-            patch("shutil.which", return_value="/usr/bin/node"),
-            patch("subprocess.run") as mock_run,
-            patch.object(Path, "exists", return_value=True),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps({"xs": "only_xs"}),
-                stderr="",
-            )
-
-            result = get_xhs_sign(self.API)
-
-            assert result == {"xs": "only_xs", "xt": "", "xs_common": ""}
+    def test_real_get_and_post_produce_different_xs(self):
+        """GET and POST to the same URI must produce different x-s (different content strings)."""
+        post = get_xhs_sign("/api/sns/web/v1/feed", data={"k": "v"}, a1="abc", method="POST")
+        get = get_xhs_sign("/api/sns/web/v1/feed", data="k=v", a1="abc", method="GET")
+        assert post["xs"] != get["xs"]
