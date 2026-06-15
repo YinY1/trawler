@@ -10,7 +10,7 @@ import tomlkit
 COOKIES_FILENAME = "cookies.toml"
 
 
-def update_auth_section(config_path: str | Path, platform: str, auth_dict: dict) -> None:
+async def update_auth_section(config_path: str | Path, platform: str, auth_dict: dict) -> None:
     """Update only the [platform.auth] section in cookies.toml, preserving all other content.
 
     The target file is ``cookies.toml`` in the same directory as ``config_path``.

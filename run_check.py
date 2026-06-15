@@ -93,7 +93,7 @@ def login(platform: str) -> None:
         rt_val = authenticator.refresh_token
         if platform == "bili" and rt_val:
             auth_dict["refresh_token"] = rt_val
-        update_auth_section(platform, auth_dict)
+        asyncio.run(update_auth_section(platform, auth_dict))
         # Save debug tokens JSON for integration tests (avoid re-scan)
         debug_path = Path("tests") / f"{platform}_debug_tokens.json"
         debug_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,7 +126,7 @@ def token_status() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
-    config = load_config("config/config.toml")
+    config = asyncio.run(load_config("config/config.toml"))
 
     table = Table(title="Token 状态")
     table.add_column("平台", style="bold")
@@ -183,7 +183,7 @@ def token_refresh(platform: str | None, refresh_all: bool, force: bool) -> None:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
     )
 
-    config = load_config("config/config.toml")
+    config = asyncio.run(load_config("config/config.toml"))
 
     if refresh_all:
         targets = [p for p in ["bili", "xhs", "weibo"] if _is_platform_configured(p, config, force)]
@@ -258,7 +258,7 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             rt_val = authenticator.refresh_token
             if rt_val:
                 auth_dict["refresh_token"] = rt_val
-            update_auth_section(platform, auth_dict)
+            asyncio.run(update_auth_section(platform, auth_dict))
             console.print(f"[green]✓[/] {platform} Token 续期成功")
             return True
         except Exception as exc:
@@ -288,7 +288,7 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
-            update_auth_section("weibo", auth_dict)
+            asyncio.run(update_auth_section("weibo", auth_dict))
             console.print("[green]✓[/] weibo Token 续期成功")
             return True
         except Exception as exc:
@@ -318,7 +318,7 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             tokens = asyncio.run(authenticator.refresh_tokens(current_tokens))
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
-            update_auth_section("xhs", auth_dict)
+            asyncio.run(update_auth_section("xhs", auth_dict))
             console.print("[green]✓[/] xhs Token 续期成功")
             return True
         except Exception as exc:
@@ -350,7 +350,7 @@ def sub_add(platform: str, identifier: str | None, search_name: str | None, name
     """添加订阅"""
     if search_name:
         # ── 按名称搜索 ────────────────────────────────────────
-        ok, msg, candidates = search_by_name(platform, search_name)
+        ok, msg, candidates = asyncio.run(search_by_name(platform, search_name))
         if not ok:
             console.print(f"[red]✗[/] {msg}")
             sys.exit(1)
@@ -359,7 +359,7 @@ def sub_add(platform: str, identifier: str | None, search_name: str | None, name
             c = candidates[0]
             cid = c.get("uid", c.get("user_id", ""))
             cname = c.get("name", search_name)
-            ok2, msg2 = add_subscription(platform, cid, cname)
+            ok2, msg2 = asyncio.run(add_subscription(platform, cid, cname))
             if ok2:
                 console.print(f"[green]✓[/] {msg2} (ID: {cid})")
             else:
@@ -377,7 +377,7 @@ def sub_add(platform: str, identifier: str | None, search_name: str | None, name
         if not name:
             console.print("[red]✗ 使用 --id 时需要同时提供 --name[/]")
             sys.exit(1)
-        ok, msg = add_subscription(platform, identifier, name)
+        ok, msg = asyncio.run(add_subscription(platform, identifier, name))
         if ok:
             console.print(f"[green]✓[/] {msg}")
         else:
@@ -398,7 +398,7 @@ def sub_add(platform: str, identifier: str | None, search_name: str | None, name
 @click.option("--id", "identifier", required=True, help="订阅标识（B站 UID / 小红书 user_id / 微博 user_id）")
 def sub_remove(platform: str, identifier: str) -> None:
     """删除订阅"""
-    ok, msg = remove_subscription(platform, identifier)
+    ok, msg = asyncio.run(remove_subscription(platform, identifier))
     if ok:
         console.print(f"[green]✓[/] {msg}")
     else:
@@ -415,7 +415,7 @@ def sub_remove(platform: str, identifier: str) -> None:
 )
 def sub_list(platform: str | None) -> None:
     """列出所有订阅"""
-    subs = list_subscriptions(platform=platform)
+    subs = asyncio.run(list_subscriptions(platform=platform))
 
     if not subs:
         console.print("[dim]暂无订阅[/]")
@@ -472,7 +472,7 @@ def sub_list(platform: str | None) -> None:
 def check(platform: str, config_path: str, verbose: bool, from_phase: str | None) -> None:
     """检查各平台新内容"""
     try:
-        config = load_config(config_path)
+        config = asyncio.run(load_config(config_path))
     except Exception as exc:
         console.print(f"[red]✗ 配置加载失败: {exc}[/]")
         sys.exit(1)

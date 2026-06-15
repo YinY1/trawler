@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>🔍 内容检查</h2>
+<div class="card">
+  <p>触发一次全平台内容检查（B站、小红书、微博）。日志将实时推送。</p>
+  <button id="run-btn" class="btn-success" hx-post="/check/run" hx-target="#run-status" hx-swap="innerHTML"
+    hx-on::after-request="if(event.detail.successful) { this.disabled=true; this.textContent='运行中...'; initSSE(); }">
+    开始检查
+  </button>
+  <div id="run-status"></div>
+</div>
+<div class="card">
+  <h3>📝 日志输出</h3>
+  <div id="log-output"></div>
+</div>
+
+<script>
+function initSSE() {
+  var el = document.getElementById('log-output');
+  var evtSource = new EventSource('/check/stream');
+  evtSource.addEventListener('log', function(e) {
+    var data = JSON.parse(e.data);
+    el.innerHTML += '[' + data.time + '] ' + data.message + '\n';
+    el.scrollTop = el.scrollHeight;
+  });
+  evtSource.addEventListener('done', function() {
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('run-btn').textContent = '开始检查';
+    evtSource.close();
+  });
+}
+</script>
+{% endblock %}

@@ -99,9 +99,9 @@ async def check_and_renew_tokens(
         if new_tokens.obtained_at > tokens.obtained_at:
             from shared.auth import update_auth_section
 
-            _update_last_refresh_at(platform, config, new_tokens.obtained_at, config_path)
+            await _update_last_refresh_at(platform, config, new_tokens.obtained_at, config_path)
             auth_dict = _tokens_to_auth_dict(platform, new_tokens, authenticator)
-            update_auth_section(platform, auth_dict, config_path=config_path)
+            await update_auth_section(platform, auth_dict, config_path=config_path)
             _update_config_memory(platform, config, new_tokens, authenticator)
             logger.info("%s token 续期成功", platform)
             return RenewalResult(platform, "renewed", f"{platform}: token 续期成功")
@@ -196,10 +196,10 @@ def _get_last_refresh_at(platform: str, config: Config) -> float:
     return 0.0
 
 
-def _update_last_refresh_at(platform: str, config: Config, timestamp: float, config_path: str) -> None:
+async def _update_last_refresh_at(platform: str, config: Config, timestamp: float, config_path: str) -> None:
     """更新上次刷新尝试时间到配置文件和内存。"""
     from shared.auth import update_auth_section
 
     if platform == "bilibili":
         config.bilibili.auth.last_refresh_at = timestamp
-        update_auth_section(platform, {"last_refresh_at": timestamp}, config_path=config_path)
+        await update_auth_section(platform, {"last_refresh_at": timestamp}, config_path=config_path)

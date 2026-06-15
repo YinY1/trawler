@@ -156,13 +156,13 @@ def _write_full_config(tmp_path) -> Path:
 
 
 class TestMissingFile:
-    def test_missing_file_returns_defaults(self, tmp_path):
-        cfg = load_config(tmp_path / "nonexistent.toml")
+    async def test_missing_file_returns_defaults(self, tmp_path):
+        cfg = await load_config(tmp_path / "nonexistent.toml")
         assert isinstance(cfg, Config)
         assert cfg == Config()
 
-    def test_missing_file_all_defaults(self, tmp_path):
-        cfg = load_config(tmp_path / "nonexistent.toml")
+    async def test_missing_file_all_defaults(self, tmp_path):
+        cfg = await load_config(tmp_path / "nonexistent.toml")
         # Spot-check all major sections
         assert cfg.general.data_dir == "./data"
         assert cfg.auth.renewal.min_interval_hours == 24
@@ -183,10 +183,10 @@ class TestMissingFile:
 
 
 class TestEmptyToml:
-    def test_empty_file_returns_defaults(self, tmp_path):
+    async def test_empty_file_returns_defaults(self, tmp_path):
         p = tmp_path / "config.toml"
         p.write_text("", encoding="utf-8")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg == Config()
 
 
@@ -194,46 +194,46 @@ class TestEmptyToml:
 
 
 class TestFullToml:
-    def test_general(self, tmp_path):
+    async def test_general(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.general.data_dir == "/data/trawler"
 
-    def test_auth_renewal(self, tmp_path):
+    async def test_auth_renewal(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.auth.renewal.min_interval_hours == 12
         assert cfg.auth.renewal.force_before_days == 3
         assert cfg.auth.renewal.check_interval_hours == 4
 
-    def test_download(self, tmp_path):
+    async def test_download(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.download.dir == "/media/downloads"
         assert cfg.download.quality == "best"
         assert cfg.download.format == "bestvideo+bestaudio"
         assert cfg.download.max_concurrent == 5
 
-    def test_transcribe(self, tmp_path):
+    async def test_transcribe(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.transcribe.model == "large"
         assert cfg.transcribe.language == "en"
         assert cfg.transcribe.output_dir == "/transcripts"
         assert cfg.transcribe.delete_after_transcribe is False
 
-    def test_analysis(self, tmp_path):
+    async def test_analysis(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.analysis.enabled is False
         assert cfg.analysis.provider == "openai"
         assert cfg.analysis.api_base == "https://api.openai.com/v1"
         assert cfg.analysis.api_key == "sk-test123"
         assert cfg.analysis.model_name == "gpt-4"
 
-    def test_bilibili_auth(self, tmp_path):
+    async def test_bilibili_auth(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.bilibili.auth.sessdata == "bili_sess"
         assert cfg.bilibili.auth.bili_jct == "bili_jct_val"
         assert cfg.bilibili.auth.buvid3 == "buvid3_val"
@@ -241,32 +241,32 @@ class TestFullToml:
         assert cfg.bilibili.auth.refresh_token == "ac123"
         assert cfg.bilibili.auth.expires_at == 1735689600.0
 
-    def test_bilibili_monitor(self, tmp_path):
+    async def test_bilibili_monitor(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.bilibili.monitor.mode == "api"
         assert cfg.bilibili.monitor.interval_minutes == 5
         assert cfg.bilibili.monitor.watch_dynamic is False
         assert cfg.bilibili.monitor.max_videos_per_check == 20
         assert cfg.bilibili.monitor.rsshub_instances == ["https://custom.rsshub.local"]
 
-    def test_bilibili_notification(self, tmp_path):
+    async def test_bilibili_notification(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.bilibili.notification.gotify_url == "https://gotify.example.com"
         assert cfg.bilibili.notification.gotify_token == "bili-token"
         assert cfg.bilibili.notification.priority == 8
 
-    def test_bilibili_subscriptions(self, tmp_path):
+    async def test_bilibili_subscriptions(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert len(cfg.bilibili.subscriptions) == 2
         assert cfg.bilibili.subscriptions[0] == BiliSubscription(uid=1001, name="UP主A")
         assert cfg.bilibili.subscriptions[1] == BiliSubscription(uid=2002, name="UP主B")
 
-    def test_xiaohongshu(self, tmp_path):
+    async def test_xiaohongshu(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.xiaohongshu.enabled is True
         assert cfg.xiaohongshu.auth.cookie == "xhs_cookie_val"
         assert cfg.xiaohongshu.auth.expires_at == 1735689600.0
@@ -277,9 +277,9 @@ class TestFullToml:
         assert len(cfg.xiaohongshu.subscriptions) == 1
         assert cfg.xiaohongshu.subscriptions[0] == UserSubscription(user_id="xhs_user1", name="博主A")
 
-    def test_weibo(self, tmp_path):
+    async def test_weibo(self, tmp_path):
         p = _write_full_config(tmp_path)
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.weibo.enabled is True
         assert cfg.weibo.auth.cookie == "weibo_cookie_val"
         assert cfg.weibo.auth.expires_at == 1735689600.0
@@ -295,12 +295,12 @@ class TestFullToml:
 
 
 class TestMinimalToml:
-    def test_only_sessdata_set(self, tmp_path):
+    async def test_only_sessdata_set(self, tmp_path):
         # Write an empty config.toml + minimal cookies.toml
         p = tmp_path / "config.toml"
         p.write_text("", encoding="utf-8")
         (tmp_path / "cookies.toml").write_text(MINIMAL_COOKIES_TOML, encoding="utf-8")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.bilibili.auth.sessdata == "abc123"
         # Everything else should be defaults
         assert cfg.bilibili.auth.bili_jct == ""
@@ -320,60 +320,60 @@ class TestMinimalToml:
 
 
 class TestEnvOverrides:
-    def test_trawler_gotify_url(self, tmp_path, monkeypatch):
+    async def test_trawler_gotify_url(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_GOTIFY_URL", "https://override.example.com")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.bilibili.notification.gotify_url == "https://override.example.com"
 
-    def test_trawler_gotify_token_bili(self, tmp_path, monkeypatch):
+    async def test_trawler_gotify_token_bili(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_GOTIFY_TOKEN_BILI", "override-bili-token")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.bilibili.notification.gotify_token == "override-bili-token"
 
-    def test_trawler_gotify_token_xhs(self, tmp_path, monkeypatch):
+    async def test_trawler_gotify_token_xhs(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_GOTIFY_TOKEN_XHS", "override-xhs-token")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.xiaohongshu.notification.gotify_token == "override-xhs-token"
 
-    def test_trawler_gotify_token_weibo(self, tmp_path, monkeypatch):
+    async def test_trawler_gotify_token_weibo(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_GOTIFY_TOKEN_WEIBO", "override-weibo-token")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.weibo.notification.gotify_token == "override-weibo-token"
 
-    def test_trawler_xhs_cookie(self, tmp_path, monkeypatch):
+    async def test_trawler_xhs_cookie(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_XHS_COOKIE", "override-xhs-cookie")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.xiaohongshu.auth.cookie == "override-xhs-cookie"
 
-    def test_trawler_weibo_cookie(self, tmp_path, monkeypatch):
+    async def test_trawler_weibo_cookie(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_WEIBO_COOKIE", "override-weibo-cookie")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.weibo.auth.cookie == "override-weibo-cookie"
 
-    def test_trawler_llm_api_key(self, tmp_path, monkeypatch):
+    async def test_trawler_llm_api_key(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_LLM_API_KEY", "override-api-key")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.analysis.api_key == "override-api-key"
 
-    def test_trawler_llm_api_base(self, tmp_path, monkeypatch):
+    async def test_trawler_llm_api_base(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_LLM_API_BASE", "https://override.api.com")
-        cfg = load_config(p)
+        cfg = await load_config(p)
         assert cfg.analysis.api_base == "https://override.api.com"
 
-    def test_env_override_with_empty_config(self, tmp_path, monkeypatch):
+    async def test_env_override_with_empty_config(self, tmp_path, monkeypatch):
         """Env vars should work even when no config file exists."""
         monkeypatch.setenv("FEEDFLOW_GOTIFY_URL", "https://from-env.com")
         monkeypatch.setenv("FEEDFLOW_XHS_COOKIE", "env-cookie")
         monkeypatch.setenv("FEEDFLOW_LLM_API_KEY", "env-key")
-        cfg = load_config(tmp_path / "nonexistent.toml")
+        cfg = await load_config(tmp_path / "nonexistent.toml")
         assert cfg.bilibili.notification.gotify_url == "https://from-env.com"
         assert cfg.xiaohongshu.auth.cookie == "env-cookie"
         assert cfg.analysis.api_key == "env-key"
@@ -546,7 +546,7 @@ class TestDictToDataclass:
 
 
 class TestDefaultPath:
-    def test_load_config_default_path_is_toml(self, tmp_path, monkeypatch):
+    async def test_load_config_default_path_is_toml(self, tmp_path, monkeypatch):
         """Verify that load_config() defaults to 'config/config.toml'."""
         monkeypatch.chdir(tmp_path)
         cfg_dir = tmp_path / "config"
@@ -554,5 +554,5 @@ class TestDefaultPath:
         p = cfg_dir / "config.toml"
         p.write_text("", encoding="utf-8")
         (cfg_dir / "cookies.toml").write_text(MINIMAL_COOKIES_TOML, encoding="utf-8")
-        cfg = load_config()
+        cfg = await load_config()
         assert cfg.bilibili.auth.sessdata == "abc123"

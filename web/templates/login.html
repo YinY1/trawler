@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>🔑 登录管理</h2>
+<div class="card">
+  <h3>Token 状态</h3>
+  <table>
+    <thead><tr><th>平台</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for p in platforms %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td>{{ p.token_status }}</td>
+        <td>{{ p.expires }}</td>
+        <td>
+          <button class="btn-primary" onclick="showQR('{{ p.key }}')">扫码登录</button>
+          <div id="login-{{ p.key }}"></div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div id="qr-container" style="display:none;" class="card">
+  <h3>二维码</h3>
+  <img id="qr-img" src="" alt="QR Code" style="max-width: 256px;">
+  <div id="qr-status"></div>
+</div>
+
+<script>
+function showQR(platform) {
+  var container = document.getElementById('qr-container');
+  var img = document.getElementById('qr-img');
+  var status = document.getElementById('qr-status');
+  container.style.display = 'block';
+  img.src = '/auth/qr/' + platform + '?t=' + Date.now();
+  status.innerHTML = '等待扫码...';
+
+  // Poll every 2 seconds
+  var pollInterval = setInterval(function() {
+    fetch('/auth/poll/' + platform)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'scanned') {
+          status.innerHTML = '已扫码，请在手机上确认';
+        } else if (data.status === 'success') {
+          status.innerHTML = '✅ 登录成功';
+          clearInterval(pollInterval);
+          setTimeout(function() { location.reload(); }, 1000);
+        } else if (data.status === 'expired' || data.status === 'no_session') {
+          status.innerHTML = '❌ 二维码已过期，请重试';
+          clearInterval(pollInterval);
+        }
+      });
+  }, 2000);
+}
+</script>
+{% endblock %}

@@ -132,6 +132,7 @@ class PipelineEngine:
         config: Config,
         platform: str,
         from_phase: Phase | None = None,
+        log_callback: Callable[[str, str], None] | None = None,
     ) -> None:
         """统一平台入口：cleanup -> detect -> process。
 
@@ -142,9 +143,14 @@ class PipelineEngine:
             config: 全局配置
             platform: 平台标识 ("bili" | "xhs" | "weibo")
             from_phase: 可选，将所有消息回退到指定阶段后重新处理
+            log_callback: 可选，``(event_type, message)`` 回调，用于流式日志输出
         """
         store = MessageStore(config.general.data_dir)
         store.cleanup(24)
+
+        if log_callback:
+            log_callback("log", f"🔍 开始检查 {platform} 平台...")
+            log_callback("log", "🧹 已清理超过 24 小时的消息")
 
         if from_phase is not None:
             store.reset_to_phase(from_phase, platform=platform)
@@ -166,5 +172,8 @@ class PipelineEngine:
         # （MessageRecord.platform 统一为 "bili"，不区分 video/dynamic）
         for msg in store.get_messages(phase=Phase.PUSHED, exclude=True, platform=platform):
             await cls.process_message(msg, config, store)
+
+        if log_callback:
+            log_callback("done", f"✅ {platform} 检查完成")
 
         store.save()

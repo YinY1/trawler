@@ -91,7 +91,7 @@ def _match_sub(item: dict[str, Any], key: str, value: int | str) -> bool:
 # ── Public API ─────────────────────────────────────────────────────
 
 
-def list_subscriptions(
+async def list_subscriptions(
     platform: str | None = None, path: str = "config/subscriptions.toml"
 ) -> dict[str, list[dict[str, Any]]]:
     """List subscriptions, optionally filtered by platform.
@@ -117,7 +117,7 @@ def list_subscriptions(
     return result
 
 
-def add_subscription(
+async def add_subscription(
     platform: str,
     identifier: int | str,
     name: str,
@@ -159,7 +159,7 @@ def add_subscription(
     return True, f"已添加: {name}"
 
 
-def remove_subscription(
+async def remove_subscription(
     platform: str,
     identifier: int | str,
     path: str = "config/subscriptions.toml",
@@ -237,7 +237,7 @@ _AUTH_COOKIE_KEY: dict[str, str] = {
 }
 
 
-def search_by_name(
+async def search_by_name(
     platform: str,
     name: str,
     config_path: str = "config/config.toml",
@@ -250,14 +250,12 @@ def search_by_name(
     if platform not in SEARCH_CAPABLE:
         return False, f"{platform} 暂不支持按名字搜索", []
 
-    import asyncio
-
     if platform == "bili":
-        return asyncio.run(_search_bili(name, config_path))
+        return await _search_bili(name, config_path)
     elif platform == "weibo":
-        return asyncio.run(_search_weibo(name, config_path))
+        return await _search_weibo(name, config_path)
     elif platform == "xhs":
-        return asyncio.run(_search_xhs(name, config_path))
+        return await _search_xhs(name, config_path)
 
     return False, f"{platform} 暂不支持按名字搜索", []
 
@@ -269,7 +267,7 @@ async def _search_bili(name: str, config_path: str) -> tuple[bool, str, list[dic
 
     from shared.config import load_config
 
-    cfg = load_config(config_path)
+    cfg = await load_config(config_path)
     auth = cfg.bilibili.auth
 
     if not auth.sessdata:
@@ -301,7 +299,7 @@ async def _search_weibo(name: str, config_path: str) -> tuple[bool, str, list[di
     """Search Weibo user by name using mobile suggestion API."""
     from shared.config import load_config
 
-    cfg = load_config(config_path)
+    cfg = await load_config(config_path)
     cookie = cfg.weibo.auth.cookie
 
     if not cookie:
@@ -332,7 +330,7 @@ async def _search_xhs(name: str, config_path: str) -> tuple[bool, str, list[dict
     """Search Xiaohongshu user by name."""
     from shared.config import load_config
 
-    cfg = load_config(config_path)
+    cfg = await load_config(config_path)
     cookie = cfg.xiaohongshu.auth.cookie
 
     if not cookie:
