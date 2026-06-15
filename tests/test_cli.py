@@ -25,6 +25,7 @@ def test_root_help(runner: CliRunner) -> None:
     assert "login" in result.output
     assert "token" in result.output
     assert "check" in result.output
+    assert "subscription" in result.output
 
 
 # ── 2. trawler check --help ────────────────────────────────────
@@ -234,3 +235,121 @@ def test_check_with_from_phase(mock_load_config: MagicMock, mock_run: AsyncMock,
     result = runner.invoke(cli, ["check", "--from-phase", "downloaded", "--platform", "bili"])
     # Should fail on config, not on option parsing
     assert result.exit_code != 2  # exit code 2 = invalid options
+
+
+# ── 12. subscription CLI ──────────────────────────────────────────
+
+
+@patch("run_check.add_subscription", return_value=(True, "已添加: 李大霄"))
+def test_subscription_add(mock_add: MagicMock, runner: CliRunner) -> None:
+    result = runner.invoke(cli, ["subscription", "add", "--platform", "bili", "--id", "123", "--name", "李大霄"])
+    assert result.exit_code == 0
+    assert "已添加" in result.output
+    mock_add.assert_called_once()
+
+
+def test_subscription_add_help(runner: CliRunner) -> None:
+    result = runner.invoke(cli, ["subscription", "add", "--help"])
+    assert result.exit_code == 0
+    assert "--platform" in result.output
+    assert "--id" in result.output
+    assert "--search-name" in result.output
+
+
+@patch("run_check.search_by_name")
+@patch("run_check.add_subscription", return_value=(True, "已添加: 李大霄"))
+def test_subscription_add_search_name(mock_add: MagicMock, mock_search: MagicMock, runner: CliRunner) -> None:
+    mock_search.return_value = (True, "找到 1 个匹配", [{"uid": 2137589551, "name": "李大霄"}])
+    result = runner.invoke(cli, ["subscription", "add", "--platform", "bili", "--search-name", "李大霄"])
+    assert result.exit_code == 0
+    assert "已添加" in result.output
+    assert "2137589551" in result.output
+    mock_add.assert_called_once_with("bili", 2137589551, "李大霄")
+
+
+@patch("run_check.search_by_name")
+def test_subscription_add_search_name_no_match(mock_search: MagicMock, runner: CliRunner) -> None:
+    mock_search.return_value = (False, "未找到名为「Unknown」的用户", [])
+    result = runner.invoke(cli, ["subscription", "add", "--platform", "bili", "--search-name", "Unknown"])
+    assert result.exit_code == 1
+    assert "未找到" in result.output
+
+
+@patch("run_check.search_by_name")
+def test_subscription_add_search_name_multiple(mock_search: MagicMock, runner: CliRunner) -> None:
+    mock_search.return_value = (
+        True,
+        "找到 2 个匹配",
+        [{"uid": 100, "name": "User1"}, {"uid": 200, "name": "User2"}],
+    )
+    result = runner.invoke(cli, ["subscription", "add", "--platform", "bili", "--search-name", "User"])
+    assert result.exit_code == 1
+    assert "多个匹配" in result.output
+    assert "User1" in result.output
+    assert "User2" in result.output
+
+
+@patch("run_check.search_by_name")
+@patch("run_check.add_subscription", return_value=(True, "已添加: 人民日报"))
+def test_subscription_add_search_name_weibo(mock_add: MagicMock, mock_search: MagicMock, runner: CliRunner) -> None:
+    mock_search.return_value = (
+        True,
+        "找到 1 个匹配",
+        [{"user_id": "2803301701", "name": "人民日报"}],
+    )
+    result = runner.invoke(cli, ["subscription", "add", "--platform", "weibo", "--search-name", "人民日报"])
+    assert result.exit_code == 0
+    assert "已添加" in result.output
+
+
+@patch("run_check.search_by_name")
+@patch("run_check.add_subscription", return_value=(True, "已添加: 用户"))
+def test_subscription_add_search_name_xhs(mock_add: MagicMock, mock_search: MagicMock, runner: CliRunner) -> None:
+    mock_search.return_value = (
+        True,
+        "找到 1 个匹配",
+        [{"user_id": "abc123", "name": "小红书用户"}],
+    )
+    result = runner.invoke(cli, ["subscription", "add", "--platform", "xhs", "--search-name", "用户"])
+    assert result.exit_code == 0
+    assert "已添加" in result.output
+
+
+@patch("run_check.remove_subscription", return_value=(True, "已删除: 李大霄"))
+def test_subscription_remove(mock_remove: MagicMock, runner: CliRunner) -> None:
+    result = runner.invoke(cli, ["subscription", "remove", "--platform", "bili", "--id", "123"])
+    assert result.exit_code == 0
+    assert "已删除" in result.output
+    mock_remove.assert_called_once()
+
+
+@patch("run_check.list_subscriptions")
+def test_subscription_list(mock_list: MagicMock, runner: CliRunner) -> None:
+    mock_list.return_value = {
+        "bilibili": [{"uid": 123, "name": "UP1"}],
+        "xiaohongshu": [{"user_id": "abc", "name": "用户2"}],
+    }
+    result = runner.invoke(cli, ["subscription", "list"])
+    assert result.exit_code == 0
+    assert "UP1" in result.output
+    assert "用户2" in result.output
+
+
+@patch("run_check.list_subscriptions")
+def test_subscription_list_filtered(mock_list: MagicMock, runner: CliRunner) -> None:
+    mock_list.return_value = {
+        "bilibili": [{"uid": 123, "name": "UP1"}],
+    }
+    result = runner.invoke(cli, ["subscription", "list", "--platform", "bili"])
+    assert result.exit_code == 0
+    assert "UP1" in result.output
+    assert "B站" in result.output  # display name in Rich table
+    mock_list.assert_called_with(platform="bili")
+
+
+def test_subscription_help(runner: CliRunner) -> None:
+    result = runner.invoke(cli, ["subscription", "--help"])
+    assert result.exit_code == 0
+    assert "add" in result.output
+    assert "remove" in result.output
+    assert "list" in result.output

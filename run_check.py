@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from core.pipeline import run_check_once
+from core.subscription_cli import add_subscription, list_subscriptions, remove_subscription, search_by_name
 from shared.auth import QRExpiredError, get_authenticator, update_auth_section
 from shared.auth.base import PlatformTokens
 from shared.config import Config, load_config
@@ -327,6 +328,119 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
     else:
         console.print(f"[red]✗ 未知平台: {platform}[/]")
         return False
+
+
+@cli.group()
+def subscription() -> None:
+    """订阅管理命令"""
+    pass
+
+
+@subscription.command("add")
+@click.option(
+    "--platform",
+    type=click.Choice(["bili", "xhs", "weibo"]),
+    required=True,
+    help="平台",
+)
+@click.option("--id", "identifier", default=None, help="订阅标识（B站 UID / 小红书 user_id / 微博 user_id）")
+@click.option("--search-name", default=None, help="按名称搜索并添加（支持 bili/weibo/xhs，需已登录）")
+@click.option("--name", default=None, help="订阅名称（与 --id 搭配使用）")
+def sub_add(platform: str, identifier: str | None, search_name: str | None, name: str | None) -> None:
+    """添加订阅"""
+    if search_name:
+        # ── 按名称搜索 ────────────────────────────────────────
+        ok, msg, candidates = search_by_name(platform, search_name)
+        if not ok:
+            console.print(f"[red]✗[/] {msg}")
+            sys.exit(1)
+
+        if len(candidates) == 1:
+            c = candidates[0]
+            cid = c.get("uid", c.get("user_id", ""))
+            cname = c.get("name", search_name)
+            ok2, msg2 = add_subscription(platform, cid, cname)
+            if ok2:
+                console.print(f"[green]✓[/] {msg2} (ID: {cid})")
+            else:
+                console.print(f"[red]✗[/] {msg2}")
+                sys.exit(1)
+        else:
+            console.print("[yellow]⚠️[/] 找到多个匹配用户:")
+            for c in candidates:
+                cid = c.get("uid", c.get("user_id", ""))
+                cname = c.get("name", "?")
+                console.print(f"  [dim]- {cname} (ID: {cid})[/]")
+            console.print("请使用 [bold]--id[/] 指定正确的标识再添加")
+            sys.exit(1)
+    elif identifier:
+        if not name:
+            console.print("[red]✗ 使用 --id 时需要同时提供 --name[/]")
+            sys.exit(1)
+        ok, msg = add_subscription(platform, identifier, name)
+        if ok:
+            console.print(f"[green]✓[/] {msg}")
+        else:
+            console.print(f"[red]✗[/] {msg}")
+            sys.exit(1)
+    else:
+        console.print("[red]✗ 请提供 --id + --name 或 --search-name[/]")
+        sys.exit(1)
+
+
+@subscription.command("remove")
+@click.option(
+    "--platform",
+    type=click.Choice(["bili", "xhs", "weibo"]),
+    required=True,
+    help="平台",
+)
+@click.option("--id", "identifier", required=True, help="订阅标识（B站 UID / 小红书 user_id / 微博 user_id）")
+def sub_remove(platform: str, identifier: str) -> None:
+    """删除订阅"""
+    ok, msg = remove_subscription(platform, identifier)
+    if ok:
+        console.print(f"[green]✓[/] {msg}")
+    else:
+        console.print(f"[red]✗[/] {msg}")
+        sys.exit(1)
+
+
+@subscription.command("list")
+@click.option(
+    "--platform",
+    type=click.Choice(["bili", "xhs", "weibo"]),
+    default=None,
+    help="按平台筛选",
+)
+def sub_list(platform: str | None) -> None:
+    """列出所有订阅"""
+    subs = list_subscriptions(platform=platform)
+
+    if not subs:
+        console.print("[dim]暂无订阅[/]")
+        return
+
+    table = Table(title="订阅列表")
+    table.add_column("平台", style="bold")
+    table.add_column("标识")
+    table.add_column("名称")
+
+    # Platform display names
+    display_names = {
+        "bilibili": "B站",
+        "xiaohongshu": "小红书",
+        "weibo": "微博",
+    }
+
+    for section, items in subs.items():
+        if not items:
+            continue
+        for item in items:
+            ident = item.get("uid") or item.get("user_id") or "-"
+            table.add_row(display_names.get(section, section), str(ident), item.get("name", "-"))
+
+    console.print(table)
 
 
 @cli.command()

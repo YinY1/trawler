@@ -474,3 +474,64 @@ async def fetch_user_posts(
                     post.clean_text = full_text
 
     return results
+
+
+# ── 用户搜索 ────────────────────────────────────────────────────
+
+MOBILE_USER_SEARCH_API = "https://m.weibo.cn/api/container/getIndex?type=suggestion&value={nickname}"
+
+
+async def search_user_by_name(
+    cookie: str,
+    nickname: str,
+    user_agent: str = _DEFAULT_UA,
+) -> list[dict[str, Any]]:
+    """通过昵称搜索微博用户（移动端 suggestion API）。
+
+    Args:
+        cookie: 微博 Cookie 字符串（需含 SUB）
+        nickname: 搜索的昵称
+        user_agent: 自定义 UA
+
+    Returns:
+        用户列表，每项含 id / screen_name / description 等字段
+    """
+    url = MOBILE_USER_SEARCH_API.format(nickname=nickname)
+    headers = {
+        "User-Agent": user_agent,
+        "Referer": "https://m.weibo.cn/",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Cookie": cookie,
+    }
+
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+        except Exception:
+            logger.exception("微博用户搜索请求异常")
+            return []
+
+    if not data.get("ok"):
+        return []
+
+    cards = data.get("data", {}).get("cards", [])
+    users: list[dict[str, Any]] = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        card_group = card.get("card_group", [])
+        if not isinstance(card_group, list):
+            continue
+        for item in card_group:
+            user = item.get("user", {}) if isinstance(item, dict) else {}
+            if user.get("id") and user.get("screen_name"):
+                users.append(user)
+    return users
