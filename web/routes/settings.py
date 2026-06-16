@@ -4,7 +4,7 @@ from pathlib import Path
 
 import tomlkit
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
 from shared.config import load_config
 from web.app import TEMPLATES
@@ -35,7 +35,7 @@ async def settings_save(
     gotify_token_weibo: str = Form(default=""),
     xhs_enabled: bool = Form(False),
     weibo_enabled: bool = Form(False),
-) -> RedirectResponse:
+) -> HTMLResponse:
     """Save settings to config.toml."""
     p = Path(CONFIG_PATH)
     if p.exists():
@@ -67,4 +67,7 @@ async def settings_save(
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(tomlkit.dumps(raw), encoding="utf-8")
 
-    return RedirectResponse(url="/settings", status_code=303)
+    # HX-Trigger header is latin-1 only; emit an ASCII-safe toast key and
+    # let the client map it to a localized message (see base.html showToast).
+    headers = {"HX-Trigger": '{"toast":{"key":"settings.saved","type":"success"}}'}
+    return HTMLResponse(content="", headers=headers, status_code=200)

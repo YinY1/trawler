@@ -1,0 +1,70 @@
+{% macro stat_card(value, label, color="text-[var(--text-primary)]", icon="") -%}
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+  {% if icon %}<div class="mb-1">{{ icon }}</div>{% endif %}
+  <div class="text-3xl font-semibold tracking-tight {{ color }}">{{ value }}</div>
+  <div class="text-sm text-[var(--text-secondary)] mt-1">{{ label }}</div>
+</div>
+{%- endmacro %}
+
+{% macro badge(text, color="blue") -%}
+{%- set color_map = {
+  "blue": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  "green": "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+  "orange": "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+  "red": "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+  "gray": "bg-gray-100 text-gray-700 dark:bg-gray-700/40 dark:text-gray-300"
+} -%}
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-[10px] text-xs font-medium {{ color_map[color] }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro platform_tag(name) -%}
+<span class="inline-flex items-center px-2 py-0.5 rounded-[10px] text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-mono">{{ name }}</span>
+{%- endmacro %}
+
+{% macro toggle(name, checked=false, label="") -%}
+<label class="relative inline-flex items-center cursor-pointer">
+  <input type="hidden" name="{{ name }}" value="false">
+  <input type="checkbox" name="{{ name }}" value="true" class="sr-only peer" {% if checked %}checked{% endif %}>
+  <div class="w-9 h-5 bg-gray-200 dark:bg-gray-700 peer-focus:ring-2 peer-focus:ring-[var(--color-primary)]/30 rounded-full peer transition-colors peer-checked:bg-[var(--color-primary)] after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform peer-checked:after:translate-x-4"></div>
+  {% if label %}<span class="ml-3 text-sm">{{ label }}</span>{% endif %}
+</label>
+{%- endmacro %}
+
+{% macro field(name, value="", label="", type="text", placeholder="", required=false, width="full") -%}
+<div class="flex flex-col gap-1.5 {{ 'col-span-2' if width == 'full' else '' }}">
+  {% if label %}<label class="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">{{ label }}</label>{% endif %}
+  <input type="{{ type }}" name="{{ name }}" value="{{ value }}" placeholder="{{ placeholder }}" {% if required %}required{% endif %}
+    class="px-3 py-2 rounded-[8px] border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] outline-none transition-all duration-200 {{ 'w-full' if width == 'full' else '' }}">
+  <div class="text-xs text-red-500 hidden field-error"></div>
+</div>
+{%- endmacro %}
+
+{% macro progress_segment(label, status="pending") -%}
+{%- set seg_color = {
+  "done": "bg-green-500",
+  "running": "bg-orange-500",
+  "pending": "bg-gray-200 dark:bg-gray-700"
+} -%}
+{%- set label_color = {
+  "done": "text-green-500",
+  "running": "text-orange-500 font-medium",
+  "pending": "text-[var(--text-tertiary)]"
+} -%}
+<div class="flex-1">
+  <div class="h-1 rounded-full {{ seg_color[status] }}"></div>
+  <div class="text-[10px] mt-1 {{ label_color[status] }}">{{ label }}</div>
+</div>
+{%- endmacro %}
+
+{% macro status_dot(status="inactive", label="") -%}
+{%- set dot_color = {
+  "active": "bg-green-500",
+  "pending": "bg-orange-500",
+  "error": "bg-red-500",
+  "inactive": "bg-gray-400"
+} -%}
+<span class="inline-flex items-center gap-1.5 text-xs">
+  <span class="w-2 h-2 rounded-full {{ dot_color[status] }}"></span>
+  {% if label %}{{ label }}{% endif %}
+</span>
+{%- endmacro %}

@@ -1,46 +1,74 @@
 {% extends "base.html" %}
+{% from "_macros.html" import stat_card, badge, platform_tag %}
+
+{% block title %}仪表盘 · Trawler{% endblock %}
+
 {% block content %}
-<h2>📊 仪表盘</h2>
-<div class="stats">
-  <div class="stat-card"><div class="value">{{ total_msgs }}</div><div class="label">总消息</div></div>
-  <div class="stat-card"><div class="value">{{ active_count }}</div><div class="label">处理中</div></div>
-  <div class="stat-card"><div class="value">{{ pushed_count }}</div><div class="label">已完成</div></div>
-  <div class="stat-card"><div class="value">{{ error_count }}</div><div class="label">错误</div></div>
+<h1 class="text-2xl font-semibold tracking-tight mb-1">仪表盘</h1>
+<p class="text-sm text-[var(--text-secondary)] mb-6">
+  实时概览 · 上次更新 {{ last_updated | timeago if last_updated else "—" }}
+</p>
+
+<!-- Stats row 1: message counts -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+  {{ stat_card(total_msgs, "总消息", "text-[var(--text-primary)]") }}
+  {{ stat_card(active_count, "处理中", "text-orange-500") }}
+  {{ stat_card(pushed_count, "已完成", "text-green-500") }}
+  {{ stat_card(error_count, "错误", "text-red-500") }}
 </div>
-<div class="stats">
-  <div class="stat-card"><div class="value" style="color: var(--color-success);">{{ token_ok }}</div><div class="label">Token 有效</div></div>
-  <div class="stat-card"><div class="value" style="color: var(--color-error);">{{ token_expired }}</div><div class="label">Token 过期</div></div>
-  <div class="stat-card"><div class="value" style="color: #999;">{{ token_none }}</div><div class="label">未配置 Token</div></div>
+
+<!-- Stats row 2: token status -->
+<div class="grid grid-cols-3 gap-4 mb-6">
+  {{ stat_card(token_ok, "Token 有效", "text-green-500") }}
+  {{ stat_card(token_expired, "Token 过期", "text-red-500") }}
+  {{ stat_card(token_none, "未配置 Token", "text-[var(--text-tertiary)]") }}
 </div>
+
 {% if sub_counts %}
-<div class="card">
-  <h3>📋 订阅概览</h3>
-  <ul>
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-6">
+  <h2 class="text-base font-semibold mb-4">订阅概览</h2>
+  <div class="flex flex-wrap gap-3">
     {% for platform, count in sub_counts.items() %}
-    <li><strong>{{ platform }}</strong>: {{ count }} 个订阅</li>
+    <div class="flex items-center gap-2 px-3 py-1.5 rounded-[10px] bg-gray-50 dark:bg-gray-800/50">
+      {{ platform_tag(platform) }}
+      <span class="text-sm font-medium">{{ count }}</span>
+    </div>
     {% endfor %}
-  </ul>
+  </div>
 </div>
 {% endif %}
-<div class="card">
-  <h3>📝 最近消息</h3>
+
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+    <h2 class="text-base font-semibold">最近消息</h2>
+  </div>
   {% if recent_messages %}
-  <table>
-    <thead><tr><th>时间</th><th>平台</th><th>标题</th><th>作者</th><th>阶段</th></tr></thead>
-    <tbody>
-      {% for msg in recent_messages %}
-      <tr>
-        <td>{{ msg.pubdate | string }}</td>
-        <td>{{ msg.platform }}</td>
-        <td>{{ msg.title }}</td>
-        <td>{{ msg.author }}</td>
-        <td>{{ msg.phase.name }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-[var(--text-secondary)] text-xs uppercase tracking-wider">
+          <th class="text-left px-5 py-3 font-medium">时间</th>
+          <th class="text-left px-5 py-3 font-medium">平台</th>
+          <th class="text-left px-5 py-3 font-medium">标题</th>
+          <th class="text-left px-5 py-3 font-medium">作者</th>
+          <th class="text-left px-5 py-3 font-medium">阶段</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for msg in recent_messages %}
+        <tr class="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+          <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.pubdate | timeago }}</td>
+          <td class="px-5 py-3">{{ platform_tag(msg.platform) }}</td>
+          <td class="px-5 py-3 max-w-xs truncate" title="{{ msg.title }}">{{ msg.title }}</td>
+          <td class="px-5 py-3 text-[var(--text-secondary)]">{{ msg.author }}</td>
+          <td class="px-5 py-3">{{ badge(msg.phase.name, msg.phase | phase_color) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
-  <p style="color: #999;">暂无消息</p>
+  <div class="p-8 text-center text-[var(--text-secondary)]">暂无消息</div>
   {% endif %}
 </div>
 {% endblock %}

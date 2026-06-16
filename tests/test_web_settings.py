@@ -37,5 +37,6 @@ class TestSettings:
         mock_exists.return_value = True
 
         resp = await client.post("/settings", data={"data_dir": "/data/test"})
-        assert resp.status_code == 303
-        assert resp.headers["location"] == "/settings"
+        assert resp.status_code == 200
+        assert "HX-Trigger" in resp.headers
+        assert "toast" in resp.headers.get("HX-Trigger", "")

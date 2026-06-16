@@ -1,57 +1,211 @@
 {% extends "base.html" %}
+{% from "_macros.html" import platform_tag, status_dot %}
+
+{% block title %}登录管理 · Trawler{% endblock %}
+
 {% block content %}
-<h2>🔑 登录管理</h2>
-<div class="card">
-  <h3>Token 状态</h3>
-  <table>
-    <thead><tr><th>平台</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead>
-    <tbody>
-      {% for p in platforms %}
-      <tr>
-        <td>{{ p.name }}</td>
-        <td>{{ p.token_status }}</td>
-        <td>{{ p.expires }}</td>
-        <td>
-          <button class="btn-primary" onclick="showQR('{{ p.key }}')">扫码登录</button>
-          <div id="login-{{ p.key }}"></div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<h1 class="text-2xl font-semibold tracking-tight mb-1">登录管理</h1>
+<p class="text-sm text-[var(--text-secondary)] mb-6">各平台 Token 状态 · 扫码登录续期</p>
+
+<!-- Token status cards grid -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+  {% for p in platforms %}
+  <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2">
+        {{ platform_tag(p.name) }}
+        {% if "有效" in p.token_status %}
+          {{ status_dot("active") }}
+        {% elif "过期" in p.token_status %}
+          {{ status_dot("error") }}
+        {% else %}
+          {{ status_dot("inactive") }}
+        {% endif %}
+      </div>
+    </div>
+    <div class="text-sm text-[var(--text-primary)] mb-2 font-medium">{{ p.token_status }}</div>
+    {% if p.expires %}
+    <div class="text-xs text-[var(--text-secondary)] mb-4">过期时间: {{ p.expires }}</div>
+    {% else %}
+    <div class="text-xs text-[var(--text-secondary)] mb-4">&nbsp;</div>
+    {% endif %}
+    <div class="flex gap-2">
+      {% if "有效" in p.token_status %}
+      <button class="px-3 py-1.5 text-xs rounded-[8px] border border-gray-300 dark:border-gray-600 text-[var(--text-secondary)] hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">查看</button>
+      <button onclick="openQRModal('{{ p.key }}')" class="px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors">续期</button>
+      {% elif "过期" in p.token_status %}
+      <button onclick="openQRModal('{{ p.key }}')" class="px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors">扫码续期</button>
+      {% else %}
+      <button onclick="openQRModal('{{ p.key }}')" class="px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors">扫码登录</button>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
 </div>
-<div id="qr-container" style="display:none;" class="card">
-  <h3>二维码</h3>
-  <img id="qr-img" src="" alt="QR Code" style="max-width: 256px;">
-  <div id="qr-status"></div>
+
+<!-- QR Modal (hidden by default) -->
+<div id="qr-overlay" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center" onclick="if(event.target===this)closeQRModal()">
+  <div class="bg-white dark:bg-gray-800 rounded-[16px] p-6 shadow-2xl max-w-sm w-full mx-4" onclick="event.stopPropagation()">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold text-[var(--text-primary)]" id="qr-title">扫码登录</h3>
+      <button onclick="closeQRModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl leading-none">&times;</button>
+    </div>
+    <!-- 4-step progress -->
+    <div class="flex items-center gap-1 mb-2">
+      <div id="step-1" class="flex-1 h-1 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors"></div>
+      <div id="step-2" class="flex-1 h-1 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors"></div>
+      <div id="step-3" class="flex-1 h-1 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors"></div>
+      <div id="step-4" class="flex-1 h-1 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors"></div>
+    </div>
+    <div class="flex justify-between text-xs text-[var(--text-secondary)] mb-6">
+      <span id="step-label-1" class="flex-1">二维码生成</span>
+      <span id="step-label-2" class="flex-1 text-center">等待扫描</span>
+      <span id="step-label-3" class="flex-1 text-center">确认登录</span>
+      <span id="step-label-4" class="text-right">保存凭证</span>
+    </div>
+    <!-- QR image -->
+    <div class="flex justify-center mb-4">
+      <img id="qr-img" src="" alt="QR Code" class="w-48 h-48 rounded-[8px] border border-gray-200 dark:border-gray-700">
+    </div>
+    <div id="qr-status" class="text-center text-sm text-[var(--text-secondary)] mb-2">正在生成二维码…</div>
+    <div id="qr-countdown" class="text-center text-xs text-orange-500"></div>
+  </div>
 </div>
 
 <script>
-function showQR(platform) {
-  var container = document.getElementById('qr-container');
-  var img = document.getElementById('qr-img');
-  var status = document.getElementById('qr-status');
-  container.style.display = 'block';
-  img.src = '/auth/qr/' + platform + '?t=' + Date.now();
-  status.innerHTML = '等待扫码...';
+  // Override base.html placeholders with real implementation
+  var qrPollInterval = null;
+  var qrCountdownInterval = null;
+  var qrPlatform = null;
 
-  // Poll every 2 seconds
-  var pollInterval = setInterval(function() {
-    fetch('/auth/poll/' + platform)
-      .then(r => r.json())
-      .then(data => {
-        if (data.status === 'scanned') {
-          status.innerHTML = '已扫码，请在手机上确认';
-        } else if (data.status === 'success') {
-          status.innerHTML = '✅ 登录成功';
-          clearInterval(pollInterval);
-          setTimeout(function() { location.reload(); }, 1000);
-        } else if (data.status === 'expired' || data.status === 'no_session') {
-          status.innerHTML = '❌ 二维码已过期，请重试';
-          clearInterval(pollInterval);
+  function setStep(n, state) {
+    // state: 'pending' (gray), 'current' (blue), 'done' (green)
+    var color = state === 'done' ? 'bg-green-500'
+              : state === 'current' ? 'bg-blue-500'
+              : 'bg-gray-200 dark:bg-gray-700';
+    var labelColor = state === 'done' ? 'text-green-500 font-medium'
+                   : state === 'current' ? 'text-blue-500 font-medium'
+                   : 'text-[var(--text-secondary)]';
+    var seg = document.getElementById('step-' + n);
+    if (seg) seg.className = 'flex-1 h-1 rounded-full transition-colors ' + color;
+    var lbl = document.getElementById('step-label-' + n);
+    if (lbl) lbl.className = lbl.className.replace(/text-(green|blue|orange)-500[^'"]*/g, '').replace(/font-medium/g, '').trim() + ' ' + labelColor;
+  }
+
+  function openQRModal(platform) {
+    qrPlatform = platform;
+    var overlay = document.getElementById('qr-overlay');
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+
+    // Reset all steps to pending
+    for (var i = 1; i <= 4; i++) {
+      var seg = document.getElementById('step-' + i);
+      seg.className = 'flex-1 h-1 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors';
+      var lbl = document.getElementById('step-label-' + i);
+      lbl.className = lbl.className.replace(/text-(green|blue|orange)-500[^'"]*/g, '').replace(/font-medium/g, '').trim();
+      lbl.classList.add('text-[var(--text-secondary)]');
+      if (i === 4) lbl.classList.add('text-right');
+      else if (i > 1) lbl.classList.add('text-center');
+    }
+    // Step 1 = current (blue) immediately
+    setStep(1, 'current');
+
+    document.getElementById('qr-status').textContent = '正在生成二维码…';
+    document.getElementById('qr-countdown').textContent = '';
+    document.getElementById('qr-countdown').className = 'text-center text-xs text-orange-500';
+
+    // Load QR image (this triggers server to start the QR session)
+    var img = document.getElementById('qr-img');
+    img.src = '/auth/qr/' + platform + '?t=' + Date.now();
+    img.onload = function() {
+      // QR loaded → step 1 done, step 2 current
+      setStep(1, 'done');
+      setStep(2, 'current');
+      document.getElementById('qr-status').textContent = '等待扫码…';
+      // Start countdown (QR ~120s lifetime)
+      var countdown = 120;
+      document.getElementById('qr-countdown').textContent = '⏱ ' + countdown + 's';
+      if (qrCountdownInterval) clearInterval(qrCountdownInterval);
+      qrCountdownInterval = setInterval(function() {
+        countdown--;
+        document.getElementById('qr-countdown').textContent = '⏱ ' + countdown + 's';
+        if (countdown <= 10) {
+          document.getElementById('qr-countdown').className = 'text-center text-xs text-red-500';
         }
-      });
-  }, 2000);
-}
+        if (countdown <= 0) {
+          clearInterval(qrCountdownInterval);
+          qrCountdownInterval = null;
+          document.getElementById('qr-status').textContent = '二维码已过期，请关闭后重试';
+          document.getElementById('qr-countdown').textContent = '';
+          if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+        }
+      }, 1000);
+    };
+    img.onerror = function() {
+      document.getElementById('qr-status').textContent = '二维码生成失败，请重试';
+    };
+
+    // Start polling
+    if (qrPollInterval) clearInterval(qrPollInterval);
+    qrPollInterval = setInterval(function() {
+      fetch('/auth/poll/' + platform)
+        .then(function(r) { return r.json(); })
+        .then(function(data) { handlePollStatus(data); })
+        .catch(function(err) {
+          // Network error — keep polling, just log
+          console.warn('poll error', err);
+        });
+    }, 2000);
+  }
+
+  function handlePollStatus(data) {
+    var status = data.status;
+    if (status === 'waiting') {
+      // Still waiting — no change
+      return;
+    }
+    if (status === 'scanned') {
+      document.getElementById('qr-status').textContent = '已扫码，请在手机上确认';
+      setStep(2, 'done');
+      setStep(3, 'current');
+      return;
+    }
+    if (status === 'confirmed') {
+      document.getElementById('qr-status').textContent = '已确认，正在保存凭证…';
+      setStep(2, 'done');
+      setStep(3, 'done');
+      setStep(4, 'current');
+      return;
+    }
+    if (status === 'success') {
+      if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+      if (qrCountdownInterval) { clearInterval(qrCountdownInterval); qrCountdownInterval = null; }
+      document.getElementById('qr-status').textContent = '✅ 登录成功';
+      setStep(3, 'done');
+      setStep(4, 'done');
+      setTimeout(function() {
+        closeQRModal();
+        showToast('登录成功', 'success');
+        location.reload();
+      }, 1500);
+      return;
+    }
+    // expired / error / no_session
+    if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+    if (qrCountdownInterval) { clearInterval(qrCountdownInterval); qrCountdownInterval = null; }
+    var msg = data.message || '二维码已过期，请重试';
+    document.getElementById('qr-status').textContent = msg;
+    document.getElementById('qr-countdown').textContent = '';
+  }
+
+  function closeQRModal() {
+    var overlay = document.getElementById('qr-overlay');
+    overlay.classList.add('hidden');
+    overlay.classList.remove('flex');
+    if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+    if (qrCountdownInterval) { clearInterval(qrCountdownInterval); qrCountdownInterval = null; }
+    qrPlatform = null;
+  }
 </script>
 {% endblock %}

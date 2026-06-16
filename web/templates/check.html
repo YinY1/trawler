@@ -1,33 +1,250 @@
 {% extends "base.html" %}
+{% from "_macros.html" import progress_segment %}
+
+{% block title %}内容检查 · Trawler{% endblock %}
+
 {% block content %}
-<h2>🔍 内容检查</h2>
-<div class="card">
-  <p>触发一次全平台内容检查（B站、小红书、微博）。日志将实时推送。</p>
-  <button id="run-btn" class="btn-success" hx-post="/check/run" hx-target="#run-status" hx-swap="innerHTML"
-    hx-on::after-request="if(event.detail.successful) { this.disabled=true; this.textContent='运行中...'; initSSE(); }">
-    开始检查
-  </button>
-  <div id="run-status"></div>
+<h1 class="text-2xl font-semibold tracking-tight mb-1">内容检查</h1>
+<p class="text-sm text-[var(--text-secondary)] mb-6">手动触发一次全平台抓取 · 实时日志输出</p>
+
+<!-- Status panel -->
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-4">
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="flex items-center gap-6 flex-wrap">
+      <div class="flex items-center gap-2">
+        <span id="status-dot" class="w-3 h-3 rounded-full bg-gray-400"></span>
+        <span id="status-text" class="text-sm font-medium">空闲</span>
+      </div>
+      <div class="text-sm text-[var(--text-secondary)]">
+        <span class="text-xs uppercase tracking-wider">已耗时</span>
+        <span id="elapsed-time" class="ml-2 font-mono">00:00</span>
+      </div>
+      <div class="text-sm text-[var(--text-secondary)]">
+        <span class="text-xs uppercase tracking-wider">已处理</span>
+        <span id="processed-count" class="ml-2 font-mono">0</span>
+      </div>
+    </div>
+    <button id="run-btn"
+      class="px-5 py-2 rounded-[9px] text-sm font-medium transition-all duration-200 bg-apple-blue text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      onclick="startCheck()">
+      开始检查
+    </button>
+  </div>
 </div>
-<div class="card">
-  <h3>📝 日志输出</h3>
-  <div id="log-output"></div>
+
+<!-- Progress bar -->
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-4">
+  <h3 class="text-sm font-medium text-[var(--text-secondary)] mb-3">检查进度</h3>
+  <div class="flex gap-1">
+    <div id="prog-discover" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
+    <div id="prog-download" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
+    <div id="prog-transcribe" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
+    <div id="prog-summarize" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
+    <div id="prog-push" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
+  </div>
+  <div class="flex justify-between mt-1.5">
+    <span class="text-xs text-[var(--text-secondary)] flex-1">发现</span>
+    <span class="text-xs text-[var(--text-secondary)] flex-1">下载</span>
+    <span class="text-xs text-[var(--text-secondary)] flex-1">转写</span>
+    <span class="text-xs text-[var(--text-secondary)] flex-1">摘要</span>
+    <span class="text-xs text-[var(--text-secondary)] flex-1">推送</span>
+  </div>
+</div>
+
+<!-- Terminal log -->
+<div class="rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-gray-800 overflow-hidden">
+  <!-- Filter bar -->
+  <div class="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-gray-800">
+    <div class="flex gap-1">
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] bg-blue-600 text-white" data-filter="all">全部</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="error">仅错误</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="live">LIVE</button>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="live-indicator text-xs text-green-500 hidden">● LIVE</span>
+      <button onclick="document.getElementById('log-output').innerHTML = '<span class=&quot;text-gray-500&quot;>日志已清空</span>'" class="text-xs text-gray-500 hover:text-white transition-colors">清空</button>
+    </div>
+  </div>
+  <!-- Log area -->
+  <div id="log-output" class="p-4 font-mono text-sm leading-relaxed h-[480px] overflow-y-auto" style="background: #1e1e1e; color: #d4d4d4;">
+    <span class="text-gray-500">等待开始检查…</span>
+  </div>
 </div>
 
 <script>
-function initSSE() {
-  var el = document.getElementById('log-output');
-  var evtSource = new EventSource('/check/stream');
-  evtSource.addEventListener('log', function(e) {
-    var data = JSON.parse(e.data);
-    el.innerHTML += '[' + data.time + '] ' + data.message + '\n';
+  /* ── Check page state ── */
+  var evtSource = null;
+  var startTime = null;
+  var elapsedTimer = null;
+  var processedCount = 0;
+
+  function startCheck() {
+    var btn = document.getElementById('run-btn');
+    if (btn.disabled) return;
+    fetch('/check/run', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'started') { initSSE(); }
+        else if (data.status === 'already_running') { showToast('检查已在运行中', 'warning'); }
+        else { showToast('启动失败: ' + (data.status || '未知'), 'error'); }
+      })
+      .catch(function(err) { showToast('请求失败: ' + err.message, 'error'); });
+  }
+
+  function initSSE() {
+    if (evtSource) evtSource.close();
+    startTime = Date.now();
+    processedCount = 0;
+    updateStatus('running', '运行中');
+    setRunButtonState('running');
+
+    // Reset progress bars
+    document.querySelectorAll('[id^="prog-"]').forEach(function(el) {
+      el.className = el.className.replace(/bg-(green|orange)-500/g, '') + ' bg-gray-200 dark:bg-gray-700';
+    });
+
+    // Reset log
+    var logEl = document.getElementById('log-output');
+    logEl.innerHTML = '';
+    document.getElementById('processed-count').textContent = '0';
+    document.querySelector('.live-indicator').classList.remove('hidden');
+
+    // Start elapsed timer
+    if (elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(updateElapsed, 1000);
+    updateElapsed();
+
+    // Open SSE
+    evtSource = new EventSource('/check/stream');
+    evtSource.addEventListener('log', function(e) {
+      var data;
+      try { data = JSON.parse(e.data); } catch(_) { return; }
+      appendLog(data);
+      processedCount++;
+      document.getElementById('processed-count').textContent = processedCount;
+    });
+    evtSource.addEventListener('done', function() {
+      evtSource.close();
+      evtSource = null;
+      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+      updateStatus('done', '已完成');
+      setRunButtonState('done');
+      // All segments green
+      document.querySelectorAll('[id^="prog-"]').forEach(function(el) {
+        el.className = el.className.replace(/bg-(gray-200|dark:bg-gray-700|orange-500)/g, '') + ' bg-green-500';
+      });
+      document.querySelector('.live-indicator').classList.add('hidden');
+      appendLog({ type: 'ok', message: '── 检查完成 ──', time: formatTimeStr() });
+    });
+    evtSource.addEventListener('error', function() {
+      // EventSource auto-reconnects; only show toast on first error
+      if (evtSource && evtSource.readyState === EventSource.CLOSED) {
+        showToast('日志流连接已关闭', 'warning');
+      }
+    });
+  }
+
+  function updateStatus(state, text) {
+    var dot = document.getElementById('status-dot');
+    var cls = 'w-3 h-3 rounded-full ';
+    if (state === 'running') cls += 'bg-orange-500 animate-pulse';
+    else if (state === 'done') cls += 'bg-green-500';
+    else cls += 'bg-gray-400';
+    dot.className = cls;
+    document.getElementById('status-text').textContent = text;
+  }
+
+  function setRunButtonState(state) {
+    var btn = document.getElementById('run-btn');
+    btn.className = btn.className.replace(/bg-(apple-blue|blue-600|orange-500|green-500)/g, '');
+    if (state === 'running') {
+      btn.disabled = true;
+      btn.textContent = '运行中…';
+      btn.className += ' bg-orange-500 cursor-not-allowed';
+    } else if (state === 'done') {
+      btn.disabled = false;
+      btn.textContent = '再次运行';
+      btn.className += ' bg-green-500 hover:bg-green-600';
+    } else {
+      btn.disabled = false;
+      btn.textContent = '开始检查';
+      btn.className += ' bg-apple-blue hover:bg-blue-600';
+    }
+  }
+
+  function updateElapsed() {
+    if (!startTime) return;
+    var sec = Math.floor((Date.now() - startTime) / 1000);
+    var m = Math.floor(sec / 60), s = sec % 60;
+    document.getElementById('elapsed-time').textContent =
+      String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  }
+
+  function appendLog(data) {
+    var el = document.getElementById('log-output');
+    var level = (data.type || 'info').toLowerCase();
+    var levelUpper = level.toUpperCase();
+    var colorClass;
+    if (level === 'error' || level === 'err') { colorClass = 'text-red-400'; levelUpper = 'ERR '; }
+    else if (level === 'warn' || level === 'warning') { colorClass = 'text-orange-400'; levelUpper = 'WARN'; }
+    else if (level === 'ok') { colorClass = 'text-green-400'; }
+    else { colorClass = 'text-gray-400'; levelUpper = 'INFO'; }
+
+    var time = data.time || formatTimeStr();
+    var line = document.createElement('div');
+    line.className = 'log-line';
+    line.setAttribute('data-level', level);
+
+    // Platform tag block — NOTE: 当前 SSE 事件不带 platform 字段（_log_callback 未扩展签名），
+    // 本任务不实现平台标签着色；保留 if 分支作前向兼容。
+    var platformBlock = '';
+    if (data.platform) {
+      platformBlock = '<span class="text-blue-400">[' + escapeHtml(data.platform) + ']</span> ';
+    }
+
+    line.innerHTML =
+      '<span class="text-gray-600">[' + escapeHtml(time) + ']</span> ' +
+      '<span class="' + colorClass + '">[' + escapeHtml(levelUpper) + ']</span> ' +
+      platformBlock +
+      '<span>' + escapeHtml(data.message || '') + '</span>';
+    el.appendChild(line);
     el.scrollTop = el.scrollHeight;
+  }
+
+  function formatTimeStr() {
+    var d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0') + ':' +
+           String(d.getSeconds()).padStart(2, '0');
+  }
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  /* ── Log filter buttons ── */
+  document.querySelectorAll('.filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.filter-btn').forEach(function(b) {
+        b.className = b.className.replace(/bg-blue-600 text-white/g, 'text-gray-400 hover:text-white transition-colors');
+      });
+      this.className = this.className.replace(/text-gray-400 hover:text-white transition-colors/g, '') + ' bg-blue-600 text-white';
+      var filter = this.dataset.filter;
+      document.querySelectorAll('.log-line').forEach(function(line) {
+        if (filter === 'all') {
+          line.style.display = '';
+        } else if (filter === 'error') {
+          line.style.display = (line.getAttribute('data-level') === 'error' || line.getAttribute('data-level') === 'err') ? '' : 'none';
+        } else if (filter === 'live') {
+          line.style.display = '';
+        }
+      });
+      var logEl = document.getElementById('log-output');
+      logEl.scrollTop = logEl.scrollHeight;
+    });
   });
-  evtSource.addEventListener('done', function() {
-    document.getElementById('run-btn').disabled = false;
-    document.getElementById('run-btn').textContent = '开始检查';
-    evtSource.close();
-  });
-}
 </script>
 {% endblock %}

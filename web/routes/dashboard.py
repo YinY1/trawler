@@ -50,6 +50,7 @@ async def dashboard(request: Request) -> HTMLResponse:
 
     # Recent messages (top 20)
     recent = sorted(all_msgs, key=lambda m: m.pubdate, reverse=True)[:20]
+    last_updated = recent[0].pubdate if recent else 0
 
     return TEMPLATES.TemplateResponse(
         request,
@@ -65,5 +66,6 @@ async def dashboard(request: Request) -> HTMLResponse:
             "token_none": token_none,
             "sub_counts": sub_counts,
             "recent_messages": recent,
+            "last_updated": last_updated,
         },
     )
