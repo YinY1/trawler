@@ -43,3 +43,6 @@ debug_*.py
 
 # Git worktrees
 .worktrees/
+
+# Superpowers brainstorm (visual companion mockups)
+.superpowers/
