@@ -174,3 +174,40 @@ def test_reset_to_phase_downgrades_messages(store: MessageStore) -> None:
     assert msg is not None
     assert msg.phase == Phase.DOWNLOADED
     assert msg.error == ""  # error cleared on reset
+
+
+# ── get_messages_in_window ───────────────────────────────────────
+
+
+def test_get_messages_in_window(store: MessageStore) -> None:
+    now = int(time.time())
+    # Manually insert 3 messages with different ages (bypass add_new window check)
+    store._messages["msg-1h"] = {
+        "platform": "bili", "content_type": ContentType.VIDEO.value, "phase": Phase.DISCOVERED.value,
+        "pubdate": now - 3600, "title": "1h ago", "author": "A",
+        "created_at": 0.0, "updated_at": 0.0, "error": "",
+    }
+    store._messages["msg-25h"] = {
+        "platform": "bili", "content_type": ContentType.VIDEO.value, "phase": Phase.DISCOVERED.value,
+        "pubdate": now - 25 * 3600, "title": "25h ago", "author": "A",
+        "created_at": 0.0, "updated_at": 0.0, "error": "",
+    }
+    store._messages["msg-48h"] = {
+        "platform": "bili", "content_type": ContentType.VIDEO.value, "phase": Phase.DISCOVERED.value,
+        "pubdate": now - 48 * 3600, "title": "48h ago", "author": "A",
+        "created_at": 0.0, "updated_at": 0.0, "error": "",
+    }
+    store._dirty = True
+
+    # Default 24h window: only the 1h message
+    window24 = store.get_messages_in_window()
+    assert len(window24) == 1
+    assert window24[0].msg_id == "msg-1h"
+
+    # 48h window: 1h + 25h (48h is excluded)
+    window48 = store.get_messages_in_window(window_hours=48)
+    assert len(window48) == 2
+    ids = {m.msg_id for m in window48}
+    assert "msg-1h" in ids
+    assert "msg-25h" in ids
+    assert "msg-48h" not in ids

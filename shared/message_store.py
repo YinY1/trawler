@@ -136,6 +136,36 @@ class MessageStore:
             results.append(self._msg_from_dict(msg_id, data))
         return results
 
+    def get_messages_in_window(
+        self,
+        window_hours: int = DEFAULT_WINDOW_HOURS,
+        *,
+        phase: Phase | None = None,
+        exclude: bool = False,
+        platform: str | None = None,
+    ) -> list[MessageRecord]:
+        """获取时间窗口内的消息（默认 24h），支持按阶段和平台过滤。
+
+        与 ``get_messages`` 的区别：只返回 ``pubdate`` 在窗口内的消息，
+        不会删除超期数据（只读，安全用于 dashboard 等只读视图）。
+        实际清理由 ``cleanup()`` 在 pipeline 中按需调用。
+        """
+        cutoff = time.time() - window_hours * 3600
+        results: list[MessageRecord] = []
+        for msg_id, data in self._messages.items():
+            if data.get("pubdate", 0) < cutoff:
+                continue
+            if platform is not None and data.get("platform") != platform:
+                continue
+            msg_phase = data.get("phase", "")
+            if phase is not None:
+                if exclude and msg_phase == phase.value:
+                    continue
+                if not exclude and msg_phase != phase.value:
+                    continue
+            results.append(self._msg_from_dict(msg_id, data))
+        return results
+
     # ── 写入 ─────────────────────────────────────────────────
 
     def add_new(
