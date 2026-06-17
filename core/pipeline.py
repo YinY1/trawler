@@ -113,6 +113,7 @@ async def run_check_once(
         # 的同步写方法天然原子，无需加锁。
         # token 续期涉及磁盘写入，串行执行避免配置文件并发写
         for _pkey, pdef in selected:
+            logger.info("🔑 检查 %s token 状态...", pdef.auth_name)
             await check_and_renew_tokens(pdef.auth_name, config, config_path)
 
         shared_store = MessageStore(config.general.data_dir)
@@ -139,6 +140,7 @@ async def run_check_once(
     else:
         # 单平台或未启用其他平台：保持原有串行路径（兼容现有调用方）
         for pkey, pdef in selected:
+            logger.info("🔑 检查 %s token 状态...", pdef.auth_name)
             await check_and_renew_tokens(pdef.auth_name, config, config_path)
 
             from core.engine import PipelineEngine

@@ -105,6 +105,7 @@ class PipelineEngine:
         phases = PHASE_FLOW[msg.content_type]
 
         start_idx = phases.index(msg.phase)
+        logger.info("▶ 处理消息 %s:%s (%s)", msg.platform, msg.msg_id, msg.title)
         for next_phase in phases[start_idx + 1 :]:
             handler = cls._handlers.get((msg.platform, next_phase))
             if handler is None:
@@ -124,6 +125,7 @@ class PipelineEngine:
 
             msg.phase = next_phase
             store.mark_phase(msg.msg_id, next_phase)
+            logger.info("%s:%s → %s ✓", msg.platform, msg.msg_id, next_phase.name)
             store.save()
 
     @classmethod

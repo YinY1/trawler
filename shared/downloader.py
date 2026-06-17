@@ -231,9 +231,10 @@ async def _download_bili_video(
         )
 
     if filepath.exists():
-        logger.info(f"下载完成: {display_name} -> {filepath.name}")
+        size_mb = filepath.stat().st_size / 1024 / 1024
+        logger.info("⬇ 下载完成: %s -> %s (%.1f MB)", display_name, filepath.name, size_mb)
     else:
-        logger.warning(f"下载可能成功但未找到文件: {display_name} ({bvid})")
+        logger.warning("⬇ 下载可能成功但未找到文件: %s (%s)", display_name, bvid)
 
     return DownloadResult(
         success=True,
@@ -272,6 +273,6 @@ async def download_video(
     download_dir.mkdir(parents=True, exist_ok=True)
 
     display_name = title or bvid
-    logger.info(f"开始下载: {display_name} ({bvid})")
+    logger.info("⬇ 开始下载: %s (%s)", display_name, bvid)
 
     return await _download_bili_video(bvid, config, download_dir, display_name)
