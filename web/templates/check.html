@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "_macros.html" import progress_segment %}
 
 {% block title %}内容检查 · Trawler{% endblock %}
 
@@ -12,8 +11,8 @@
   <div class="flex items-center justify-between flex-wrap gap-3">
     <div class="flex items-center gap-6 flex-wrap">
       <div class="flex items-center gap-2">
-        <span id="status-dot" class="w-3 h-3 rounded-full bg-gray-400"></span>
-        <span id="status-text" class="text-sm font-medium">空闲</span>
+        <span id="status-dot" class="w-3 h-3 rounded-full {% if running %}bg-orange-500 animate-pulse{% else %}bg-gray-400{% endif %}"></span>
+        <span id="status-text" class="text-sm font-medium">{% if running %}运行中{% else %}空闲{% endif %}</span>
       </div>
       <div class="text-sm text-[var(--text-secondary)]">
         <span class="text-xs uppercase tracking-wider">已耗时</span>
@@ -21,33 +20,46 @@
       </div>
       <div class="text-sm text-[var(--text-secondary)]">
         <span class="text-xs uppercase tracking-wider">已处理</span>
-        <span id="processed-count" class="ml-2 font-mono">0</span>
+        <span id="processed-count" class="ml-2 font-mono">{{ processed_count|default(0) }}</span>
       </div>
     </div>
     <button id="run-btn"
-      class="px-5 py-2 rounded-[9px] text-sm font-medium transition-all duration-200 bg-apple-blue text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="px-5 py-2 rounded-[9px] text-sm font-medium transition-all duration-200 {% if running %}bg-orange-500 text-white cursor-not-allowed{% else %}bg-apple-blue text-white hover:bg-blue-600{% endif %}"
+      {% if running %}disabled{% endif %}
       onclick="startCheck()">
-      开始检查
+      {% if running %}运行中…{% else %}开始检查{% endif %}
     </button>
   </div>
 </div>
 
-<!-- Progress bar -->
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-4">
-  <h3 class="text-sm font-medium text-[var(--text-secondary)] mb-3">检查进度</h3>
-  <div class="flex gap-1">
-    <div id="prog-discover" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
-    <div id="prog-download" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
-    <div id="prog-transcribe" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
-    <div id="prog-summarize" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
-    <div id="prog-push" class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 transition-colors duration-500"></div>
+<!-- Platform progress cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+  <!-- bili -->
+  <div id="card-bili" data-platform="bili"
+       class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-sm font-medium">B站</span>
+      <span id="status-bili" class="text-xs text-[var(--text-secondary)]">⚪ 空闲</span>
+    </div>
+    <div id="progress-bili" class="text-xs text-[var(--text-tertiary)] font-mono">—</div>
   </div>
-  <div class="flex justify-between mt-1.5">
-    <span class="text-xs text-[var(--text-secondary)] flex-1">发现</span>
-    <span class="text-xs text-[var(--text-secondary)] flex-1">下载</span>
-    <span class="text-xs text-[var(--text-secondary)] flex-1">转写</span>
-    <span class="text-xs text-[var(--text-secondary)] flex-1">摘要</span>
-    <span class="text-xs text-[var(--text-secondary)] flex-1">推送</span>
+  <!-- xhs -->
+  <div id="card-xhs" data-platform="xhs"
+       class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-sm font-medium">小红书</span>
+      <span id="status-xhs" class="text-xs text-[var(--text-secondary)]">⚪ 空闲</span>
+    </div>
+    <div id="progress-xhs" class="text-xs text-[var(--text-tertiary)] font-mono">—</div>
+  </div>
+  <!-- weibo -->
+  <div id="card-weibo" data-platform="weibo"
+       class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-sm font-medium">微博</span>
+      <span id="status-weibo" class="text-xs text-[var(--text-secondary)]">⚪ 空闲</span>
+    </div>
+    <div id="progress-weibo" class="text-xs text-[var(--text-tertiary)] font-mono">—</div>
   </div>
 </div>
 
@@ -78,6 +90,73 @@
   var elapsedTimer = null;
   var processedCount = 0;
 
+  /* ── Platform cards ──
+     /check 页面的进度展示为"每平台独立文字进度卡片"。SSE 事件不带结构化
+     platform 字段（_log_callback 未扩展签名），但 engine.py 的入口/出口
+     log_callback 调用文本里含平台名（如 "🔍 开始检查 bili 平台..." /
+     "✅ bili 检查完成" / "📋 bili 发现 N 条待处理消息"），前端用正则提取。 */
+  var PLATFORMS = ['bili', 'xhs', 'weibo'];
+  // message 中匹配平台的正则（按出现顺序：开始 / 发现 N 条 / 完成 / 错误态）
+  var RE_PLATFORM_START = /开始检查\s*(bili|xhs|weibo)\s*平台/;
+  var RE_PLATFORM_FOUND = /(bili|xhs|weibo)\s*发现\s*(\d+)\s*条待处理消息/;
+  var RE_PLATFORM_DONE = /(bili|xhs|weibo)\s*检查完成/;
+  // 兜底：从任意包含 "bili" / "xhs" / "weibo" token 的行提取（用于日志区标签）
+  var RE_PLATFORM_ANY = /\b(bili|xhs|weibo)\b/;
+
+  function setPlatformStatus(platform, state, text) {
+    var statusEl = document.getElementById('status-' + platform);
+    var progEl = document.getElementById('progress-' + platform);
+    if (!statusEl || !progEl) return;
+    var icon, label, statusCls, progCls;
+    if (state === 'running') {
+      icon = '🟡'; label = '运行中';
+      statusCls = 'text-xs text-orange-500 font-medium';
+      progCls = 'text-xs text-[var(--text-secondary)] font-mono';
+    } else if (state === 'done') {
+      icon = '✅'; label = '完成';
+      statusCls = 'text-xs text-green-600 dark:text-green-400 font-medium';
+      progCls = 'text-xs text-[var(--text-tertiary)] font-mono';
+    } else {
+      icon = '⚪'; label = '空闲';
+      statusCls = 'text-xs text-[var(--text-secondary)]';
+      progCls = 'text-xs text-[var(--text-tertiary)] font-mono';
+      text = '—';
+    }
+    statusEl.textContent = icon + ' ' + label;
+    statusEl.className = statusCls;
+    if (text !== undefined) {
+      progEl.textContent = text;
+      progEl.className = progCls;
+    }
+  }
+
+  /* 从 message 提取平台 key，返回 'bili'|'xhs'|'weibo'|null。
+     并根据 message 语义更新对应平台卡片状态。 */
+  function handlePlatformEvent(message) {
+    var m;
+    if ((m = RE_PLATFORM_START.exec(message))) {
+      setPlatformStatus(m[1], 'running', '正在检查…');
+      return m[1];
+    }
+    if ((m = RE_PLATFORM_FOUND.exec(message))) {
+      // 仅在卡片仍为 running 时更新文案，避免覆盖后续完成态
+      var cur = document.getElementById('status-' + m[1]);
+      if (cur && cur.textContent.indexOf('运行中') !== -1) {
+        setPlatformStatus(m[1], 'running', '处理 ' + m[2] + ' 条消息中…');
+      }
+      return m[1];
+    }
+    if ((m = RE_PLATFORM_DONE.exec(message))) {
+      setPlatformStatus(m[1], 'done', '检查完成');
+      return m[1];
+    }
+    // 兜底：含平台 token 但不属于状态变更，返回平台用于日志区标签着色
+    if ((m = RE_PLATFORM_ANY.exec(message))) {
+      return m[1];
+    }
+    return null;
+  }
+
   function startCheck() {
     var btn = document.getElementById('run-btn');
     if (btn.disabled) return;
@@ -85,23 +164,27 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'started') { initSSE(); }
-        else if (data.status === 'already_running') { showToast('检查已在运行中', 'warning'); }
+        else if (data.status === 'already_running') {
+          // 已有运行中的任务：重连 SSE，先回放历史再续流，让用户看到日志
+          restoreFromStatus().then(function() { connectSSE(); });
+        }
         else { showToast('启动失败: ' + (data.status || '未知'), 'error'); }
       })
       .catch(function(err) { showToast('请求失败: ' + err.message, 'error'); });
   }
 
+  /* 全新开始检查：清零、重置进度条、重设 startTime、切到 running 态、连接 SSE */
+  var doneHandled = false;  // 幂等标志：一次 run 生命周期内 done 只处理一次
   function initSSE() {
-    if (evtSource) evtSource.close();
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    doneHandled = false;
     startTime = Date.now();
     processedCount = 0;
     updateStatus('running', '运行中');
     setRunButtonState('running');
 
-    // Reset progress bars
-    document.querySelectorAll('[id^="prog-"]').forEach(function(el) {
-      el.className = el.className.replace(/bg-(green|orange)-500/g, '') + ' bg-gray-200 dark:bg-gray-700';
-    });
+    // Reset platform cards
+    PLATFORMS.forEach(function(p) { setPlatformStatus(p, 'idle'); });
 
     // Reset log
     var logEl = document.getElementById('log-output');
@@ -114,27 +197,50 @@
     elapsedTimer = setInterval(updateElapsed, 1000);
     updateElapsed();
 
-    // Open SSE
+    connectSSE();
+  }
+
+  /* 只负责建立 SSE 连接与绑定事件，不动任何 UI 状态/计数。
+     供 initSSE（全新开始）和 DOMContentLoaded/already_running（恢复）共用。 */
+  function connectSSE() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
     evtSource = new EventSource('/check/stream');
     evtSource.addEventListener('log', function(e) {
       var data;
       try { data = JSON.parse(e.data); } catch(_) { return; }
-      appendLog(data);
-      processedCount++;
-      document.getElementById('processed-count').textContent = processedCount;
+      // 注意：不动 processedCount。历史回放阶段条数已计入后端 processed_count，
+      // 实时阶段也通过 done 时同步 /check/status 取累计值，避免重复计数。
+      // 解析 message 中隐含的平台信号：更新对应平台卡片状态，并提取平台标签。
+      var detectedPlatform = data.message ? handlePlatformEvent(data.message) : null;
+      appendLog(data, detectedPlatform);
     });
     evtSource.addEventListener('done', function() {
+      // 幂等：EventSource 在某些 race 下可能触发多次 done（如重连后拿到
+      // done history）。只处理第一次，避免重复 DOM 操作 / 计数同步。
+      if (doneHandled) { return; }
+      doneHandled = true;
       evtSource.close();
       evtSource = null;
+      // 计时器强制清：无论之前状态如何，done 必须停表
       if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
       updateStatus('done', '已完成');
       setRunButtonState('done');
-      // All segments green
-      document.querySelectorAll('[id^="prog-"]').forEach(function(el) {
-        el.className = el.className.replace(/bg-(gray-200|dark:bg-gray-700|orange-500)/g, '') + ' bg-green-500';
+      // 平台仍在跑的卡片在收到各平台 done 事件时已逐个转绿；
+      // 这里兜底：把所有未完成的卡片（如本次未触发某平台）标为完成，
+      // 避免卡片永久停在"运行中"。
+      PLATFORMS.forEach(function(p) {
+        var card = document.getElementById('status-' + p);
+        if (card && card.textContent.indexOf('完成') === -1) {
+          setPlatformStatus(p, 'done');
+        }
       });
       document.querySelector('.live-indicator').classList.add('hidden');
       appendLog({ type: 'ok', message: '── 检查完成 ──', time: formatTimeStr() });
+      // 同步最终累计计数（后端 processed_count 为权威值）
+      fetch('/check/status').then(function(r) { return r.json(); }).then(function(d) {
+        processedCount = d.processed_count || processedCount;
+        document.getElementById('processed-count').textContent = processedCount;
+      }).catch(function() {});
     });
     evtSource.addEventListener('error', function() {
       // EventSource auto-reconnects; only show toast on first error
@@ -142,6 +248,10 @@
         showToast('日志流连接已关闭', 'warning');
       }
     });
+  }
+
+  function closeSSE() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
   }
 
   function updateStatus(state, text) {
@@ -156,7 +266,10 @@
 
   function setRunButtonState(state) {
     var btn = document.getElementById('run-btn');
-    btn.className = btn.className.replace(/bg-(apple-blue|blue-600|orange-500|green-500)/g, '');
+    // 清掉所有"态相关"的 class，包括 cursor-not-allowed（running 态残留会导致
+    // done/idle 态按钮仍是禁止光标，即便 disabled=false）。
+    btn.className = btn.className.replace(/bg-(apple-blue|blue-600|orange-500|green-500)\b/g, '')
+                                   .replace(/\bcursor-not-allowed\b/g, '');
     if (state === 'running') {
       btn.disabled = true;
       btn.textContent = '运行中…';
@@ -180,7 +293,7 @@
       String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
   }
 
-  function appendLog(data) {
+  function appendLog(data, platform) {
     var el = document.getElementById('log-output');
     var level = (data.type || 'info').toLowerCase();
     var levelUpper = level.toUpperCase();
@@ -195,11 +308,13 @@
     line.className = 'log-line';
     line.setAttribute('data-level', level);
 
-    // Platform tag block — NOTE: 当前 SSE 事件不带 platform 字段（_log_callback 未扩展签名），
-    // 本任务不实现平台标签着色；保留 if 分支作前向兼容。
+    // Platform tag block — SSE 事件不带结构化 platform 字段（_log_callback
+    // 未扩展签名），改由调用方从 message 文本正则提取后传入；data.platform
+    // 留作前向兼容（如未来后端加字段）。
+    var pf = platform || data.platform;
     var platformBlock = '';
-    if (data.platform) {
-      platformBlock = '<span class="text-blue-400">[' + escapeHtml(data.platform) + ']</span> ';
+    if (pf) {
+      platformBlock = '<span class="text-blue-400">[' + escapeHtml(pf) + ']</span> ';
     }
 
     line.innerHTML =
@@ -224,6 +339,92 @@
     d.textContent = String(s);
     return d.innerHTML;
   }
+
+  /* 从 /check/status 恢复 UI 状态：processedCount / startTime+计时器 / 状态点 / 进度条 / 历史日志回放。
+     返回 Promise<data>，供调用方决定是否再 connectSSE()。
+     注意：历史回放不再增加 processedCount，因为 history 里的条数已被计入 processed_count 总数。 */
+  function restoreFromStatus() {
+    return fetch('/check/status').then(function(r) { return r.json(); }).then(function(data) {
+      // 恢复已处理计数
+      processedCount = data.processed_count || 0;
+      document.getElementById('processed-count').textContent = processedCount;
+
+      // 恢复计时：只有真正 running 才启动计时器。started_at 在后端 pipeline
+      // 结束后会被清空（None），但即便后端漏清，这里也以 data.running 为准，
+      // 避免把"已完成的旧 run 的 started_at"误当成"正在跑"而启动死循环计时器。
+      if (data.running && data.started_at) {
+        startTime = data.started_at * 1000;
+        if (elapsedTimer) clearInterval(elapsedTimer);
+        elapsedTimer = setInterval(updateElapsed, 1000);
+        updateElapsed();
+      } else {
+        startTime = null;
+        if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+        document.getElementById('elapsed-time').textContent = '00:00';
+      }
+
+      // 清空日志区，准备回放历史
+      var logEl = document.getElementById('log-output');
+      logEl.innerHTML = '';
+
+      if (data.running) {
+        // 运行中：切到 running 态、显示 LIVE、平台卡片置为运行中（精确进度无法恢复，
+        // 后续 SSE 实时事件会按 message 文本逐条更新卡片状态）
+        updateStatus('running', '运行中');
+        setRunButtonState('running');
+        document.querySelector('.live-indicator').classList.remove('hidden');
+        PLATFORMS.forEach(function(p) {
+          // 仅当 status 文本不是"完成"时设为 running；已完成平台保持完成态
+          var cur = document.getElementById('status-' + p);
+          if (!cur || cur.textContent.indexOf('完成') === -1) {
+            setPlatformStatus(p, 'running', '检查中…');
+          }
+        });
+        // 回放历史日志（不再累加 processedCount）；回放也会通过
+        // handlePlatformEvent 把卡片状态精确还原（如某些平台已 done）
+        (data.log_history || []).forEach(function(item) {
+          var detectedPlatform = item.message ? handlePlatformEvent(item.message) : null;
+          appendLog(item, detectedPlatform);
+        });
+      } else {
+        // 未运行
+        document.querySelector('.live-indicator').classList.add('hidden');
+        if (data.log_history && data.log_history.length > 0) {
+          // 刚完成一次检查：回放历史日志、切到 done 态、所有平台卡片标完成
+          data.log_history.forEach(function(item) {
+            var detectedPlatform = item.message ? handlePlatformEvent(item.message) : null;
+            appendLog(item, detectedPlatform);
+          });
+          updateStatus('done', '已完成');
+          setRunButtonState('done');
+          PLATFORMS.forEach(function(p) { setPlatformStatus(p, 'done'); });
+        } else {
+          // 全新空闲态：恢复默认占位文案与状态点
+          updateStatus('idle', '空闲');
+          setRunButtonState('idle');
+          PLATFORMS.forEach(function(p) { setPlatformStatus(p, 'idle'); });
+          logEl.innerHTML = '<span class="text-gray-500">等待开始检查…</span>';
+        }
+      }
+      return data;
+    });
+  }
+
+  /* ── 页面加载：自动恢复运行状态 ── */
+  document.addEventListener('DOMContentLoaded', function() {
+    restoreFromStatus().then(function(data) {
+      if (data.running) { connectSSE(); }
+    }).catch(function(err) {
+      // /check/status 拉取失败：保持空闲态，不影响用户主动开始检查
+      console.error('restore status failed:', err);
+    });
+  });
+
+  /* ── 页面卸载：关闭 SSE，避免卡死 ──
+     beforeunload 在 bfcache/某些导航下不可靠，pagehide 覆盖更多场景
+     （包括移动端、bfcache 恢复），双保险确保后端订阅被释放。 */
+  window.addEventListener('beforeunload', closeSSE);
+  window.addEventListener('pagehide', closeSSE);
 
   /* ── Log filter buttons ── */
   document.querySelectorAll('.filter-btn').forEach(function(btn) {
