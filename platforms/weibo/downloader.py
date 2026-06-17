@@ -12,7 +12,7 @@ from shared.config import Config
 from shared.constants import WEIBO_DOWNLOAD_TIMEOUT
 from shared.protocols import WeiboDownloadResult, WeiboPost
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.weibo.downloader")
 
 
 def _get_post_dir(config: Config, post_id: str) -> Path:

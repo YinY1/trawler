@@ -20,7 +20,7 @@ from shared.config import Config
 from shared.message_store import MessageStore
 from shared.protocols import ContentType, Phase, PhaseContext
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.bilibili.handlers")
 
 
 # -- Detector ----------------------------------------------------

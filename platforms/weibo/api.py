@@ -19,7 +19,7 @@ import aiohttp
 from shared.constants import WEIBO_REQUEST_TIMEOUT
 from shared.protocols import WeiboPost
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.weibo.api")
 
 # 移动端 API
 MOBILE_USER_POSTS_API = "https://m.weibo.cn/api/container/getIndex?type=uid&value={user_id}&containerid=107603{user_id}"

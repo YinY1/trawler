@@ -9,7 +9,7 @@ from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS
 from shared.protocols import CommentHighlight
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.bilibili.comments")
 
 
 def _extract_reply_info(reply: dict) -> dict:

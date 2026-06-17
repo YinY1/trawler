@@ -20,7 +20,7 @@ from shared.auth.base import (
 from shared.config import Config
 from shared.constants import WEIBO_POLL_TIMEOUT, WEIBO_REQUEST_TIMEOUT
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.weibo.auth")
 
 # 微博 QR 登录 API
 QR_IMAGE_URL = "https://passport.weibo.com/sso/v2/qrcode/image?entry=miniblog&size=180"
@@ -108,6 +108,7 @@ class WeiboAuthenticator(BaseAuthenticator):
     # ── BaseAuthenticator 接口 ────────────────────────────
 
     async def generate_qr_code(self) -> QRCodeResult:
+        logger.info("🔑 WeiboAuthenticator 生成二维码...")
         async with aiohttp.ClientSession(trust_env=False) as session:
             resp = await session.get(
                 QR_IMAGE_URL,
@@ -133,6 +134,7 @@ class WeiboAuthenticator(BaseAuthenticator):
         return QRCodeResult(qr_url=qr_url, qr_key=qrid, expires_in=WEIBO_POLL_TIMEOUT)
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
+        logger.info("🔑 WeiboAuthenticator 轮询扫码状态...")
         async with aiohttp.ClientSession(trust_env=False) as session:
             url = QR_CHECK_URL.format(qrid=qr_key)
             resp = await session.get(
@@ -189,6 +191,7 @@ class WeiboAuthenticator(BaseAuthenticator):
         - retcode=20000000
         - data.url: 跨域登录 URL（访问此 URL 获取 Set-Cookie）
         """
+        logger.info("🔑 WeiboAuthenticator 获取凭证...")
         data = self._last_check_data
 
         if not isinstance(data, dict):
@@ -254,6 +257,7 @@ class WeiboAuthenticator(BaseAuthenticator):
         访问 weibo.com，如果服务端返回新的 Set-Cookie，则更新 tokens。
         否则保持原有 tokens 不变。
         """
+        logger.info("🔑 WeiboAuthenticator 续期 token...")
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         async with aiohttp.ClientSession(trust_env=False) as session:
             try:

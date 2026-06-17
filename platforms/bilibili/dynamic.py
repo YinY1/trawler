@@ -12,7 +12,7 @@ from shared.protocols import DynamicInfo
 if TYPE_CHECKING:
     from bilibili_api.utils.network import Credential
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.bilibili.dynamic")
 
 _DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_AV": 8,
