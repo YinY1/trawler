@@ -17,7 +17,7 @@ from shared.auth.base import (
 )
 from shared.config import Config
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.bilibili.auth")
 
 
 # ═══════════════
@@ -92,7 +92,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
                     value = cookie.split(";")[0].split("=", 1)[1] if "=" in cookie else ""
                     self._saved_cookies[name] = value
 
-            body = await resp.json()
+                body = await resp.json()
             data = body.get("data", {})
             code = data.get("code", -1)
 
@@ -148,6 +148,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
         from shared.config import load_config
 
+        logger.info("🔑 Bilibili 续期 token...")
         cfg = await load_config(self._config_path)
         refresh_token = cfg.bilibili.auth.refresh_token
         if not refresh_token:
@@ -164,6 +165,7 @@ class BilibiliAuthenticator(BaseAuthenticator):
 
         need = await cred.check_refresh()
         if not need:
+            logger.info("🔑 Bilibili token 无需刷新")
             return tokens
 
         try:
@@ -198,14 +200,18 @@ class BilibiliAuthenticator(BaseAuthenticator):
     async def validate_tokens(self, tokens: PlatformTokens) -> bool:
         import bilibili_api
 
+        logger.info("🔑 Bilibili 验证 token 有效性...")
         if tokens.expires_at < time.time():
+            logger.info("🔑 Bilibili token 已过期")
             return False
         cred = bilibili_api.Credential(
             sessdata=tokens.cookies.get("sessdata", ""),
             bili_jct=tokens.cookies.get("bili_jct", ""),
         )
         try:
-            return await cred.check_valid()
+            valid = await cred.check_valid()
+            logger.info("🔑 Bilibili token 有效性: %s", valid)
+            return valid
         except Exception as e:
             logger.warning("B站 token 有效性检查失败: %s", e)
             return False
