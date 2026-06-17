@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}全局日志 · Trawler{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-semibold tracking-tight mb-1">全局日志</h1>
+<p class="text-sm text-[var(--text-secondary)] mb-6">全应用所有模块的实时日志输出</p>
+
+<!-- Terminal log -->
+<div class="rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-gray-800 overflow-hidden">
+  <!-- Filter bar -->
+  <div class="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-gray-800">
+    <div class="flex gap-1">
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] bg-blue-600 text-white" data-filter="all">ALL</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="debug">DEBUG</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="info">INFO</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="warn">WARN</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="error">ERROR</button>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="live-indicator" class="text-xs text-green-500">● LIVE</span>
+      <span id="pause-indicator" class="text-xs text-yellow-500 hidden">⏸ 暂停</span>
+      <button onclick="document.getElementById('log-output').innerHTML = '<span class=\'text-gray-500\'>日志已清空</span>'" class="text-xs text-gray-500 hover:text-white transition-colors">清空</button>
+    </div>
+  </div>
+  <!-- Log area -->
+  <div id="log-output" class="p-4 font-mono text-sm leading-relaxed h-[480px] overflow-y-auto" style="background: #1e1e1e; color: #d4d4d4;">
+    <span class="text-gray-500">等待日志接入…</span>
+  </div>
+</div>
+
+<script>
+  /* ── SSE connection ── */
+  var evtSource = null;
+  var logContainer = document.getElementById('log-output');
+
+  function connectLogSSE() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    evtSource = new EventSource('/logs/stream');
+
+    evtSource.addEventListener('log', function(e) {
+      var data;
+      try { data = JSON.parse(e.data); } catch(_) { return; }
+      appendLog(data);
+    });
+
+    evtSource.addEventListener('error', function() {
+      if (evtSource && evtSource.readyState === EventSource.CLOSED) {
+        // Connection lost — show warning but don't flood user with toasts
+      }
+    });
+  }
+
+  function appendLog(data) {
+    var level = (data.level || 'info').toLowerCase();
+    var levelUpper = level.toUpperCase();
+    var colorClass;
+    if (level === 'error' || level === 'err') {
+      colorClass = 'text-red-400';
+      levelUpper = 'ERR ';
+    } else if (level === 'warn' || level === 'warning') {
+      colorClass = 'text-orange-400';
+      levelUpper = 'WARN';
+    } else if (level === 'debug') {
+      colorClass = 'text-gray-500';
+      levelUpper = 'DEBUG';
+    } else {
+      colorClass = 'text-gray-400';
+      levelUpper = 'INFO';
+    }
+
+    var line = document.createElement('div');
+    line.className = 'log-line';
+    line.setAttribute('data-level', level);
+
+    // Format message — first 19 chars are "HH:MM:SS [LEVEL] ", strip them
+    // for a cleaner display since we already show a separate time column.
+    // Actually, the formatted message already includes timestamp + level,
+    // so we display it as-is.
+    var msg = data.message || '';
+    line.innerHTML =
+      '<span class="' + colorClass + '">' + escapeHtml(msg) + '</span>';
+    logContainer.appendChild(line);
+
+    // Auto-scroll: only if user is already near the bottom
+    autoScroll();
+  }
+
+  /* ── Auto-scroll logic ── */
+  var autoScrollEnabled = true;
+
+  function isNearBottom() {
+    return (logContainer.scrollHeight - logContainer.scrollTop - logContainer.clientHeight) < 50;
+  }
+
+  function autoScroll() {
+    if (autoScrollEnabled) {
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+  }
+
+  // Detect manual scroll — if user scrolls up, pause auto-scroll
+  logContainer.addEventListener('scroll', function() {
+    if (isNearBottom()) {
+      autoScrollEnabled = true;
+      document.getElementById('pause-indicator').classList.add('hidden');
+      document.getElementById('live-indicator').classList.remove('hidden');
+    } else {
+      autoScrollEnabled = false;
+      document.getElementById('pause-indicator').classList.remove('hidden');
+      document.getElementById('live-indicator').classList.add('hidden');
+    }
+  });
+
+  /* ── Log filter buttons ── */
+  document.querySelectorAll('.filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.filter-btn').forEach(function(b) {
+        b.className = b.className.replace(/bg-blue-600 text-white/g, '') +
+          ' text-gray-400 hover:text-white transition-colors';
+      });
+      this.className = 'px-3 py-1 text-xs rounded-[6px] bg-blue-600 text-white';
+      var filter = this.dataset.filter;
+      document.querySelectorAll('.log-line').forEach(function(line) {
+        if (filter === 'all') {
+          line.style.display = '';
+        } else {
+          var lvl = line.getAttribute('data-level');
+          line.style.display = (lvl === filter) ? '' : 'none';
+        }
+      });
+    });
+  });
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  /* ── Lifecycle ── */
+  document.addEventListener('DOMContentLoaded', function() {
+    connectLogSSE();
+  });
+
+  window.addEventListener('beforeunload', function() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+  });
+</script>
+{% endblock %}

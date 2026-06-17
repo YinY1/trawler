@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -72,10 +71,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     Refreshed on real startup so each server run gets a fresh queue and a
     clean running flag, independent of any state set at module import time.
     """
-    app.state.log_queue = asyncio.Queue()
+    app.state.subscribers = []  # list[asyncio.Queue[dict | None]]
+    app.state.log_history = []
     app.state.check_running = False
     app.state.check_task = None
+    app.state.check_processed_count = 0
+    app.state.check_started_at = None
+
+    # ── D 组: 全局日志页 ────────────────────────────────────────────
+    from web.logging_bridge import setup_web_logging, teardown_web_logging
+
+    log_bus = setup_web_logging()
+    app.state.log_bus = log_bus
+    # ──────────────────────────────────────────────────────────────────
+
     yield
+
+    # ── D 组: 清理 ────────────────────────────────────────────────────
+    teardown_web_logging(log_bus)
+    # ──────────────────────────────────────────────────────────────────
+
     # Cancel any running check on shutdown
     current_task = app.state.check_task
     if current_task is not None and not current_task.done():
@@ -89,9 +104,17 @@ def create_app() -> FastAPI:
     # Initialize async resources on app.state so they exist even when the
     # lifespan handler is not executed (e.g. httpx ASGITransport in tests).
     # The lifespan handler re-initializes them on real startup.
-    app.state.log_queue = asyncio.Queue()
+    app.state.subscribers = []  # list[asyncio.Queue[dict | None]]
+    app.state.log_history = []
     app.state.check_running = False
     app.state.check_task = None
+    app.state.check_processed_count = 0
+    app.state.check_started_at = None
+
+    # D 组: 全局日志页 - LogBus (lifespan 里会重新初始化)
+    from web.logging_bridge import LogBus
+
+    app.state.log_bus = LogBus()
 
     # Mount static files — directory exists in the repo, no need to create
     static_dir = HERE / "static"
@@ -101,6 +124,7 @@ def create_app() -> FastAPI:
     from web.routes.auth import router as auth_router
     from web.routes.check import router as check_router
     from web.routes.dashboard import router as dashboard_router
+    from web.routes.logs import router as logs_router
     from web.routes.settings import router as settings_router
     from web.routes.subscriptions import router as subscriptions_router
 
@@ -108,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(subscriptions_router)
     app.include_router(check_router)
     app.include_router(auth_router)
+    app.include_router(logs_router)
     app.include_router(settings_router)
 
     return app
