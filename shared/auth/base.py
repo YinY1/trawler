@@ -78,6 +78,10 @@ class BaseAuthenticator(ABC):
     def supports_refresh(self) -> bool:
         return False
 
+    async def close(self) -> None:
+        """Release any owned HTTP resources. Default no-op; override if needed."""
+        return None
+
     @property
     def refresh_token(self) -> str | None:
         """Platform-specific additional auth value (e.g. B站 refresh_token). Returns None by default."""

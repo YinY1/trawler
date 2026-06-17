@@ -188,6 +188,9 @@ def setup_web_logging(bus: LogBus | None = None, level: int = logging.INFO) -> L
 
     handler.addFilter(_SkipUvicornAccess())
 
+    # Ensure root logger level matches handler level; otherwise INFO records
+    # are dropped before reaching the handler (root defaults to WARNING).
+    root.setLevel(level)
     root.addHandler(handler)
     return bus
 
