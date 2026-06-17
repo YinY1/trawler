@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 # pyright: basic
+import logging
+import time
 from pathlib import Path
 from typing import Any
 
 import tomlkit
+
+logger = logging.getLogger(__name__)
 
 COOKIES_FILENAME = "cookies.toml"
 
@@ -45,3 +49,40 @@ async def update_auth_section(config_path: str | Path, platform: str, auth_dict:
         auth_table[key] = value
 
     cookies_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+
+async def clear_auth_section(config_path: str | Path, platform: str) -> bool:
+    """Remove the [platform.auth] section from cookies.toml if it exists.
+
+    Returns True if the section was present (and removed), False otherwise.
+    All other content (subscriptions, other platforms) is preserved.
+    """
+    p = Path(config_path)
+    cookies_path = p.with_name(COOKIES_FILENAME)
+    if not cookies_path.exists():
+        return False
+
+    doc = tomlkit.parse(cookies_path.read_text(encoding="utf-8"))
+    if platform not in doc:
+        return False
+    platform_table = doc[platform]
+    if "auth" not in platform_table:
+        return False
+
+    # Safety backup: snapshot the current cookies.toml before destructive delete.
+    # Prevents accidental credential loss (e.g. tests/curl hitting the real file).
+    try:
+        backup_path = cookies_path.with_suffix(".toml.bak")
+        original = cookies_path.read_text(encoding="utf-8")
+        header = (
+            f"# Backup before clear_auth_section at {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"# Platform: {platform}\n\n"
+        )
+        backup_path.write_text(header + original, encoding="utf-8")
+        logger.warning("⚠️ 已备份 %s 的 [%s.auth] 段到 %s", platform, platform, backup_path.name)
+    except Exception as exc:  # noqa: BLE001 — backup failure must not block logout
+        logger.warning("⚠️ 备份失败 (仍将继续删除): %s", exc)
+
+    del platform_table["auth"]
+    cookies_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return True
