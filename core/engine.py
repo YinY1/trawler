@@ -133,6 +133,7 @@ class PipelineEngine:
         platform: str,
         from_phase: Phase | None = None,
         log_callback: Callable[[str, str], None] | None = None,
+        store: MessageStore | None = None,
     ) -> None:
         """统一平台入口：cleanup -> detect -> process。
 
@@ -144,13 +145,25 @@ class PipelineEngine:
             platform: 平台标识 ("bili" | "xhs" | "weibo")
             from_phase: 可选，将所有消息回退到指定阶段后重新处理
             log_callback: 可选，``(event_type, message)`` 回调，用于流式日志输出
+            store: 可选，共享的 MessageStore 实例。并发执行多平台时由
+                调用方传入同一实例以避免各实例内存快照互相覆盖。为 None
+                时本方法会自行创建（单平台调用路径，保持向后兼容）。
+
+        并发安全：在单线程 asyncio 事件循环中，MessageStore 的所有写
+        方法均为纯同步（不含 await），不会让出事件循环，因此共享同一
+        实例时对 ``_messages`` 的多步操作天然原子。
         """
-        store = MessageStore(config.general.data_dir)
-        store.cleanup(24)
+        # 共享实例时跳过 cleanup（应由首次创建者执行一次），
+        # 避免三个并发平台各自扫描同一份 _messages 造成重复工作
+        owns_store = store is None
+        if owns_store:
+            store = MessageStore(config.general.data_dir)
+            store.cleanup(24)
+            if log_callback:
+                log_callback("log", "🧹 已清理超过 24 小时的消息")
 
         if log_callback:
             log_callback("log", f"🔍 开始检查 {platform} 平台...")
-            log_callback("log", "🧹 已清理超过 24 小时的消息")
 
         if from_phase is not None:
             store.reset_to_phase(from_phase, platform=platform)
@@ -170,7 +183,14 @@ class PipelineEngine:
 
         # 消息处理：仍使用原始 platform 字符串
         # （MessageRecord.platform 统一为 "bili"，不区分 video/dynamic）
-        for msg in store.get_messages(phase=Phase.PUSHED, exclude=True, platform=platform):
+        pending = list(store.get_messages(phase=Phase.PUSHED, exclude=True, platform=platform))
+        if log_callback:
+            log_callback("log", f"📋 {platform} 发现 {len(pending)} 条待处理消息")
+        for msg in pending:
+            if msg.error:
+                # 跳过已有错误的消息，避免永久失败的消息无限重试
+                logger.info("⏭ 跳过错误消息: %s (%s)", msg.title, msg.error)
+                continue
             await cls.process_message(msg, config, store)
 
         if log_callback:
