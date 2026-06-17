@@ -7,8 +7,9 @@
 <h1 class="text-2xl font-semibold tracking-tight mb-1">订阅管理</h1>
 <p class="text-sm text-[var(--text-secondary)] mb-6">按平台分组 · 搜索用户后点击添加</p>
 
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 {% for p in platforms %}
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-4 overflow-hidden">
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] overflow-hidden">
   <!-- Header: collapsible -->
   <div class="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors" onclick="var b=this.nextElementSibling; b.classList.toggle('hidden'); this.querySelector('.chevron').classList.toggle('rotate-180')">
     <div class="flex items-center gap-3">
@@ -73,6 +74,7 @@
   </div>
 </div>
 {% endfor %}
+</div>
 
 <script>
   // URL flash → toast on page load

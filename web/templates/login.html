@@ -31,7 +31,6 @@
     {% endif %}
     <div class="flex gap-2">
       {% if "有效" in p.token_status %}
-      <button class="px-3 py-1.5 text-xs rounded-[8px] border border-gray-300 dark:border-gray-600 text-[var(--text-secondary)] hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">查看</button>
       <button onclick="openQRModal('{{ p.key }}')" class="px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors">续期</button>
       {% elif "过期" in p.token_status %}
       <button onclick="openQRModal('{{ p.key }}')" class="px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors">扫码续期</button>
@@ -200,6 +199,11 @@
   }
 
   function closeQRModal() {
+    // 仅在非 success 关闭时提示（success 时 handlePollStatus 已显示成功 toast）
+    var statusEl = document.getElementById('qr-status');
+    if (statusEl && statusEl.textContent.indexOf('成功') === -1) {
+      showToast('登录未完成', 'warning');
+    }
     var overlay = document.getElementById('qr-overlay');
     overlay.classList.add('hidden');
     overlay.classList.remove('flex');

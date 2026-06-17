@@ -3,25 +3,71 @@
 
 {% block title %}仪表盘 · Trawler{% endblock %}
 
+{# Tooltip for stat card; msgs: list[MessageRecord], total: int, empty_hint: str #}
+{% macro stat_tooltip(msgs, total, empty_hint="暂无消息") %}
+<div class="absolute left-0 top-full mt-2 hidden group-hover:block z-50 w-72">
+  <div class="bg-white dark:bg-gray-800 border border-[var(--card-border)] rounded-[10px] shadow-[0_8px_24px_rgba(0,0,0,0.12)] p-2 max-h-72 overflow-y-auto">
+    {% if msgs %}
+    {% for msg in msgs %}
+    <div class="flex items-start gap-2 px-2 py-1.5 rounded-[6px] hover:bg-gray-50 dark:hover:bg-gray-700/40">
+      <div class="min-w-0 flex-1">
+        <div class="text-xs font-medium text-[var(--text-primary)] truncate" title="{{ msg.title }}">{{ msg.title[:30] }}{% if msg.title|length > 30 %}…{% endif %}</div>
+        <div class="text-[10px] text-[var(--text-secondary)] mt-0.5 flex items-center gap-1.5">
+          <span class="font-mono">{{ msg.platform }}</span>
+          <span>·</span>
+          <span class="truncate">{{ msg.author }}</span>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    {% if total > msgs|length %}
+    <div class="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-gray-100 dark:border-gray-700 mt-1">
+      还有 {{ total - msgs|length }} 条…
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="text-xs text-[var(--text-tertiary)] text-center py-3">{{ empty_hint }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 <h1 class="text-2xl font-semibold tracking-tight mb-1">仪表盘</h1>
 <p class="text-sm text-[var(--text-secondary)] mb-6">
   实时概览 · 上次更新 {{ last_updated | timeago if last_updated else "—" }}
 </p>
 
-<!-- Stats row 1: message counts -->
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-  {{ stat_card(total_msgs, "总消息", "text-[var(--text-primary)]") }}
-  {{ stat_card(active_count, "处理中", "text-orange-500") }}
-  {{ stat_card(pushed_count, "已完成", "text-green-500") }}
-  {{ stat_card(error_count, "错误", "text-red-500") }}
-</div>
-
-<!-- Stats row 2: token status -->
-<div class="grid grid-cols-3 gap-4 mb-6">
-  {{ stat_card(token_ok, "Token 有效", "text-green-500") }}
-  {{ stat_card(token_expired, "Token 过期", "text-red-500") }}
-  {{ stat_card(token_none, "未配置 Token", "text-[var(--text-tertiary)]") }}
+<!-- Stats row 1: message counts (compact) -->
+<div class="flex flex-wrap gap-3 mb-4">
+  <div class="relative group">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+      <span class="text-sm font-semibold tracking-tight text-[var(--text-primary)]">{{ total_msgs }}</span>
+      <span class="text-xs text-[var(--text-secondary)]">总消息</span>
+    </div>
+    {{ stat_tooltip(total_sample, total_msgs) }}
+  </div>
+  <div class="relative group">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+      <span class="text-sm font-semibold tracking-tight text-orange-500">{{ active_count }}</span>
+      <span class="text-xs text-[var(--text-secondary)]">处理中</span>
+    </div>
+    {{ stat_tooltip(active_messages, active_count, "暂无处理中的消息") }}
+  </div>
+  <div class="relative group">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+      <span class="text-sm font-semibold tracking-tight text-green-500">{{ pushed_count }}</span>
+      <span class="text-xs text-[var(--text-secondary)]">已完成</span>
+    </div>
+    {{ stat_tooltip(pushed_sample, pushed_count, "暂无已完成的消息") }}
+  </div>
+  <div class="relative group">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+      <span class="text-sm font-semibold tracking-tight text-red-500">{{ error_count }}</span>
+      <span class="text-xs text-[var(--text-secondary)]">错误</span>
+    </div>
+    {{ stat_tooltip(error_messages, error_count, "暂无错误消息") }}
+  </div>
 </div>
 
 {% if sub_counts %}

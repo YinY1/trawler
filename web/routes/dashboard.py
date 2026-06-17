@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from core.subscription_cli import list_subscriptions
 from shared.config import load_config
 from shared.message_store import MessageStore
-from shared.protocols import Phase
+from shared.protocols import MessageRecord, Phase
 from web.app import TEMPLATES
 
 router = APIRouter()
@@ -27,6 +27,15 @@ async def dashboard(request: Request) -> HTMLResponse:
     pushed_count = sum(1 for m in all_msgs if m.phase == Phase.PUSHED)
     error_count = sum(1 for m in all_msgs if m.error)
     active_count = total_msgs - pushed_count
+
+    # Tooltip message lists (top 10 by pubdate desc, avoid bloated tooltip)
+    def _top10(msgs: list[MessageRecord]) -> list[MessageRecord]:
+        return sorted(msgs, key=lambda m: m.pubdate, reverse=True)[:10]
+
+    active_messages = _top10([m for m in all_msgs if m.phase != Phase.PUSHED])
+    error_messages = _top10([m for m in all_msgs if m.error])
+    pushed_sample = _top10([m for m in all_msgs if m.phase == Phase.PUSHED])
+    total_sample = _top10(all_msgs)
 
     # Token status counts
     token_ok = 0
@@ -61,6 +70,10 @@ async def dashboard(request: Request) -> HTMLResponse:
             "pushed_count": pushed_count,
             "error_count": error_count,
             "active_count": active_count,
+            "active_messages": active_messages,
+            "error_messages": error_messages,
+            "pushed_sample": pushed_sample,
+            "total_sample": total_sample,
             "token_ok": token_ok,
             "token_expired": token_expired,
             "token_none": token_none,
