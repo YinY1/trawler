@@ -37,15 +37,16 @@ async def _fetch_user_dynamics(
     Returns:
         动态信息字典列表
     """
-    from bilibili_api import dynamic
-    from bilibili_api.dynamic import DynamicType
+    from bilibili_api import user
 
     try:
-        resp = await dynamic.get_dynamic_page_info(
-            credential=credential,
-            _type=DynamicType.ALL,
-            host_mid=uid,
-        )
+        # NOTE: 不用 dynamic.get_dynamic_page_info(), 它的 _type 与 host_mid
+        # 参数在源码里是 if/elif 互斥 (L1254-1261)，传 _type 后 host_mid 被
+        # 静默丢弃，会返回登录账号的全量关注流而非指定 UP 主动态。
+        # user.User.get_dynamics_new() 走 /feed/space 接口，按 UID 拉取指定
+        # UP 主的空间动态，不依赖关注关系。
+        user_obj = user.User(uid, credential=credential)
+        resp = await user_obj.get_dynamics_new()
     except Exception as e:
         logger.error(f"获取 UP 主 {uid} 动态失败: {e}")
         return []
@@ -131,8 +132,11 @@ def _parse_dynamic(item: dict, uid: int) -> Optional[DynamicInfo]:
     link = f"https://t.bilibili.com/{dynamic_id}"
 
     # 如果标题为空，截取内容前 50 字符作为标题
+    # NOTE: B站 API 返回的 desc 字段可能为 dict 而非 str，直接切片会抛
+    # KeyError(slice(None, 50, None)) 导致 pipeline 提前失败。
     if not title and content:
-        title = content[:50] + ("..." if len(content) > 50 else "")
+        if isinstance(content, str):
+            title = content[:50] + ("..." if len(content) > 50 else "")
 
     return DynamicInfo(
         dynamic_id=dynamic_id,
