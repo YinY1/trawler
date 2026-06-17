@@ -33,6 +33,11 @@
   /* Fonts */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Shadows — Apple soft elevation */
+  --shadow-stat: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.05);
+  --shadow-tooltip: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +56,10 @@
     --card-border: rgba(255, 255, 255, 0.06);
     --sidebar-bg: rgba(28, 28, 30, 0.72);
     --sidebar-border: rgba(255, 255, 255, 0.08);
+
+    --shadow-stat: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --shadow-tooltip: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
 }
 

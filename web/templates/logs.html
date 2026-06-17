@@ -6,15 +6,16 @@
 <p class="text-sm text-[var(--text-secondary)] mb-6">全应用所有模块的实时日志输出</p>
 
 <!-- Terminal log -->
-<div class="rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-gray-800 overflow-hidden">
+<div class="rounded-[14px] shadow-card border border-gray-800 overflow-hidden">
   <!-- Filter bar -->
   <div class="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-gray-800">
-    <div class="flex gap-1">
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] bg-blue-600 text-white" data-filter="all">ALL</button>
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="debug">DEBUG</button>
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="info">INFO</button>
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="warn">WARN</button>
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="error">ERROR</button>
+    <!-- Segmented control (single-select toggle) -->
+    <div class="inline-flex items-center p-0.5 rounded-[10px] bg-white/5 border border-white/10">
+      <button class="filter-btn flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors bg-blue-600 text-white shadow-sm" data-filter="all">ALL</button>
+      <button class="filter-btn flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors text-gray-400 hover:text-white hover:bg-white/10" data-filter="debug">DEBUG</button>
+      <button class="filter-btn flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors text-gray-400 hover:text-white hover:bg-white/10" data-filter="info">INFO</button>
+      <button class="filter-btn flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors text-gray-400 hover:text-white hover:bg-white/10" data-filter="warn">WARN</button>
+      <button class="filter-btn flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors text-gray-400 hover:text-white hover:bg-white/10" data-filter="error">ERROR</button>
     </div>
     <div class="flex items-center gap-3">
       <span id="live-indicator" class="text-xs text-green-500">● LIVE</span>
@@ -111,14 +112,15 @@
     }
   });
 
-  /* ── Log filter buttons ── */
+  /* ── Log filter buttons (segmented control — single select) ── */
+  var FILTER_ACTIVE = 'flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors bg-blue-600 text-white shadow-sm';
+  var FILTER_IDLE   = 'flex-1 px-3 py-1 text-xs rounded-[8px] font-medium transition-colors text-gray-400 hover:text-white hover:bg-white/10';
   document.querySelectorAll('.filter-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       document.querySelectorAll('.filter-btn').forEach(function(b) {
-        b.className = b.className.replace(/bg-blue-600 text-white/g, '') +
-          ' text-gray-400 hover:text-white transition-colors';
+        b.className = 'filter-btn ' + FILTER_IDLE;
       });
-      this.className = 'px-3 py-1 text-xs rounded-[6px] bg-blue-600 text-white';
+      this.className = 'filter-btn ' + FILTER_ACTIVE;
       var filter = this.dataset.filter;
       document.querySelectorAll('.log-line').forEach(function(line) {
         if (filter === 'all') {

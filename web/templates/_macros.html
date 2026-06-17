@@ -1,5 +1,5 @@
 {% macro stat_card(value, label, color="text-[var(--text-primary)]", icon="") -%}
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)]">
   {% if icon %}<div class="mb-1">{{ icon }}</div>{% endif %}
   <div class="text-3xl font-semibold tracking-tight {{ color }}">{{ value }}</div>
   <div class="text-sm text-[var(--text-secondary)] mt-1">{{ label }}</div>

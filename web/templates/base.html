@@ -22,6 +22,11 @@
               red: '#ff3b30',
               'red-dark': '#ff453a',
             }
+          },
+          boxShadow: {
+            'stat': 'var(--shadow-stat)',
+            'card': 'var(--shadow-card)',
+            'tooltip': 'var(--shadow-tooltip)',
           }
         }
       }
@@ -32,7 +37,7 @@
 <body class="h-full bg-[var(--bg-base)] text-[var(--text-primary)] font-sans antialiased">
 
   <!-- Mobile hamburger -->
-  <button id="menu-toggle" class="md:hidden fixed top-3 left-3 z-50 p-2 rounded-lg bg-[var(--card-bg)] backdrop-blur-[12px] border border-[var(--card-border)]" aria-label="Toggle menu">
+  <button id="menu-toggle" class="md:hidden fixed top-3 left-3 z-50 p-2 rounded-[10px] bg-[var(--card-bg)] backdrop-blur-[12px] border border-[var(--card-border)]" aria-label="Toggle menu">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
   </button>
 
@@ -78,7 +83,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  <!-- Global JS: toast, HTMX hooks, sidebar toggle, QR modal helpers -->
+  <!-- Global JS: toast, HTMX hooks, sidebar toggle -->
   <script>
     // ── Toast system ─────────────────────────────────────────────
     function showToast(msg, type) {
@@ -162,10 +167,6 @@
         document.getElementById('sidebar').classList.add('-translate-x-full');
       }
     });
-
-    // ── QR modal helpers (placeholders, Task 7 fills in) ───────
-    function openQRModal(platform) { /* Task 7 */ }
-    function closeQRModal() { /* Task 7 */ }
   </script>
 </body>
 </html>

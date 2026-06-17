@@ -9,7 +9,7 @@
 
 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 {% for p in platforms %}
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] overflow-hidden">
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-card border border-[var(--card-border)] overflow-hidden">
   <!-- Header: collapsible -->
   <div class="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors" onclick="var b=this.nextElementSibling; b.classList.toggle('hidden'); this.querySelector('.chevron').classList.toggle('rotate-180')">
     <div class="flex items-center gap-3">
@@ -20,6 +20,27 @@
   </div>
       <!-- Body -->
       <div class="px-5 pb-4">
+        <!-- Search row (moved to top — always visible) -->
+        <div class="mb-4">
+          <form class="flex gap-2"
+                hx-post="/subscriptions/search"
+                hx-trigger="submit"
+                hx-target="#search-{{ p.key }}"
+                hx-swap="innerHTML">
+            <input type="text" name="name" placeholder="搜索 {{ p.name }} 用户…"
+              class="flex-1 px-3 py-2 rounded-[8px] border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 text-sm focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] outline-none transition-all">
+            <input type="hidden" name="platform" value="{{ p.key }}">
+            <button type="submit"
+              class="px-4 py-2 bg-apple-blue text-white rounded-[8px] text-sm font-medium hover:bg-blue-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <span>搜索</span>
+            </button>
+          </form>
+          <div id="search-{{ p.key }}" class="mt-2"></div>
+        </div>
+
         {% if p["items"] %}
         <div class="space-y-1 mb-4">
           {% for item in p["items"] %}
@@ -40,25 +61,18 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="text-sm text-[var(--text-secondary)] py-2">暂无订阅</p>
+    <p class="text-sm text-[var(--text-secondary)] py-2 mb-4">暂无订阅</p>
     {% endif %}
 
-    <!-- Search section -->
-    <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-      <div class="flex gap-2">
-        <input type="text" name="name" placeholder="按名称搜索…"
-          class="flex-1 px-3 py-2 rounded-[8px] border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 text-sm focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] outline-none transition-all"
-          hx-post="/subscriptions/search" hx-trigger="keyup changed delay:300ms"
-          hx-target="#search-{{ p.key }}" hx-swap="innerHTML"
-          hx-include="this.form">
-        <input type="hidden" name="platform" value="{{ p.key }}">
-        <button type="button" class="px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-apple-blue transition-colors"
-          onclick="document.getElementById('manual-{{ p.key }}').classList.toggle('hidden')">手动添加</button>
-      </div>
-      <div id="search-{{ p.key }}" class="mt-2"></div>
-
-      <!-- Manual add (collapsed) -->
-      <div id="manual-{{ p.key }}" class="hidden mt-3 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-[10px]">
+    <!-- Manual add (collapsible — bottom, separated from search) -->
+    <div class="pt-4 border-t border-gray-100 dark:border-gray-800">
+      <button type="button"
+        class="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-apple-blue transition-colors"
+        onclick="var el=document.getElementById('manual-{{ p.key }}'); el.classList.toggle('hidden'); this.querySelector('.chevron-add').classList.toggle('rotate-180')">
+        <span>手动添加 UID</span>
+        <svg class="chevron-add w-3 h-3 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="manual-{{ p.key }}" class="hidden mt-2 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-[10px]">
         <form hx-post="/subscriptions/add" hx-target="body">
           <input type="hidden" name="platform" value="{{ p.key }}">
           <div class="flex gap-2">

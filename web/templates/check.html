@@ -7,7 +7,7 @@
 <p class="text-sm text-[var(--text-secondary)] mb-6">手动触发一次全平台抓取 · 实时日志输出</p>
 
 <!-- Status panel -->
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-4">
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)] mb-4">
   <div class="flex items-center justify-between flex-wrap gap-3">
     <div class="flex items-center gap-6 flex-wrap">
       <div class="flex items-center gap-2">
@@ -24,7 +24,7 @@
       </div>
     </div>
     <button id="run-btn"
-      class="px-5 py-2 rounded-[9px] text-sm font-medium transition-all duration-200 {% if running %}bg-orange-500 text-white cursor-not-allowed{% else %}bg-apple-blue text-white hover:bg-blue-600{% endif %}"
+      class="px-5 py-2 rounded-[10px] text-sm font-medium transition-all duration-200 {% if running %}bg-orange-500 text-white cursor-not-allowed{% else %}bg-apple-blue text-white hover:bg-blue-600{% endif %}"
       {% if running %}disabled{% endif %}
       onclick="startCheck()">
       {% if running %}运行中…{% else %}开始检查{% endif %}
@@ -36,41 +36,55 @@
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
   <!-- bili -->
   <div id="card-bili" data-platform="bili"
-       class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
-    <div class="flex items-center justify-between mb-2">
-      <span class="text-sm font-medium">B站</span>
-      <span id="status-bili" class="text-xs text-[var(--text-secondary)]">⚪ 空闲</span>
+       class="relative bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 pl-5 shadow-card border border-[var(--card-border)] overflow-hidden">
+    <!-- 左侧状态色条（绝对定位，JS 切 class） -->
+    <span id="bar-bili" class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--text-tertiary)]"></span>
+    <div class="flex items-center justify-between mb-1.5">
+      <span class="text-base font-semibold tracking-tight">B站</span>
+      <!-- dot + 文字组合（JS 切 dot class + label） -->
+      <span id="status-bili" class="inline-flex items-center gap-1.5 text-xs">
+        <span class="w-2 h-2 rounded-full bg-[var(--text-tertiary)]"></span>
+        <span class="text-[var(--text-secondary)]">空闲</span>
+      </span>
     </div>
-    <div id="progress-bili" class="text-xs text-[var(--text-tertiary)] font-mono">—</div>
+    <div id="progress-bili" class="text-[13px] leading-relaxed text-[var(--text-tertiary)] font-mono tabular-nums">—</div>
   </div>
   <!-- xhs -->
   <div id="card-xhs" data-platform="xhs"
-       class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
-    <div class="flex items-center justify-between mb-2">
-      <span class="text-sm font-medium">小红书</span>
-      <span id="status-xhs" class="text-xs text-[var(--text-secondary)]">⚪ 空闲</span>
+       class="relative bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 pl-5 shadow-card border border-[var(--card-border)] overflow-hidden">
+    <span id="bar-xhs" class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--text-tertiary)]"></span>
+    <div class="flex items-center justify-between mb-1.5">
+      <span class="text-base font-semibold tracking-tight">小红书</span>
+      <span id="status-xhs" class="inline-flex items-center gap-1.5 text-xs">
+        <span class="w-2 h-2 rounded-full bg-[var(--text-tertiary)]"></span>
+        <span class="text-[var(--text-secondary)]">空闲</span>
+      </span>
     </div>
-    <div id="progress-xhs" class="text-xs text-[var(--text-tertiary)] font-mono">—</div>
+    <div id="progress-xhs" class="text-[13px] leading-relaxed text-[var(--text-tertiary)] font-mono tabular-nums">—</div>
   </div>
   <!-- weibo -->
   <div id="card-weibo" data-platform="weibo"
-       class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
-    <div class="flex items-center justify-between mb-2">
-      <span class="text-sm font-medium">微博</span>
-      <span id="status-weibo" class="text-xs text-[var(--text-secondary)]">⚪ 空闲</span>
+       class="relative bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 pl-5 shadow-card border border-[var(--card-border)] overflow-hidden">
+    <span id="bar-weibo" class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--text-tertiary)]"></span>
+    <div class="flex items-center justify-between mb-1.5">
+      <span class="text-base font-semibold tracking-tight">微博</span>
+      <span id="status-weibo" class="inline-flex items-center gap-1.5 text-xs">
+        <span class="w-2 h-2 rounded-full bg-[var(--text-tertiary)]"></span>
+        <span class="text-[var(--text-secondary)]">空闲</span>
+      </span>
     </div>
-    <div id="progress-weibo" class="text-xs text-[var(--text-tertiary)] font-mono">—</div>
+    <div id="progress-weibo" class="text-[13px] leading-relaxed text-[var(--text-tertiary)] font-mono tabular-nums">—</div>
   </div>
 </div>
 
 <!-- Terminal log -->
-<div class="rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-gray-800 overflow-hidden">
+<div class="rounded-[14px] shadow-card border border-gray-800 overflow-hidden">
   <!-- Filter bar -->
   <div class="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-gray-800">
     <div class="flex gap-1">
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] bg-blue-600 text-white" data-filter="all">全部</button>
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="error">仅错误</button>
-      <button class="filter-btn px-3 py-1 text-xs rounded-[6px] text-gray-400 hover:text-white transition-colors" data-filter="live">LIVE</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[10px] bg-blue-600 text-white" data-filter="all">全部</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[10px] text-gray-400 hover:text-white transition-colors" data-filter="error">仅错误</button>
+      <button class="filter-btn px-3 py-1 text-xs rounded-[10px] text-gray-400 hover:text-white transition-colors" data-filter="live">LIVE</button>
     </div>
     <div class="flex items-center gap-3">
       <span class="live-indicator text-xs text-green-500 hidden">● LIVE</span>
@@ -104,29 +118,35 @@
   var RE_PLATFORM_ANY = /\b(bili|xhs|weibo)\b/;
 
   function setPlatformStatus(platform, state, text) {
+    var card = document.getElementById('card-' + platform);
+    var bar = document.getElementById('bar-' + platform);
     var statusEl = document.getElementById('status-' + platform);
     var progEl = document.getElementById('progress-' + platform);
-    if (!statusEl || !progEl) return;
-    var icon, label, statusCls, progCls;
+    if (!card || !bar || !statusEl || !progEl) return;
+
+    // dot 色 + bar 色 + pulse + label + label 色 + 进度色
+    var dotCls, barCls, pulse, label, labelCls, progCls;
     if (state === 'running') {
-      icon = '🟡'; label = '运行中';
-      statusCls = 'text-xs text-orange-500 font-medium';
-      progCls = 'text-xs text-[var(--text-secondary)] font-mono';
+      dotCls = 'bg-orange-500'; barCls = 'bg-orange-500'; pulse = 'animate-pulse';
+      label = '运行中'; labelCls = 'text-orange-500 font-medium';
+      progCls = 'text-[var(--text-secondary)] font-mono tabular-nums';
     } else if (state === 'done') {
-      icon = '✅'; label = '完成';
-      statusCls = 'text-xs text-green-600 dark:text-green-400 font-medium';
-      progCls = 'text-xs text-[var(--text-tertiary)] font-mono';
+      dotCls = 'bg-green-500'; barCls = 'bg-green-500'; pulse = '';
+      label = '完成'; labelCls = 'text-green-600 dark:text-green-400 font-medium';
+      progCls = 'text-[var(--text-tertiary)] font-mono tabular-nums';
     } else {
-      icon = '⚪'; label = '空闲';
-      statusCls = 'text-xs text-[var(--text-secondary)]';
-      progCls = 'text-xs text-[var(--text-tertiary)] font-mono';
+      dotCls = 'bg-[var(--text-tertiary)]'; barCls = 'bg-[var(--text-tertiary)]'; pulse = '';
+      label = '空闲'; labelCls = 'text-[var(--text-secondary)]';
+      progCls = 'text-[var(--text-tertiary)] font-mono tabular-nums';
       text = '—';
     }
-    statusEl.textContent = icon + ' ' + label;
-    statusEl.className = statusCls;
+    bar.className = 'absolute left-0 top-0 bottom-0 w-1 ' + barCls + ' ' + pulse;
+    statusEl.innerHTML =
+      '<span class="w-2 h-2 rounded-full ' + dotCls + ' ' + pulse + '"></span>' +
+      '<span class="' + labelCls + '">' + label + '</span>';
     if (text !== undefined) {
       progEl.textContent = text;
-      progEl.className = progCls;
+      progEl.className = 'text-[13px] leading-relaxed ' + progCls;
     }
   }
 

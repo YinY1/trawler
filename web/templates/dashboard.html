@@ -5,8 +5,8 @@
 
 {# Tooltip for stat card; msgs: list[MessageRecord], total: int, empty_hint: str #}
 {% macro stat_tooltip(msgs, total, empty_hint="暂无消息") %}
-<div class="absolute left-0 top-full mt-2 hidden group-hover:block z-50 w-72">
-  <div class="bg-white dark:bg-gray-800 border border-[var(--card-border)] rounded-[10px] shadow-[0_8px_24px_rgba(0,0,0,0.12)] p-2 max-h-72 overflow-y-auto">
+<div class="absolute left-0 top-full hidden group-hover:block z-50 w-72 pt-2">
+  <div class="bg-[var(--card-bg)] backdrop-blur-[12px] border border-[var(--card-border)] rounded-[10px] shadow-tooltip p-2 max-h-72 overflow-y-auto">
     {% if msgs %}
     {% for msg in msgs %}
     <div class="flex items-start gap-2 px-2 py-1.5 rounded-[6px] hover:bg-gray-50 dark:hover:bg-gray-700/40">
@@ -20,11 +20,6 @@
       </div>
     </div>
     {% endfor %}
-    {% if total > msgs|length %}
-    <div class="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-gray-100 dark:border-gray-700 mt-1">
-      还有 {{ total - msgs|length }} 条…
-    </div>
-    {% endif %}
     {% else %}
     <div class="text-xs text-[var(--text-tertiary)] text-center py-3">{{ empty_hint }}</div>
     {% endif %}
@@ -41,28 +36,28 @@
 <!-- Stats row 1: message counts (compact) -->
 <div class="flex flex-wrap gap-3 mb-4">
   <div class="relative group">
-    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-stat border border-[var(--card-border)] flex items-center gap-2 cursor-default">
       <span class="text-sm font-semibold tracking-tight text-[var(--text-primary)]">{{ total_msgs }}</span>
       <span class="text-xs text-[var(--text-secondary)]">总消息</span>
     </div>
     {{ stat_tooltip(total_sample, total_msgs) }}
   </div>
   <div class="relative group">
-    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-stat border border-[var(--card-border)] flex items-center gap-2 cursor-default">
       <span class="text-sm font-semibold tracking-tight text-orange-500">{{ active_count }}</span>
       <span class="text-xs text-[var(--text-secondary)]">处理中</span>
     </div>
     {{ stat_tooltip(active_messages, active_count, "暂无处理中的消息") }}
   </div>
   <div class="relative group">
-    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-stat border border-[var(--card-border)] flex items-center gap-2 cursor-default">
       <span class="text-sm font-semibold tracking-tight text-green-500">{{ pushed_count }}</span>
       <span class="text-xs text-[var(--text-secondary)]">已完成</span>
     </div>
     {{ stat_tooltip(pushed_sample, pushed_count, "暂无已完成的消息") }}
   </div>
   <div class="relative group">
-    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-[var(--card-border)] flex items-center gap-2 cursor-default">
+    <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[10px] px-3 py-1.5 shadow-stat border border-[var(--card-border)] flex items-center gap-2 cursor-default">
       <span class="text-sm font-semibold tracking-tight text-red-500">{{ error_count }}</span>
       <span class="text-xs text-[var(--text-secondary)]">错误</span>
     </div>
@@ -71,7 +66,7 @@
 </div>
 
 {% if sub_counts %}
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] mb-6">
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)] mb-6">
   <h2 class="text-base font-semibold mb-4">订阅概览</h2>
   <div class="flex flex-wrap gap-3">
     {% for platform, count in sub_counts.items() %}
@@ -84,7 +79,7 @@
 </div>
 {% endif %}
 
-<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)] overflow-hidden">
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-card border border-[var(--card-border)] overflow-hidden">
   <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
     <h2 class="text-base font-semibold">最近消息</h2>
   </div>
@@ -93,7 +88,8 @@
     <table class="w-full text-sm">
       <thead>
         <tr class="text-[var(--text-secondary)] text-xs uppercase tracking-wider">
-          <th class="text-left px-5 py-3 font-medium">时间</th>
+          <th class="text-left px-5 py-3 font-medium">处理时间</th>
+          <th class="text-left px-5 py-3 font-medium">发布时间</th>
           <th class="text-left px-5 py-3 font-medium">平台</th>
           <th class="text-left px-5 py-3 font-medium">标题</th>
           <th class="text-left px-5 py-3 font-medium">作者</th>
@@ -103,6 +99,7 @@
       <tbody>
         {% for msg in recent_messages %}
         <tr class="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+          <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.updated_at | timeago }}</td>
           <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.pubdate | timeago }}</td>
           <td class="px-5 py-3">{{ platform_tag(msg.platform) }}</td>
           <td class="px-5 py-3 max-w-xs truncate" title="{{ msg.title }}">{{ msg.title }}</td>

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -115,6 +117,34 @@ def create_app() -> FastAPI:
     from web.logging_bridge import LogBus
 
     app.state.log_bus = LogBus()
+
+    # ── 全局异常处理: 让 422 / 500 进入日志链路 ────────────────────────
+    # RequestValidationError 在路由 handler 之前抛出, 不进 try/except,
+    # 必须注册 exception_handler 才能被 logger 捕获并流到 /logs。
+    from fastapi import Request
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        logger.warning(
+            "⚠️ 请求参数校验失败: %s %s — %s",
+            request.method,
+            request.url.path,
+            exc.errors(),
+        )
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        logger.exception(
+            "💥 未处理异常: %s %s — %s", request.method, request.url.path, exc
+        )
+        return JSONResponse(status_code=500, content={"detail": "内部错误"})
+
+    # ──────────────────────────────────────────────────────────────────
 
     # Mount static files — directory exists in the repo, no need to create
     static_dir = HERE / "static"
