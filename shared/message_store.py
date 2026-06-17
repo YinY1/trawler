@@ -86,6 +86,7 @@ class MessageStore:
             created_at=data.get("created_at", 0.0),
             updated_at=data.get("updated_at", 0.0),
             error=data.get("error", ""),
+            dynamic_text=data.get("dynamic_text", ""),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -187,6 +188,24 @@ class MessageStore:
         if msg_id not in self._messages:
             return
         self._messages[msg_id]["error"] = error
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
+    def append_dynamic_text(self, msg_id: str, text: str) -> None:
+        """向已存在消息追加 dynamic_text（动态去重场景专用）。
+
+        当动态的 ``linked_bvid`` 指向的视频已被注册时，调用此方法将动态本身
+        的文字内容追加到视频消息上，避免重复推送两条内容相同的消息。
+
+        多次追加会用换行分隔。如果 text 为空，直接 no-op。
+        """
+        if msg_id not in self._messages or not text:
+            return
+        existing = self._messages[msg_id].get("dynamic_text", "")
+        if existing:
+            self._messages[msg_id]["dynamic_text"] = f"{existing}\n{text}"
+        else:
+            self._messages[msg_id]["dynamic_text"] = text
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
