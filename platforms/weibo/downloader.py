@@ -7,14 +7,12 @@ import logging
 from pathlib import Path
 
 import aiohttp
-from rich.console import Console
 
 from shared.config import Config
 from shared.constants import WEIBO_DOWNLOAD_TIMEOUT
 from shared.protocols import WeiboDownloadResult, WeiboPost
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 def _get_post_dir(config: Config, post_id: str) -> Path:

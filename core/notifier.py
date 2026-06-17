@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 
 import aiohttp
-from rich.console import Console
 
 from shared.config import NotificationConfig
 from shared.constants import GOTIFY_MAX_RETRIES, GOTIFY_TIMEOUT
 
-console = Console()
+logger = logging.getLogger(__name__)
 
 
 # ── 底层 Gotify 接口 ─────────────────────────────────────────────
@@ -38,11 +38,11 @@ async def send_gotify(
         是否发送成功
     """
     if not config.enabled:
-        console.log("[dim]通知推送已禁用[/]")
+        logger.debug("通知推送已禁用")
         return False
 
     if not config.gotify_url or not config.gotify_token:
-        console.log("[yellow]Gotify 配置不完整（缺少 URL 或 Token）[/]")
+        logger.warning("Gotify 配置不完整（缺少 URL 或 Token）")
         return False
 
     url = f"{config.gotify_url.rstrip('/')}/message"
@@ -65,25 +65,25 @@ async def send_gotify(
                     timeout=aiohttp.ClientTimeout(total=GOTIFY_TIMEOUT),
                 ) as resp:
                     resp.raise_for_status()
-                console.log(f"[green]Gotify 通知发送成功: {title}[/]")
+                logger.info("Gotify 通知发送成功: %s", title)
                 return True
 
         except asyncio.TimeoutError:
-            console.log(f"[yellow]Gotify 请求超时 (尝试 {attempt}/{max_retries})[/]")
+            logger.warning("Gotify 请求超时 (尝试 %s/%s)", attempt, max_retries)
         except aiohttp.ClientConnectionError:
-            console.log(f"[yellow]Gotify 连接失败 (尝试 {attempt}/{max_retries})[/]")
+            logger.warning("Gotify 连接失败 (尝试 %s/%s)", attempt, max_retries)
         except aiohttp.ClientResponseError as e:
-            console.log(f"[yellow]Gotify HTTP 错误 (尝试 {attempt}/{max_retries}): {e}[/]")
+            logger.warning("Gotify HTTP 错误 (尝试 %s/%s): %s", attempt, max_retries, e)
         except Exception as e:
-            console.log(f"[yellow]Gotify 发送异常 (尝试 {attempt}/{max_retries}): {e}[/]")
+            logger.warning("Gotify 发送异常 (尝试 %s/%s): %s", attempt, max_retries, e)
 
         # 指数退避：1s, 2s, 4s
         if attempt < max_retries:
             wait = 2 ** (attempt - 1)
-            console.log(f"[dim]等待 {wait}s 后重试...[/]")
+            logger.debug("等待 %ss 后重试...", wait)
             await asyncio.sleep(wait)
 
-    console.log(f"[bold red]Gotify 通知发送失败（已重试 {max_retries} 次）: {title}[/]")
+    logger.error("Gotify 通知发送失败（已重试 %s 次）: %s", max_retries, title)
     return False
 
 

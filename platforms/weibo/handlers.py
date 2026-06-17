@@ -9,8 +9,6 @@ from __future__ import annotations
 # pyright: basic
 import logging
 
-from rich.console import Console
-
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
 from core.notifier import notify_new_weibo_post
@@ -24,7 +22,6 @@ from shared.message_store import MessageStore
 from shared.protocols import ContentType, Phase, PhaseContext
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 # -- Detector ----------------------------------------------------
@@ -57,7 +54,7 @@ async def weibo_detector(config: Config, store: MessageStore) -> None:
 async def weibo_download(ctx: PhaseContext) -> bool:
     """下载微博媒体、解析内容、生成摘要和关键词。"""
     post_id = ctx.msg.msg_id.replace("weibo:", "")
-    console.print(f"  [dim]⬇ 下载 {ctx.msg.title} ({post_id})...[/]")
+    logger.info("⬇ 下载 %s (%s)...", ctx.msg.title, post_id)
 
     # Reconstruct WeiboPost from MessageRecord
     from shared.protocols import WeiboPost
@@ -84,18 +81,18 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         result = await download_weibo_media(post=post, config=ctx.config)
     except Exception as exc:
         ctx.error = f"下载失败: {exc}"
-        console.print(f"  [red]✗ {ctx.error}[/]")
+        logger.error("✗ %s", ctx.error)
         logger.exception("Weibo download failed for %s", post_id)
         return False
 
     if not result.success:
         ctx.error = result.error or "下载未成功"
-        console.print(f"  [yellow]⚠️  {ctx.error}[/]")
+        logger.warning("⚠️  %s", ctx.error)
         return False
 
     ctx.image_paths = result.image_paths
     ctx.content_text = result.text
-    console.print("  [green]✓ 下载完成[/]")
+    logger.info("✓ 下载完成")
 
     # Parse content
     try:
@@ -103,12 +100,12 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         if parsed:
             ctx.content_text = parsed.get("text", ctx.content_text)
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  内容解析失败: {exc}[/]")
+        logger.warning("⚠️  内容解析失败: %s", exc)
         logger.warning("Weibo parse failed for %s: %s", post_id, exc)
 
     # Generate summary and keywords (TEXT type skips SUMMARIZED phase)
     try:
-        summary_text, source, _ = generate_summary(
+        summary_text, source, _ = await generate_summary(
             source_id=post_id,
             title=ctx.msg.title,
             author=ctx.msg.author,
@@ -116,20 +113,20 @@ async def weibo_download(ctx: PhaseContext) -> bool:
             config=ctx.config,
         )
         ctx.summary_text = summary_text
-        console.print(f"  [dim]📝 摘要 ({source})[/]")
+        logger.info("📝 摘要 (%s)", source)
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  摘要生成失败: {exc}[/]")
+        logger.warning("⚠️  摘要生成失败: %s", exc)
         ctx.summary_text = ctx.content_text[:500]
 
     try:
-        ctx.keywords = extract_keywords(
+        ctx.keywords = await extract_keywords(
             text=ctx.content_text,
             title=ctx.msg.title,
             author=ctx.msg.author,
             config=ctx.config,
         )
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  关键词提取失败: {exc}[/]")
+        logger.warning("⚠️  关键词提取失败: %s", exc)
         ctx.keywords = []
 
     # Fetch comment highlights
@@ -140,9 +137,9 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         )
         ctx.comment_highlights = format_comment_highlights(highlights)
         if highlights:
-            console.print(f"  [dim]💬 获取到 {len(highlights)} 条热门评论[/]")
+            logger.info("💬 获取到 %d 条热门评论", len(highlights))
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  评论获取失败: {exc}[/]")
+        logger.warning("⚠️  评论获取失败: %s", exc)
         ctx.comment_highlights = ""
 
     return True
@@ -156,7 +153,7 @@ async def weibo_push(ctx: PhaseContext) -> bool:
     """推送微博通知。"""
     post_id = ctx.msg.msg_id.replace("weibo:", "")
     display_title = ctx.msg.title
-    console.print("  [dim]🔔 推送通知...[/]")
+    logger.info("🔔 推送通知...")
 
     try:
         await notify_new_weibo_post(
@@ -168,9 +165,9 @@ async def weibo_push(ctx: PhaseContext) -> bool:
             comment_highlights=ctx.comment_highlights or None,
             weibo_noti_config=ctx.config.weibo.notification,
         )
-        console.print("  [green]✓ 通知推送完成[/]")
+        logger.info("✓ 通知推送完成")
     except Exception as exc:
-        console.print(f"  [yellow]⚠️  通知推送失败: {exc}[/]")
+        logger.warning("⚠️  通知推送失败: %s", exc)
         logger.warning("Weibo notify failed for %s: %s", post_id, exc)
 
     return True

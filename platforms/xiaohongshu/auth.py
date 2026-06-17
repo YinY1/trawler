@@ -18,8 +18,6 @@ import random
 import time
 from collections.abc import Callable
 
-from rich.console import Console
-
 from platforms.xiaohongshu.client import XhsClient
 from shared.auth.base import (
     AuthStatus,
@@ -34,7 +32,6 @@ from shared.config import Config
 from shared.cookie_utils import build_cookie_str, parse_cookie_str
 
 logger = logging.getLogger("trawler.xiaohongshu.auth")
-console = Console()
 
 _A1_CHARSET = "abcdefghijklmnopqrstuvwxyz1234567890"
 
@@ -59,7 +56,7 @@ def get_xhs_cookie(config: Config) -> str:
         return cookie.strip()
 
     logger.warning("未配置小红书 Cookie，API 请求可能失败")
-    console.print("[yellow]⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 XHS_COOKIE 中设置[/yellow]")
+    logger.warning("⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 XHS_COOKIE 中设置")
     return ""
 
 

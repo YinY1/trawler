@@ -5,14 +5,11 @@ from __future__ import annotations
 # pyright: basic
 import logging
 
-from rich.console import Console
-
 from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS
 from shared.protocols import CommentHighlight
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 def _extract_reply_info(reply: dict) -> dict:
