@@ -117,6 +117,7 @@ async def subscription_endpoint_add(
     plat_section = cast(dict[str, Any], plat_section_raw)
     subs = plat_section.get("subscriptions", [])
     id_field = "uid" if plat_name == "bilibili" else "user_id"
+    found = False
     for sub in subs:
         if not isinstance(sub, dict):
             continue
@@ -128,7 +129,13 @@ async def subscription_endpoint_add(
             if endpoint_name not in eps_list:
                 eps_list.append(endpoint_name)
                 sub_dict["notify_endpoints"] = eps_list
+            found = True
             break
+    if not found:
+        return HTMLResponse(
+            content="", status_code=404,
+            headers={"HX-Trigger": '{"toast":{"msg":"订阅不存在","type":"error"}}'},
+        )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return HTMLResponse(
         content="",
@@ -155,6 +162,7 @@ async def subscription_endpoint_remove(
     plat_section = cast(dict[str, Any], plat_section_raw)
     subs = plat_section.get("subscriptions", [])
     id_field = "uid" if plat_name == "bilibili" else "user_id"
+    found = False
     for sub in subs:
         if not isinstance(sub, dict):
             continue
@@ -164,7 +172,13 @@ async def subscription_endpoint_remove(
             eps_arr = sub_dict.get("notify_endpoints", [])
             eps = [str(e) for e in eps_arr if str(e) != endpoint_name]
             sub_dict["notify_endpoints"] = eps
+            found = True
             break
+    if not found:
+        return HTMLResponse(
+            content="", status_code=404,
+            headers={"HX-Trigger": '{"toast":{"msg":"订阅不存在","type":"error"}}'},
+        )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return HTMLResponse(
         content="",
