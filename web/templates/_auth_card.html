@@ -1,0 +1,38 @@
+{# Single auth-platform card — rendered standalone for HTMX partial refresh. #}
+{% from "_macros.html" import platform_tag, status_dot %}
+<div id="auth-card-{{ p.key }}"
+     class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)]">
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-2">
+      {{ platform_tag(p.name) }}
+      {% if "有效" in p.token_status %}
+        {{ status_dot("active") }}
+      {% elif "过期" in p.token_status %}
+        {{ status_dot("error") }}
+      {% else %}
+        {{ status_dot("inactive") }}
+      {% endif %}
+    </div>
+  </div>
+  <div class="text-sm text-[var(--text-primary)] mb-2 font-medium">{{ p.token_status }}</div>
+  {% if p.expires %}
+  <div class="text-xs text-[var(--text-secondary)] mb-4">过期时间: {{ p.expires }}</div>
+  {% else %}
+  <div class="text-xs text-[var(--text-secondary)] mb-4">&nbsp;</div>
+  {% endif %}
+  <div class="flex gap-2">
+    {% if "有效" in p.token_status %}
+    <button data-renew-btn onclick="renewToken('{{ p.key }}', this)" class="renew-btn px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5">续期</button>
+    {% elif "过期" in p.token_status %}
+    <button data-renew-btn onclick="openQRModal('{{ p.key }}', this)" class="renew-btn px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5">扫码续期</button>
+    {% else %}
+    <button data-renew-btn onclick="openQRModal('{{ p.key }}', this)" class="renew-btn px-3 py-1.5 text-xs rounded-[8px] bg-apple-blue text-white hover:bg-blue-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5">扫码登录</button>
+    {% endif %}
+    {% if p.has_auth %}
+    <button onclick="logoutPlatform('{{ p.key }}', this)"
+      class="logout-btn px-3 py-1.5 text-xs rounded-[8px] border border-gray-300 dark:border-gray-600 text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10 hover:border-red-400 hover:text-red-500 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5">
+      注销
+    </button>
+    {% endif %}
+  </div>
+</div>

@@ -8,14 +8,12 @@ import re
 from typing import Any
 
 import aiohttp
-from rich.console import Console
 
 from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS, WEIBO_REQUEST_TIMEOUT
 from shared.protocols import CommentHighlight
 
-logger = logging.getLogger(__name__)
-console = Console()
+logger = logging.getLogger("trawler.weibo.comments")
 
 # PC 端评论 API
 COMMENT_API = "https://weibo.com/ajax/statuses/buildComments?flow=default&id={post_id}&is_show_bulletin=2&key="

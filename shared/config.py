@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 # pyright: basic
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ── 认证续期配置 ──────────────────────────────────────────────
 
@@ -316,10 +319,12 @@ async def load_config(path: str | Path = "config/config.toml") -> Config:
     - ``config/subscriptions.toml``: 订阅列表
     """
     p = Path(path)
+    logger.debug("⚙️ 加载配置: %s", p)
 
     # 检测旧版 config.yaml 并给出迁移提示
     yaml_path = p.with_suffix(".yaml")
     if yaml_path.exists():
+        logger.warning("⚙️ 检测到旧版 config.yaml，请迁移至 TOML")
         import warnings
 
         warnings.warn(
@@ -338,6 +343,7 @@ async def load_config(path: str | Path = "config/config.toml") -> Config:
     # ── 2. 合并凭证配置（config/cookies.toml）────────────────
     cookies_path = p.with_name("cookies.toml")
     if cookies_path.exists():
+        logger.debug("⚙️ 合并凭证: %s", cookies_path)
         with open(cookies_path, "rb") as f:
             cookies_raw: dict = tomllib.load(f)
         for _platform in ("bilibili", "xiaohongshu", "weibo"):
@@ -350,6 +356,7 @@ async def load_config(path: str | Path = "config/config.toml") -> Config:
     # ── 3. 合并订阅列表（config/subscriptions.toml）──────────
     subs_path = p.with_name("subscriptions.toml")
     if subs_path.exists():
+        logger.debug("⚙️ 合并订阅: %s", subs_path)
         with open(subs_path, "rb") as f:
             subs_raw: dict = tomllib.load(f)
         for _platform in ("bilibili", "xiaohongshu", "weibo"):
@@ -361,4 +368,5 @@ async def load_config(path: str | Path = "config/config.toml") -> Config:
 
     cfg = _parse_config(raw)
     _apply_env_overrides(cfg)
+    logger.debug("⚙️ 配置加载完成")
     return cfg

@@ -29,6 +29,7 @@ class TestAuth:
         mock_auth.generate_qr_code = AsyncMock(
             return_value=MagicMock(qr_url="https://example.com/qr", qr_key="key1")
         )
+        mock_auth.close = AsyncMock()
         mock_get_auth.return_value = mock_auth
         resp = await client.get("/auth/qr/bili")
         assert resp.status_code == 200
@@ -46,6 +47,7 @@ class TestAuth:
         mock_auth.poll_qr_status = AsyncMock(
             return_value=AuthStatus(success=False, status=QRStatus.WAITING, message="waiting")
         )
+        mock_auth.close = AsyncMock()
         mock_get_auth.return_value = mock_auth
         # Need a QR session first
         await client.get("/auth/qr/bili")

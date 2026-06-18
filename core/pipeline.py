@@ -14,16 +14,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from rich.console import Console
-
 from shared.config import Config
 from shared.protocols import Phase
 
-console = Console()
 logger = logging.getLogger(__name__)
 
 
@@ -97,22 +95,62 @@ async def run_check_once(
     if from_phase is not None:
         _phase = Phase[from_phase.upper()]
 
-    console.print()
-    console.rule("[bold]Trawler v0.1.0[/bold]")
-    console.print()
+    logger.info("▶ Trawler v0.1.0")
 
-    for pkey, pdef in PLATFORM_REGISTRY.items():
-        if platform not in ("all", pkey):
-            continue
-        if not pdef.enabled_check(config):
-            continue
+    # 选出本次需要执行的平台（保持 PLATFORM_REGISTRY 顺序）
+    selected = [
+        (pkey, pdef)
+        for pkey, pdef in PLATFORM_REGISTRY.items()
+        if (platform in ("all", pkey)) and pdef.enabled_check(config)
+    ]
 
-        from shared.auth.scheduler import check_and_renew_tokens
+    from shared.auth.scheduler import check_and_renew_tokens
+    from shared.message_store import MessageStore
 
-        await check_and_renew_tokens(pdef.auth_name, config, config_path)
+    if platform == "all" and len(selected) > 1:
+        # 并发执行多平台：共享同一个 MessageStore 实例，避免各实例
+        # 内存快照互相覆盖导致数据丢失。单线程事件循环下 MessageStore
+        # 的同步写方法天然原子，无需加锁。
+        # token 续期涉及磁盘写入，串行执行避免配置文件并发写
+        for _pkey, pdef in selected:
+            logger.info("🔑 检查 %s token 状态...", pdef.auth_name)
+            await check_and_renew_tokens(pdef.auth_name, config, config_path)
+
+        shared_store = MessageStore(config.general.data_dir)
+        shared_store.cleanup(24)
+        if log_callback:
+            log_callback("log", "🧹 已清理超过 24 小时的消息")
 
         from core.engine import PipelineEngine
 
-        await PipelineEngine.run_platform(
-            config, pkey, from_phase=_phase, log_callback=log_callback
-        )
+        tasks = [
+            PipelineEngine.run_platform(
+                config, pkey, from_phase=_phase, log_callback=log_callback, store=shared_store
+            )
+            for pkey, _pdef in selected
+        ]
+        # return_exceptions=True 防止单个平台失败中断其他平台
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for (pkey, _pdef), result in zip(selected, results, strict=True):
+            # BaseException 包含 CancelledError：取消通常来自 shutdown，记 warning 即可，
+            # 不当作普通错误打扰前端；Exception 才是真正的平台执行失败。
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                logger.warning("✗ 平台 %s 被取消/中断: %s", pkey, result)
+                if log_callback:
+                    log_callback("log", f"⏹ {pkey} 平台被取消: {result}")
+            elif isinstance(result, Exception):
+                logger.error("✗ 平台 %s 检查失败: %s", pkey, result, exc_info=result)
+                if log_callback:
+                    log_callback("error", f"✗ {pkey} 平台检查失败: {result}")
+        # 每个 run_platform 内部已各自 save()，共享 store 无需额外落盘
+    else:
+        # 单平台或未启用其他平台：保持原有串行路径（兼容现有调用方）
+        for pkey, pdef in selected:
+            logger.info("🔑 检查 %s token 状态...", pdef.auth_name)
+            await check_and_renew_tokens(pdef.auth_name, config, config_path)
+
+            from core.engine import PipelineEngine
+
+            await PipelineEngine.run_platform(
+                config, pkey, from_phase=_phase, log_callback=log_callback
+            )

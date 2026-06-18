@@ -18,8 +18,6 @@ import random
 import time
 from collections.abc import Callable
 
-from rich.console import Console
-
 from platforms.xiaohongshu.client import XhsClient
 from shared.auth.base import (
     AuthStatus,
@@ -34,7 +32,6 @@ from shared.config import Config
 from shared.cookie_utils import build_cookie_str, parse_cookie_str
 
 logger = logging.getLogger("trawler.xiaohongshu.auth")
-console = Console()
 
 _A1_CHARSET = "abcdefghijklmnopqrstuvwxyz1234567890"
 
@@ -59,7 +56,7 @@ def get_xhs_cookie(config: Config) -> str:
         return cookie.strip()
 
     logger.warning("未配置小红书 Cookie，API 请求可能失败")
-    console.print("[yellow]⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 XHS_COOKIE 中设置[/yellow]")
+    logger.warning("⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 XHS_COOKIE 中设置")
     return ""
 
 
@@ -107,6 +104,7 @@ class XhsAuthenticator(BaseAuthenticator):
 
     async def generate_qr_code(self) -> QRCodeResult:
         """生成 QR 二维码 (纯 Python, 通过 XhsClient)。"""
+        logger.info("🔑 XhsAuthenticator 生成二维码...")
         a1 = generate_a1()
         init_cookies: dict[str, str] = {"a1": a1, "webId": generate_web_id(a1)}
 
@@ -129,6 +127,7 @@ class XhsAuthenticator(BaseAuthenticator):
 
         状态码映射: 1=waiting, 2=scanned, 3=success, 4=expired
         """
+        logger.info("🔑 XhsAuthenticator 轮询扫码状态...")
         client = self._ensure_client()
         try:
             result = await client.check_qrcode_status(qr_key, self._qr_code)
@@ -147,6 +146,7 @@ class XhsAuthenticator(BaseAuthenticator):
 
     async def get_tokens(self, qr_key: str) -> PlatformTokens:
         """从 XhsClient 当前 session 提取登录后的 cookies。"""
+        logger.info("🔑 XhsAuthenticator 获取凭证...")
         now = time.time()
         client = self._client
         if client is None:
@@ -197,6 +197,7 @@ class XhsAuthenticator(BaseAuthenticator):
 
     async def refresh_tokens(self, tokens: PlatformTokens) -> PlatformTokens:
         """通过访问 XHS 主页捕获 Set-Cookie 续期。"""
+        logger.info("🔑 XhsAuthenticator 续期 token...")
         client = self._ensure_client(build_cookie_str(tokens.cookies))
         new_cookies = await client.refresh_cookies()
 
@@ -205,6 +206,7 @@ class XhsAuthenticator(BaseAuthenticator):
             cookies.update(new_cookies)
 
         now = time.time()
+        logger.info("🔑 XhsAuthenticator token 续期完成")
         return PlatformTokens(
             platform="xhs",
             cookies=cookies,
@@ -224,6 +226,12 @@ class XhsAuthenticator(BaseAuthenticator):
 
     def supports_refresh(self) -> bool:
         return True
+
+    async def close(self) -> None:
+        """关闭内部 XhsClient（及其懒创建的 aiohttp session）。"""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
 
 def build_tokens_from_config(config: Config) -> PlatformTokens | None:

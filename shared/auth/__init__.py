@@ -28,6 +28,7 @@ __all__ = [
     "QRStatus",
     "RefreshFailedError",
     "TokenInvalidError",
+    "clear_auth_section",
     "display_qr_in_terminal",
     "get_authenticator",
     "update_auth_section",
@@ -62,3 +63,16 @@ async def update_auth_section(
 
     table = _PLATFORM_TABLE.get(platform, platform)
     await _update(config_path=config_path, platform=table, auth_dict=auth_dict)
+
+
+async def clear_auth_section(
+    platform: str, config_path: str = "config/config.toml"
+) -> bool:
+    """Remove [platform.auth] section from cookies.toml.
+
+    Returns True if the section existed and was removed.
+    """
+    from shared.auth.token_store import clear_auth_section as _clear
+
+    table = _PLATFORM_TABLE.get(platform, platform)
+    return await _clear(config_path=config_path, platform=table)

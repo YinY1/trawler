@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
-import subprocess
 from collections import Counter
-
-from rich.console import Console
 
 from shared.config import AnalysisConfig, Config
 from shared.constants import CODEBUDDY_TIMEOUT, LLM_API_TIMEOUT
 from shared.protocols import LLMProvider
 
-console = Console()
+logger = logging.getLogger(__name__)
 
 # ── 摘要 Prompt 模板 ─────────────────────────────────────────────
 
@@ -51,7 +50,7 @@ class CodeBuddyProvider:
         """
         self.model = model
 
-    def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str) -> str:
         """调用 codebuddy CLI 生成文本
 
         Args:
@@ -63,25 +62,34 @@ class CodeBuddyProvider:
         Raises:
             RuntimeError: codebuddy 执行失败时抛出
         """
-        console.log(f"[dim]调用 CodeBuddy (model={self.model})...[/]")
+        logger.debug("调用 CodeBuddy (model=%s)...", self.model)
         cmd = ["codebuddy", "--model", self.model, prompt]
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=CODEBUDDY_TIMEOUT,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"CodeBuddy 调用超时 ({CODEBUDDY_TIMEOUT}s)")
         except FileNotFoundError:
             raise RuntimeError("codebuddy 命令未找到，请确保已安装")
 
-        if result.returncode != 0:
-            raise RuntimeError(f"CodeBuddy 调用失败 (返回码 {result.returncode}): {result.stderr}")
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=CODEBUDDY_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(f"CodeBuddy 调用超时 ({CODEBUDDY_TIMEOUT}s)")
 
-        output = result.stdout.strip()
+        stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+        stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"CodeBuddy 调用失败 (返回码 {proc.returncode}): {stderr}")
+
+        output = stdout.strip()
         if not output:
             raise RuntimeError("CodeBuddy 返回空结果")
 
@@ -115,7 +123,7 @@ class OpenAIProvider:
         self.api_key = api_key
         self.model_name = model_name
 
-    def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str) -> str:
         """调用 OpenAI 兼容 API 生成文本
 
         Args:
@@ -141,10 +149,13 @@ class OpenAIProvider:
             "max_tokens": 2048,
         }
 
-        console.log(f"[dim]调用 OpenAI 兼容 API (model={self.model_name})...[/]")
+        logger.debug("调用 OpenAI 兼容 API (model=%s)...", self.model_name)
 
         try:
-            response = httpx.post(url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT
+                )
         except httpx.TimeoutException:
             raise RuntimeError(f"OpenAI API 调用超时 ({LLM_API_TIMEOUT}s)")
         except httpx.ConnectError:
@@ -414,7 +425,7 @@ def _create_provider(config: AnalysisConfig) -> LLMProvider:
         raise ValueError(f"不支持的 provider: {config.provider}")
 
 
-def generate_summary(
+async def generate_summary(
     source_id: str,
     title: str,
     author: str,
@@ -437,7 +448,7 @@ def generate_summary(
         (摘要文本, 来源标识, 是否AI生成) 三元组
     """
     if not config.analysis.enabled:
-        console.log("[dim]AI 分析已禁用，使用本地摘要[/]")
+        logger.debug("AI 分析已禁用，使用本地摘要")
         fallback = LocalFallbackProvider()
         prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
         return fallback.generate(prompt), "local", False
@@ -449,12 +460,12 @@ def generate_summary(
     try:
         provider = _create_provider(config.analysis)
         prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
-        summary = provider.generate(prompt)
-        console.log(f"[bold green]AI 摘要生成成功: {source_id}[/]")
+        summary = await provider.generate(prompt)
+        logger.info("AI 摘要生成成功: %s", source_id)
         return summary, config.analysis.provider, True
 
     except Exception as e:
-        console.log(f"[yellow]AI 摘要生成失败 ({config.analysis.provider}): {e}，降级到本地摘要[/]")
+        logger.warning("AI 摘要生成失败 (%s): %s，降级到本地摘要", config.analysis.provider, e)
 
     # 降级到本地摘要
     fallback = LocalFallbackProvider()
@@ -463,7 +474,7 @@ def generate_summary(
     return summary, "local-fallback", False
 
 
-def extract_keywords(
+async def extract_keywords(
     text: str,
     title: str,
     author: str,
@@ -487,14 +498,14 @@ def extract_keywords(
         try:
             provider = _create_provider(config.analysis)
             prompt = _KEYWORDS_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
-            result = provider.generate(prompt)
+            result = await provider.generate(prompt)
             # 解析关键词（支持中英文分号、逗号、换行分隔）
             keywords = re.split(r"[；;，,\n]+", result)
             keywords = [k.strip() for k in keywords if k.strip()]
             if keywords:
                 return keywords[:5]
         except Exception as e:
-            console.log(f"[dim]AI 关键词提取失败: {e}，使用本地提取[/]")
+            logger.debug("AI 关键词提取失败: %s，使用本地提取", e)
 
     # 本地 TF 提取
     return _extract_keywords_local(text, title)

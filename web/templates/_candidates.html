@@ -1,17 +1,20 @@
 {% if candidates %}
-<ul>
+<div class="bg-white dark:bg-gray-800 rounded-[8px] border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm divide-y divide-gray-100 dark:divide-gray-800">
   {% for c in candidates %}
-  <li>
-    {{ c.get("name", "?") }} (ID: {{ c.get("uid") or c.get("user_id", "?") }})
-    <form action="/subscriptions/add" method="post" style="display:inline;">
+  <div class="flex items-center justify-between px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+    <div class="flex-1 min-w-0">
+      <div class="text-sm font-medium truncate">{{ c.get("name", "?") }}</div>
+      <div class="text-xs text-[var(--text-secondary)] font-mono">UID: {{ c.get("uid") or c.get("user_id", "?") }}</div>
+    </div>
+    <form hx-post="/subscriptions/add" hx-target="body" style="display:inline;">
       <input type="hidden" name="platform" value="{{ search_platform }}">
       <input type="hidden" name="identifier" value="{{ c.get('uid') or c.get('user_id', '') }}">
       <input type="hidden" name="name" value="{{ c.get('name', '') }}">
-      <button type="submit" class="btn-primary btn-small">添加</button>
+      <button type="submit" class="px-3 py-1 text-xs font-medium text-apple-blue hover:bg-apple-blue/10 rounded-[6px] transition-colors">+ 添加</button>
     </form>
-  </li>
+  </div>
   {% endfor %}
-</ul>
+</div>
 {% else %}
-<p style="color:#999;">{{ search_msg }}</p>
+<p class="text-xs text-[var(--text-secondary)] mt-1 px-1">{{ search_msg }}</p>
 {% endif %}

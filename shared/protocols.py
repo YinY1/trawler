@@ -226,7 +226,7 @@ class SummaryResult:
 class LLMProvider(Protocol):
     """LLM 提供商协议"""
 
-    def generate(self, prompt: str) -> str: ...
+    async def generate(self, prompt: str) -> str: ...
 
 
 # ═══════════════════════════════════════════════════════════
@@ -352,6 +352,10 @@ class MessageRecord:
     created_at: float = 0.0
     updated_at: float = 0.0
     error: str = ""
+    # 动态附加文字（去重场景）：当动态 linked_bvid 指向的视频已被注册时，
+    # 动态本身的文字内容（UP 主的补充说明）会被追加到对应视频消息的这个字段，
+    # 在摘要生成时拼到摘要输入文本前面，标注【动态内容】。
+    dynamic_text: str = ""
 
 
 @dataclass

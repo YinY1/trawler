@@ -128,7 +128,7 @@ def _build_tokens_from_config(platform: str, config: Config) -> PlatformTokens |
     try:
         mod = importlib.import_module(module_name)
         return mod.build_tokens_from_config(config)
-    except ImportError, AttributeError:
+    except (ImportError, AttributeError):
         return None
 
 

@@ -10,7 +10,7 @@ import bilibili_api
 from shared.config import Config
 from shared.protocols import VideoInfo
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trawler.bilibili.monitor")
 
 
 async def _fetch_user_videos(

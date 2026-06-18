@@ -34,6 +34,7 @@ data/
 config/config.toml
 config/cookies.toml
 config/subscriptions.toml
+config/*.toml.bak
 
 # Debug artifacts
 transcripts/
@@ -43,3 +44,6 @@ debug_*.py
 
 # Git worktrees
 .worktrees/
+
+# Superpowers brainstorm (visual companion mockups)
+.superpowers/

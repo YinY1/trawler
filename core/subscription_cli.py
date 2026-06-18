@@ -141,9 +141,12 @@ async def add_subscription(
 
     arr = _ensure_platform_array(doc, section)
 
+    logger.info("📋 添加订阅: %s/%s = %s", section, key, typed_id)
+
     # Check duplicate
     for item in arr:
         if isinstance(item, dict) and str(item.get(key, "")) == str(typed_id):
+            logger.warning("📋 订阅已存在: %s", name)
             return False, f"已存在: {item.get('name', '')}"
 
     # Append new subscription
@@ -172,7 +175,10 @@ async def remove_subscription(
     key, typed_id = _key_value(platform, identifier)
     p = Path(path)
 
+    logger.info("📋 删除订阅: %s/%s = %s", section, key, typed_id)
+
     if not p.exists():
+        logger.warning("📋 订阅文件不存在")
         return False, "未找到: 订阅文件不存在"
 
     raw = p.read_text(encoding="utf-8")
@@ -206,6 +212,7 @@ async def remove_subscription(
                 new_list.append(item)
 
     if not found:
+        logger.warning("📋 未找到订阅: %s/%s = %s", section, key, typed_id)
         return False, f"未找到: {platform} 平台未找到匹配的订阅"
 
     # Replace subscriptions; remove key if empty to avoid empty-AoT serialization bug

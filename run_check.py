@@ -22,6 +22,7 @@ from shared.auth.base import PlatformTokens
 from shared.config import Config, load_config
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def setup_logging(verbose: bool = False, log_dir: str = "data") -> None:
@@ -72,15 +73,19 @@ def login(platform: str) -> None:
 
     try:
         authenticator = get_authenticator(platform)
+        logger.info("🔑 %s 登录流程启动...", platform)
 
         from shared.auth.base import AuthStatus, QRStatus
 
         def _on_status(status: AuthStatus) -> None:
             if status.status == QRStatus.SCANNED:
+                logger.info("🔑 %s 已扫码，等待确认", platform)
                 console.print("  [green]✓[/] 已扫码，请在手机上确认")
             elif status.status == QRStatus.SUCCESS:
+                logger.info("🔑 %s 扫码成功", platform)
                 console.print("  [green]✓[/] 登录成功")
 
+        logger.info("🔑 %s 等待扫码...", platform)
         console.print("  [dim]等待扫码中...（每 2 秒检测一次）[/]")
         tokens = asyncio.run(authenticator.qr_login(on_status=_on_status))
         # Weibo stores cookies as a single semicolon-delimited string
@@ -106,10 +111,13 @@ def login(platform: str) -> None:
         debug_path.write_text(json.dumps(debug_data, ensure_ascii=False, indent=2), encoding="utf-8")
         console.print(f"[dim]🔑 Debug tokens saved to {debug_path}[/]")
         console.print(f"[green]✓ {platform} 登录成功，凭证已保存[/]")
+        logger.info("🔑 %s 登录成功", platform)
     except QRExpiredError:
+        logger.warning("🔑 %s 二维码已过期", platform)
         console.print("[red]✗ 二维码已过期，请重试[/]")
         sys.exit(1)
     except Exception as exc:
+        logger.warning("🔑 %s 登录失败: %s", platform, exc)
         console.print(f"[red]✗ 登录失败: {exc}[/]")
         sys.exit(1)
 
@@ -237,9 +245,11 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
     if platform == "bili":
         auth = config.bilibili.auth
         if not force and (auth.expires_at <= 0 or auth.expires_at < time.time()):
+            logger.warning("🔑 %s token 已过期或未配置", platform)
             console.print("[red]✗[/] Token 已过期或未配置，请先执行 trawler login --platform bili")
             return False
         try:
+            logger.info("🔑 %s Token 续期开始...", platform)
             authenticator = get_authenticator(platform)
             bili_auth = config.bilibili.auth
             current_tokens = PlatformTokens(
@@ -259,18 +269,22 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             if rt_val:
                 auth_dict["refresh_token"] = rt_val
             asyncio.run(update_auth_section(platform, auth_dict))
+            logger.info("🔑 %s Token 续期成功", platform)
             console.print(f"[green]✓[/] {platform} Token 续期成功")
             return True
         except Exception as exc:
+            logger.warning("🔑 %s Token 续期失败: %s", platform, exc)
             console.print(f"[red]✗[/] 续期失败: {exc}")
             return False
 
     elif platform == "weibo":
         auth = config.weibo.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
+            logger.warning("🔑 %s token 已过期或未配置", platform)
             console.print("[red]✗[/] 未配置微博 Cookie 或已过期，请先执行 trawler login --platform weibo")
             return False
         try:
+            logger.info("🔑 %s Token 续期开始...", platform)
             from platforms.weibo.auth import WeiboAuthenticator
 
             authenticator = WeiboAuthenticator()
@@ -289,18 +303,22 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
             asyncio.run(update_auth_section("weibo", auth_dict))
+            logger.info("🔑 %s Token 续期成功", platform)
             console.print("[green]✓[/] weibo Token 续期成功")
             return True
         except Exception as exc:
+            logger.warning("🔑 %s Token 续期失败: %s", platform, exc)
             console.print(f"[red]✗[/] 续期失败: {exc}")
             return False
 
     elif platform == "xhs":
         auth = config.xiaohongshu.auth
         if not auth.cookie or auth.expires_at <= 0 or auth.expires_at < time.time():
+            logger.warning("🔑 %s token 已过期或未配置", platform)
             console.print("[red]✗[/] 未配置小红书 Cookie 或已过期，请先执行 trawler login --platform xhs")
             return False
         try:
+            logger.info("🔑 %s Token 续期开始...", platform)
             from platforms.xiaohongshu.auth import XhsAuthenticator
 
             authenticator = XhsAuthenticator()
@@ -319,13 +337,16 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
             auth_dict = {"cookie": cookie_str, "expires_at": tokens.expires_at}
             asyncio.run(update_auth_section("xhs", auth_dict))
+            logger.info("🔑 %s Token 续期成功", platform)
             console.print("[green]✓[/] xhs Token 续期成功")
             return True
         except Exception as exc:
+            logger.warning("🔑 %s Token 续期失败: %s", platform, exc)
             console.print(f"[red]✗[/] 续期失败: {exc}")
             return False
 
     else:
+        logger.warning("🔑 未知平台: %s", platform)
         console.print(f"[red]✗ 未知平台: {platform}[/]")
         return False
 

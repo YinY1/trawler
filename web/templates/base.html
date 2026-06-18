@@ -1,23 +1,172 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="h-full">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Trawler Web UI</title>
+  <title>{% block title %}Trawler{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'media',
+      theme: {
+        extend: {
+          colors: {
+            apple: {
+              blue: '#0071e3',
+              'blue-dark': '#0a84ff',
+              green: '#34c759',
+              'green-dark': '#30d158',
+              orange: '#ff9500',
+              'orange-dark': '#ff9f0a',
+              red: '#ff3b30',
+              'red-dark': '#ff453a',
+            }
+          },
+          boxShadow: {
+            'stat': 'var(--shadow-stat)',
+            'card': 'var(--shadow-card)',
+            'tooltip': 'var(--shadow-tooltip)',
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/static/tokens.css">
 </head>
-<body>
-  <nav class="sidebar">
-    <h1>Trawler</h1>
-    <a href="/" class="{% if active_nav == 'dashboard' %}active{% endif %}">📊 仪表盘</a>
-    <a href="/subscriptions" class="{% if active_nav == 'subscriptions' %}active{% endif %}">📋 订阅管理</a>
-    <a href="/check" class="{% if active_nav == 'check' %}active{% endif %}">🔍 内容检查</a>
-    <a href="/auth" class="{% if active_nav == 'auth' %}active{% endif %}">🔑 登录管理</a>
-    <a href="/settings" class="{% if active_nav == 'settings' %}active{% endif %}">⚙️ 设置</a>
-  </nav>
-  <main class="main">
+<body class="h-full bg-[var(--bg-base)] text-[var(--text-primary)] font-sans antialiased">
+
+  <!-- Mobile hamburger -->
+  <button id="menu-toggle" class="md:hidden fixed top-3 left-3 z-50 p-2 rounded-[10px] bg-[var(--card-bg)] backdrop-blur-[12px] border border-[var(--card-border)]" aria-label="Toggle menu">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+  <!-- Mobile overlay -->
+  <div id="sidebar-overlay" class="fixed inset-0 bg-black/30 z-30 hidden md:hidden" onclick="toggleSidebar()"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="fixed left-0 top-0 h-full w-60 bg-[var(--sidebar-bg)] backdrop-blur-[20px] border-r border-[var(--sidebar-border)] z-40 flex flex-col transition-transform duration-300 -translate-x-full md:translate-x-0">
+    <div class="px-5 py-6 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-sm bg-[var(--color-primary)]"></span>
+      <span class="text-base font-semibold tracking-tight">Trawler</span>
+    </div>
+    <nav class="flex flex-col gap-1 px-3 mt-2">
+      <a href="/" class="flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm transition-colors {% if active_nav == 'dashboard' %}bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium{% else %}text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--text-primary)]{% endif %}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        仪表盘
+      </a>
+      <a href="/subscriptions" class="flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm transition-colors {% if active_nav == 'subscriptions' %}bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium{% else %}text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--text-primary)]{% endif %}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        订阅管理
+      </a>
+      <a href="/check" class="flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm transition-colors {% if active_nav == 'check' %}bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium{% else %}text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--text-primary)]{% endif %}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        内容检查
+      </a>
+      <a href="/logs" class="flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm transition-colors {% if active_nav == 'logs' %}bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium{% else %}text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--text-primary)]{% endif %}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h12"/></svg>
+        全局日志
+      </a>
+      <a href="/auth" class="flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm transition-colors {% if active_nav == 'auth' %}bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium{% else %}text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--text-primary)]{% endif %}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+        登录管理
+      </a>
+      <a href="/settings" class="flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm transition-colors {% if active_nav == 'settings' %}bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium{% else %}text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5 hover:text-[var(--text-primary)]{% endif %}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        设置
+      </a>
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <main id="main-content" class="md:ml-60 p-6 md:p-8 min-h-screen max-w-[1400px]">
     {% block content %}{% endblock %}
   </main>
+
+  <!-- Global JS: toast, HTMX hooks, sidebar toggle -->
+  <script>
+    // ── Toast system ─────────────────────────────────────────────
+    function showToast(msg, type) {
+      var colors = {
+        success: 'bg-green-500', error: 'bg-red-500',
+        warning: 'bg-orange-500', info: 'bg-blue-500'
+      };
+      var t = document.createElement('div');
+      t.className = 'fixed top-4 right-4 z-[9999] px-4 py-3 rounded-[10px] text-white text-sm font-medium shadow-lg animate-fadeIn';
+      t.style.backgroundColor = '';
+      t.classList.add(colors[type] || colors.info);
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(function() {
+        t.style.opacity = '0';
+        t.style.transition = 'opacity 0.3s';
+        setTimeout(function() { t.remove(); }, 300);
+      }, 3000);
+    }
+
+    // ── HTMX loading hooks ──────────────────────────────────────
+    document.addEventListener('htmx:beforeRequest', function(e) {
+      var btn = e.detail.elt.querySelector('button[type="submit"], button[data-loading]')
+             || (e.detail.elt.tagName === 'BUTTON' ? e.detail.elt : null)
+             || e.detail.elt.closest('button');
+      if (btn && !btn.dataset.origText) {
+        btn.disabled = true;
+        btn.dataset.origText = btn.textContent;
+        btn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></span>' + btn.textContent;
+      }
+    });
+    document.addEventListener('htmx:afterRequest', function(e) {
+      var btn = e.detail.elt.querySelector('button')
+             || (e.detail.elt.tagName === 'BUTTON' ? e.detail.elt : null)
+             || e.detail.elt.closest('button');
+      if (btn && btn.dataset.origText !== undefined) {
+        btn.disabled = false;
+        btn.textContent = btn.dataset.origText;
+        delete btn.dataset.origText;
+      }
+    });
+    document.addEventListener('htmx:responseError', function(e) {
+      showToast('请求失败: ' + (e.detail.xhr.statusText || '网络错误'), 'error');
+    });
+
+    // ── HTMX HX-Trigger toast listener ─────────────────────────
+    // Server emits ASCII-safe toast keys (HTTP headers are latin-1);
+    // map keys to localized messages here. Direct `msg` also supported.
+    var TOAST_KEY_MAP = {
+      'settings.saved': '设置已保存'
+    };
+    document.addEventListener('htmx:afterOnLoad', function(e) {
+      var trigger = e.detail.xhr.getResponseHeader('HX-Trigger');
+      if (trigger) {
+        try {
+          var data = JSON.parse(trigger);
+          if (data.toast) {
+            var msg = data.toast.msg || TOAST_KEY_MAP[data.toast.key] || '完成';
+            showToast(msg, data.toast.type || 'info');
+          }
+        } catch(_) {}
+      }
+    });
+
+    // ── Mobile sidebar toggle ───────────────────────────────────
+    function toggleSidebar() {
+      var sb = document.getElementById('sidebar');
+      var ov = document.getElementById('sidebar-overlay');
+      sb.classList.toggle('-translate-x-full');
+      ov.classList.toggle('hidden');
+    }
+    document.getElementById('menu-toggle').addEventListener('click', toggleSidebar);
+    document.getElementById('sidebar-overlay').addEventListener('click', toggleSidebar);
+    window.addEventListener('resize', function() {
+      if (window.innerWidth >= 768) {
+        var sb = document.getElementById('sidebar');
+        var ov = document.getElementById('sidebar-overlay');
+        sb.classList.remove('-translate-x-full');
+        ov.classList.add('hidden');
+      } else {
+        document.getElementById('sidebar').classList.add('-translate-x-full');
+      }
+    });
+  </script>
 </body>
 </html>

@@ -10,7 +10,6 @@ from typing import Any, Optional
 from urllib.parse import urljoin
 
 import aiohttp
-from rich.console import Console
 
 from platforms.xiaohongshu.auth import (
     get_xhs_cookie,
@@ -21,7 +20,6 @@ from shared.constants import XHS_DOWNLOAD_TIMEOUT
 from shared.protocols import NoteInfo, XhsDownloadResult
 
 logger = logging.getLogger("trawler.xiaohongshu.downloader")
-console = Console()
 
 # 图片下载基础 URL
 IMAGE_CDN_BASE = "https://sns-img-bd.xhscdn.com/"

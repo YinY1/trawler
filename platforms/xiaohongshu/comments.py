@@ -6,8 +6,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rich.console import Console
-
 from platforms.xiaohongshu.auth import get_xhs_cookie
 from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
@@ -15,7 +13,6 @@ from shared.constants import MAX_COMMENT_HIGHLIGHTS
 from shared.protocols import CommentHighlight
 
 logger = logging.getLogger("trawler.xiaohongshu.comments")
-console = Console()
 
 # 最大返回评论数
 MAX_HIGHLIGHT_COMMENTS = MAX_COMMENT_HIGHLIGHTS
@@ -44,7 +41,7 @@ def _parse_comment(comment_data: dict[str, Any], author_user_id: str = "") -> Co
         like_str = comment_data.get("like_count", "0")
         try:
             like_count = int(like_str) if like_str else 0
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             like_count = 0
 
         is_author = bool(author_user_id and user_id == author_user_id)

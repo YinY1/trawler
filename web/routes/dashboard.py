@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from core.subscription_cli import list_subscriptions
 from shared.config import load_config
 from shared.message_store import MessageStore
-from shared.protocols import Phase
+from shared.protocols import MessageRecord, Phase
 from web.app import TEMPLATES
 
 router = APIRouter()
@@ -20,13 +20,22 @@ async def dashboard(request: Request) -> HTMLResponse:
     config = await load_config()
 
     store = MessageStore(config.general.data_dir)
-    all_msgs = store.get_messages()
+    all_msgs = store.get_messages_in_window()  # 默认 24h，只读安全
 
     # Stats
     total_msgs = len(all_msgs)
     pushed_count = sum(1 for m in all_msgs if m.phase == Phase.PUSHED)
     error_count = sum(1 for m in all_msgs if m.error)
     active_count = total_msgs - pushed_count
+
+    # Tooltip message lists (sorted by pubdate desc; one-day window is small enough)
+    def _recent(msgs: list[MessageRecord]) -> list[MessageRecord]:
+        return sorted(msgs, key=lambda m: m.pubdate, reverse=True)
+
+    active_messages = _recent([m for m in all_msgs if m.phase != Phase.PUSHED])
+    error_messages = _recent([m for m in all_msgs if m.error])
+    pushed_sample = _recent([m for m in all_msgs if m.phase == Phase.PUSHED])
+    total_sample = _recent(all_msgs)
 
     # Token status counts
     token_ok = 0
@@ -48,8 +57,10 @@ async def dashboard(request: Request) -> HTMLResponse:
     subs = await list_subscriptions()
     sub_counts = {platform: len(items) for platform, items in subs.items()}
 
-    # Recent messages (top 20)
-    recent = sorted(all_msgs, key=lambda m: m.pubdate, reverse=True)[:20]
+    # Recent messages (top 20) — sorted by updated_at desc:
+    # 用户希望按"最近处理"顺序看，updated_at 反映最后一次阶段推进时间
+    recent = sorted(all_msgs, key=lambda m: m.updated_at, reverse=True)[:20]
+    last_updated = recent[0].updated_at if recent else 0
 
     return TEMPLATES.TemplateResponse(
         request,
@@ -60,10 +71,15 @@ async def dashboard(request: Request) -> HTMLResponse:
             "pushed_count": pushed_count,
             "error_count": error_count,
             "active_count": active_count,
+            "active_messages": active_messages,
+            "error_messages": error_messages,
+            "pushed_sample": pushed_sample,
+            "total_sample": total_sample,
             "token_ok": token_ok,
             "token_expired": token_expired,
             "token_none": token_none,
             "sub_counts": sub_counts,
             "recent_messages": recent,
+            "last_updated": last_updated,
         },
     )

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
 from typing import Any
-
-from rich.console import Console
 
 from shared.config import Config
 from shared.protocols import TranscriptResult
@@ -18,7 +17,7 @@ try:
 except ImportError:
     WhisperModel = None  # type: ignore[assignment]
 
-console = Console()
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════
 
@@ -32,13 +31,13 @@ def _get_model(config: Config) -> Any:
     model_size = config.transcribe.model
     cache_key = f"fw-{model_size}"
     if cache_key not in _model_cache:
-        console.log(f"[bold blue]正在加载 faster-whisper {model_size} 模型（首次可能需要下载）...[/]")
+        logger.info("正在加载 faster-whisper %s 模型（首次可能需要下载）...", model_size)
         _model_cache[cache_key] = WhisperModel(
             model_size,
             device="cpu",
             compute_type="int8",
         )
-        console.log(f"[bold green]faster-whisper {model_size} 模型加载完成[/]")
+        logger.info("faster-whisper %s 模型加载完成", model_size)
     return _model_cache[cache_key]
 
 
@@ -60,7 +59,7 @@ def _extract_audio(filepath: Path, output_path: Path) -> None:
         str(output_path),
         "-y",
     ]
-    console.log(f"[dim]执行 FFmpeg: {' '.join(cmd)}[/]")
+    logger.debug("执行 FFmpeg: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg 音频提取失败 (返回码 {result.returncode}): {result.stderr}")
@@ -133,7 +132,7 @@ def transcribe_file(
     author: str,
 ) -> TranscriptResult:
     """将音视频文件转写为文本"""
-    console.log(f"[bold blue]开始转写: {title} ({source_id})[/]")
+    logger.info("开始转写: %s (%s)", title, source_id)
 
     if not filepath.exists():
         return TranscriptResult(
@@ -152,13 +151,13 @@ def transcribe_file(
         fd, tmp_path = _tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         temp_wav = Path(tmp_path)
-        console.log("[dim]Step 1: 提取音频...[/]")
+        logger.debug("Step 1: 提取音频...")
         _extract_audio(filepath, temp_wav)
 
         duration = _get_audio_duration(temp_wav)
 
         # Step 2 & 3: 加载模型并转写
-        console.log("[dim]Step 2-3: 加载模型并转写...[/]")
+        logger.debug("Step 2-3: 加载模型并转写...")
         model = _get_model(config)
         language_hint = config.transcribe.language or None
         segments_iter, info = model.transcribe(
@@ -187,7 +186,7 @@ def transcribe_file(
             )
 
         # Step 4: 保存结果
-        console.log("[dim]Step 4: 保存转写结果...[/]")
+        logger.debug("Step 4: 保存转写结果...")
         output_dir = Path(config.transcribe.output_dir)
         txt_path, json_path = _save_transcript(
             text=text,
@@ -200,7 +199,7 @@ def transcribe_file(
             output_dir=output_dir,
         )
 
-        console.log(f"[bold green]转写完成: {title} (时长 {duration:.1f}s, 文本 {len(text)} 字)[/]")
+        logger.info("转写完成: %s (时长 %.1fs, 文本 %s 字)", title, duration, len(text))
 
         return TranscriptResult(
             success=True,
@@ -214,7 +213,7 @@ def transcribe_file(
         )
 
     except Exception as e:
-        console.log(f"[bold red]转写失败: {title} - {e}[/]")
+        logger.error("转写失败: %s - %s", title, e)
         return TranscriptResult(
             success=False,
             source_id=source_id,
@@ -238,9 +237,9 @@ def cleanup_media(filepath: Path, source_id: str) -> None:
     try:
         if filepath.exists():
             filepath.unlink()
-            console.log(f"[dim]已清理媒体文件: {source_id} ({filepath.name})[/]")
+            logger.debug("已清理媒体文件: %s (%s)", source_id, filepath.name)
     except OSError as e:
-        console.log(f"[yellow]清理媒体文件失败: {source_id} - {e}[/]")
+        logger.warning("清理媒体文件失败: %s - %s", source_id, e)
 
 
 async def transcribe_file_async(

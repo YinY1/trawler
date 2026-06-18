@@ -163,6 +163,7 @@ class TestPackageExports:
             "QRStatus",
             "RefreshFailedError",
             "TokenInvalidError",
+            "clear_auth_section",
             "display_qr_in_terminal",
             "get_authenticator",
             "update_auth_section",

@@ -86,6 +86,7 @@ class MessageStore:
             created_at=data.get("created_at", 0.0),
             updated_at=data.get("updated_at", 0.0),
             error=data.get("error", ""),
+            dynamic_text=data.get("dynamic_text", ""),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -124,6 +125,36 @@ class MessageStore:
         """
         results: list[MessageRecord] = []
         for msg_id, data in self._messages.items():
+            if platform is not None and data.get("platform") != platform:
+                continue
+            msg_phase = data.get("phase", "")
+            if phase is not None:
+                if exclude and msg_phase == phase.value:
+                    continue
+                if not exclude and msg_phase != phase.value:
+                    continue
+            results.append(self._msg_from_dict(msg_id, data))
+        return results
+
+    def get_messages_in_window(
+        self,
+        window_hours: int = DEFAULT_WINDOW_HOURS,
+        *,
+        phase: Phase | None = None,
+        exclude: bool = False,
+        platform: str | None = None,
+    ) -> list[MessageRecord]:
+        """获取时间窗口内的消息（默认 24h），支持按阶段和平台过滤。
+
+        与 ``get_messages`` 的区别：只返回 ``pubdate`` 在窗口内的消息，
+        不会删除超期数据（只读，安全用于 dashboard 等只读视图）。
+        实际清理由 ``cleanup()`` 在 pipeline 中按需调用。
+        """
+        cutoff = time.time() - window_hours * 3600
+        results: list[MessageRecord] = []
+        for msg_id, data in self._messages.items():
+            if data.get("pubdate", 0) < cutoff:
+                continue
             if platform is not None and data.get("platform") != platform:
                 continue
             msg_phase = data.get("phase", "")
@@ -187,6 +218,24 @@ class MessageStore:
         if msg_id not in self._messages:
             return
         self._messages[msg_id]["error"] = error
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
+    def append_dynamic_text(self, msg_id: str, text: str) -> None:
+        """向已存在消息追加 dynamic_text（动态去重场景专用）。
+
+        当动态的 ``linked_bvid`` 指向的视频已被注册时，调用此方法将动态本身
+        的文字内容追加到视频消息上，避免重复推送两条内容相同的消息。
+
+        多次追加会用换行分隔。如果 text 为空，直接 no-op。
+        """
+        if msg_id not in self._messages or not text:
+            return
+        existing = self._messages[msg_id].get("dynamic_text", "")
+        if existing:
+            self._messages[msg_id]["dynamic_text"] = f"{existing}\n{text}"
+        else:
+            self._messages[msg_id]["dynamic_text"] = text
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
