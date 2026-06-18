@@ -170,8 +170,9 @@
     if (xhr.status !== 200) { return; }
     try {
       var data = JSON.parse(xhr.responseText);
-      var type = data.ok ? 'success' : 'error';
-      document.body.dispatchEvent(new CustomEvent('showToast', { detail: { key: data.ok ? 'analysis.test.ok' : 'analysis.test.fail', type: type } }));
+      if (typeof showToast === 'function') {
+        showToast(data.message, data.ok ? 'success' : 'error');
+      }
     } catch (e) {}
   }
 </script>

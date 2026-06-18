@@ -11,7 +11,7 @@ from shared.config import AnalysisConfig
 class TestCreateProvider:
     """Tests for the create_provider factory function."""
 
-    def testcreate_provider_openai(self) -> None:
+    def test_create_provider_openai(self) -> None:
         config = AnalysisConfig(
             provider="openai",
             api_base="https://api.openai.com/v1",
@@ -24,7 +24,7 @@ class TestCreateProvider:
         assert provider.api_key == "sk-x"
         assert provider.model_name == "gpt-4o-mini"
 
-    def testcreate_provider_openai_missing_api_base_raises(self) -> None:
+    def test_create_provider_openai_missing_api_base_raises(self) -> None:
         config = AnalysisConfig(
             provider="openai",
             api_base="",
@@ -33,13 +33,13 @@ class TestCreateProvider:
         with pytest.raises(ValueError):
             create_provider(config)
 
-    def testcreate_provider_ollama_default_api_base(self) -> None:
+    def test_create_provider_ollama_default_api_base(self) -> None:
         config = AnalysisConfig(provider="ollama", api_base="")
         provider = create_provider(config)
         assert isinstance(provider, OpenAIProvider)
         assert provider.api_base == "http://localhost:11434/v1"
 
-    def testcreate_provider_ollama_custom_api_base(self) -> None:
+    def test_create_provider_ollama_custom_api_base(self) -> None:
         config = AnalysisConfig(
             provider="ollama",
             api_base="http://my-host:11434/v1",
@@ -48,17 +48,17 @@ class TestCreateProvider:
         assert isinstance(provider, OpenAIProvider)
         assert provider.api_base == "http://my-host:11434/v1"
 
-    def testcreate_provider_unknown_raises(self) -> None:
+    def test_create_provider_unknown_raises(self) -> None:
         config = AnalysisConfig(provider="foobar")
         with pytest.raises(ValueError, match="不支持的 provider"):
             create_provider(config)
 
-    def testcreate_provider_codebuddy_removed(self) -> None:
+    def test_create_provider_codebuddy_removed(self) -> None:
         config = AnalysisConfig(provider="codebuddy")
         with pytest.raises(ValueError):
             create_provider(config)
 
-    def testcreate_provider_case_insensitive(self) -> None:
+    def test_create_provider_case_insensitive(self) -> None:
         config = AnalysisConfig(
             provider="OpenAI",
             api_base="https://api.openai.com/v1",

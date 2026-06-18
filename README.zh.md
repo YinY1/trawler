@@ -13,8 +13,9 @@
 - **多平台监控** — 支持 B站（RSS/API）、小红书、微博的订阅检查
 - **自动下载** — B站视频下载（bilibili_api）、小红书笔记/视频下载
 - **语音转写** — 基于 faster-whisper 的自动语音识别，支持多语言
-- **AI 摘要** — 自动生成内容摘要和关键词（支持 OpenAI / Ollama / 本地降级）
-- **推送通知** — 基于 Gotify 的 Markdown 格式推送
+- **AI 摘要** — 自动生成内容摘要和关键词（支持 OpenAI / Ollama / 本地降级，Web UI 配置）
+- **推送通知** — 基于 Gotify 的 Markdown 格式推送，多端点 fan-out
+- **Web UI** — FastAPI + HTMX 面板（监控、检查、日志、设置、认证）
 - **评论亮点** — 提取 B站和小红书的热门评论
 - **二维码登录** — B站扫码认证，支持自动续期
 - **TOML 配置** — TOML 驱动配置，支持环境变量覆盖
@@ -96,11 +97,18 @@ trawler token status
 trawler/
 ├── core/              # 流程编排层
 │   ├── pipeline.py    # 工作流流水线
-│   ├── notifier.py    # Gotify 推送通知
+│   ├── comments.py    # 跨平台评论亮点提取
+│   ├── engine.py      # 检查引擎（调度器）
+│   ├── formatter.py   # 通知消息格式化
+│   ├── notifiers/     # 推送通知提供者
+│   │   ├── gotify.py  #   Gotify 通知器
+│   │   ├── telegram.py#   Telegram（占坑）
+│   │   └── email.py   #   邮件（占坑）
 │   ├── summarizer.py  # AI 摘要与关键词提取
-│   └── transcriber.py # 语音转写（faster-whisper）
+│   ├── transcriber.py # 语音转写（faster-whisper）
+│   └── subscription_cli.py # CLI 订阅管理
 ├── platforms/
-│   ├── bilibili/      # B站：认证、监控、评论、动态、RSS
+│   ├── bilibili/      # B站：认证、监控、评论、动态
 │   ├── xiaohongshu/   # 小红书：认证、监控、评论、下载、解析
 │   └── weibo/         # 微博：认证、监控、评论、下载、解析
 ├── shared/
@@ -109,8 +117,11 @@ trawler/
 │   ├── protocols.py   # 数据模型与行为契约
 │   ├── downloader.py  # 公共下载工具
 │   └── http.py        # 公共 aiohttp 会话
+├── web/               # Web UI（FastAPI + HTMX + Jinja2）
+│   ├── app.py         # FastAPI 应用
+│   └── routes/        # 面板、检查、设置、认证、端点、日志、订阅
 ├── run_check.py       # CLI 入口（Click）
-└── tests/             # 测试套件（pytest，259+ 项）
+└── tests/             # 测试套件（pytest，408+ 项）
 ```
 
 ### 数据流水线
@@ -151,6 +162,7 @@ Trawler 是一个 Python 3.14 异步项目（uv 管理），结构如下：
 4. **JsonSetStore 去重** — `mark_known()` 仅内存操作，`save()` 写磁盘
 5. **AI 降级链** — OpenAI → Ollama → 本地 TF-IDF 提取
 6. **B站 RSS 优先、API 降级**；小红书/微博仅 API
+7. **HTMX 驱动 Web UI** — FastAPI + HTMX + Jinja2，免 JS 框架内联编辑
 
 ### 开发
 
@@ -186,10 +198,6 @@ Config
 
 | 变量 | 覆盖项 |
 |---|---|
-| `FEEDFLOW_GOTIFY_URL` | Gotify 服务器地址 |
-| `FEEDFLOW_GOTIFY_TOKEN_BILI` | B站 Gotify Token |
-| `FEEDFLOW_GOTIFY_TOKEN_XHS` | 小红书 Gotify Token |
-| `FEEDFLOW_GOTIFY_TOKEN_WEIBO` | 微博 Gotify Token |
 | `FEEDFLOW_XHS_COOKIE` | 小红书 Cookie |
 | `FEEDFLOW_WEIBO_COOKIE` | 微博 Cookie |
 | `FEEDFLOW_LLM_API_KEY` | LLM API 密钥 |
