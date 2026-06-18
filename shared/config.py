@@ -291,14 +291,18 @@ def _parse_config(raw: dict) -> Config:
 def _apply_env_overrides(cfg: Config) -> None:
     """环境变量覆盖配置值，优先级高于配置文件"""
     # 平台 cookies
-    if v := os.environ.get("FEEDFLOW_XHS_COOKIE"):
+    if v := os.environ.get("TRAWLER_XHS_COOKIE"):
         cfg.xiaohongshu.auth.cookie = v
-    if v := os.environ.get("FEEDFLOW_WEIBO_COOKIE"):
+    if v := os.environ.get("TRAWLER_WEIBO_COOKIE"):
         cfg.weibo.auth.cookie = v
+    if v := os.environ.get("TRAWLER_BILI_SESSDATA"):
+        cfg.bilibili.auth.sessdata = v
+    if v := os.environ.get("TRAWLER_BILI_REFRESH_TOKEN"):
+        cfg.bilibili.auth.refresh_token = v
     # AI
-    if v := os.environ.get("FEEDFLOW_LLM_API_KEY"):
+    if v := os.environ.get("TRAWLER_LLM_API_KEY"):
         cfg.analysis.api_key = v
-    if v := os.environ.get("FEEDFLOW_LLM_API_BASE"):
+    if v := os.environ.get("TRAWLER_LLM_API_BASE"):
         cfg.analysis.api_base = v
 
 

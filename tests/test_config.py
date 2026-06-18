@@ -293,32 +293,44 @@ class TestMinimalToml:
 class TestEnvOverrides:
     async def test_trawler_xhs_cookie(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_XHS_COOKIE", "override-xhs-cookie")
+        monkeypatch.setenv("TRAWLER_XHS_COOKIE", "override-xhs-cookie")
         cfg = await load_config(p)
         assert cfg.xiaohongshu.auth.cookie == "override-xhs-cookie"
 
     async def test_trawler_weibo_cookie(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_WEIBO_COOKIE", "override-weibo-cookie")
+        monkeypatch.setenv("TRAWLER_WEIBO_COOKIE", "override-weibo-cookie")
         cfg = await load_config(p)
         assert cfg.weibo.auth.cookie == "override-weibo-cookie"
 
     async def test_trawler_llm_api_key(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_LLM_API_KEY", "override-api-key")
+        monkeypatch.setenv("TRAWLER_LLM_API_KEY", "override-api-key")
         cfg = await load_config(p)
         assert cfg.analysis.api_key == "override-api-key"
 
     async def test_trawler_llm_api_base(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_LLM_API_BASE", "https://override.api.com")
+        monkeypatch.setenv("TRAWLER_LLM_API_BASE", "https://override.api.com")
         cfg = await load_config(p)
         assert cfg.analysis.api_base == "https://override.api.com"
 
+    async def test_trawler_bili_sessdata(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_BILI_SESSDATA", "override-sessdata")
+        cfg = await load_config(p)
+        assert cfg.bilibili.auth.sessdata == "override-sessdata"
+
+    async def test_trawler_bili_refresh_token(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_BILI_REFRESH_TOKEN", "override-refresh")
+        cfg = await load_config(p)
+        assert cfg.bilibili.auth.refresh_token == "override-refresh"
+
     async def test_env_override_with_empty_config(self, tmp_path, monkeypatch):
         """Env vars should work even when no config file exists."""
-        monkeypatch.setenv("FEEDFLOW_XHS_COOKIE", "env-cookie")
-        monkeypatch.setenv("FEEDFLOW_LLM_API_KEY", "env-key")
+        monkeypatch.setenv("TRAWLER_XHS_COOKIE", "env-cookie")
+        monkeypatch.setenv("TRAWLER_LLM_API_KEY", "env-key")
         cfg = await load_config(tmp_path / "nonexistent.toml")
         assert cfg.xiaohongshu.auth.cookie == "env-cookie"
         assert cfg.analysis.api_key == "env-key"
