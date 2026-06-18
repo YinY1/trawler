@@ -356,6 +356,8 @@ class MessageRecord:
     # 动态本身的文字内容（UP 主的补充说明）会被追加到对应视频消息的这个字段，
     # 在摘要生成时拼到摘要输入文本前面，标注【动态内容】。
     dynamic_text: str = ""
+    # detector 注入，push handler 用于精确匹配订阅（存 uid/user_id 字符串）
+    subscription_ref: str = ""
 
 
 @dataclass
@@ -372,3 +374,46 @@ class PhaseContext:
     keywords: list[str] = field(default_factory=list)
     comment_highlights: str = ""
     error: str = ""
+
+
+# ═══════════════════════════════════════════════════════════
+# 通知抽象层 — Notifier Protocol + 内容模型
+# ═══════════════════════════════════════════════════════════
+
+
+@dataclass
+class NotificationContent:
+    """跨平台统一的通知内容载体。
+
+    渲染层根据 platform 字段选择 emoji 前缀和模板；
+    Notifier 实现根据 type 字段决定是否省略某些字段。
+    """
+    platform: str  # "bili" | "xhs" | "weibo"
+    source_id: str  # bvid / note_id / post_id / dynamic_id（不含 platform 前缀）
+    title: str
+    author: str
+    summary: str = ""
+    keywords: list[str] = field(default_factory=list)
+    comment_highlights: str = ""
+    url: str = ""  # 完整链接，空则由渲染层根据 platform + source_id 生成
+    type: str = "content"  # "content" | "dynamic"
+
+
+@dataclass
+class SendResult:
+    """单次发送结果（fan-out 中单个 endpoint 的反馈）。"""
+    endpoint_name: str
+    success: bool
+    error: str = ""
+
+
+class Notifier(Protocol):
+    """通知发送器抽象。Provider 实现此接口。
+
+    实现例：GotifyNotifier / TelegramNotifier（stub）/ EmailNotifier（stub）。
+    """
+    name: str
+
+    async def send(self, content: NotificationContent) -> SendResult:
+        """渲染并推送一条通知。返回 SendResult（不抛异常，失败时填 error）。"""
+        ...

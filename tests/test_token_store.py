@@ -24,10 +24,6 @@ SAMPLE_TOML = textwrap.dedent("""\
     mode = "rss"
     interval_minutes = 3
 
-    [bilibili.notification]
-    enabled = true
-    gotify_url = "https://gotify.example.com"
-
     [xiaohongshu.auth]
     cookie = "old_xhs_cookie"
 
@@ -71,9 +67,8 @@ class TestUpdateAuthSection:
         # Other platforms untouched
         assert data["xiaohongshu"]["auth"]["cookie"] == "old_xhs_cookie"
         assert data["weibo"]["auth"]["cookie"] == "old_weibo_cookie"
-        # Monitor / notification untouched
+        # Monitor untouched
         assert data["bilibili"]["monitor"]["mode"] == "rss"
-        assert data["bilibili"]["notification"]["gotify_url"] == "https://gotify.example.com"
 
     async def test_comments_preserved(self, tmp_path):
         """TOML comments are still present after update."""

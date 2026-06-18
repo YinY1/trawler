@@ -10,14 +10,14 @@ from __future__ import annotations
 import logging
 
 from core.engine import PipelineEngine
-from core.notifier import notify_new_xhs_note
+from core.notifiers import send_to_subscription
 from core.transcriber import cleanup_media
 from platforms.xiaohongshu.downloader import download_note
 from platforms.xiaohongshu.monitor import fetch_user_notes
 from platforms.xiaohongshu.parser import parse_note_content
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import ContentType, NoteInfo, Phase, PhaseContext
+from shared.protocols import ContentType, NoteInfo, NotificationContent, Phase, PhaseContext
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ async def xhs_detector(config: Config, store: MessageStore) -> None:
                 pubdate=n.pubdate,
                 title=n.title,
                 author=n.author,
+                subscription_ref=sub.user_id,
             )
 
 
@@ -115,28 +116,34 @@ async def xhs_download(ctx: PhaseContext) -> bool:
 async def xhs_push(ctx: PhaseContext) -> bool:
     """推送小红书笔记通知。"""
     note_id = ctx.msg.msg_id.replace("xhs:", "")
-    logger.info("🔔 推送通知...")
 
-    try:
-        await notify_new_xhs_note(
-            note_id=note_id,
-            title=ctx.msg.title,
-            author=ctx.msg.author,
-            summary=ctx.summary_text,
-            keywords=ctx.keywords,
-            comment_highlights=ctx.comment_highlights or None,
-            xhs_noti_config=ctx.config.xiaohongshu.notification,
-        )
-        logger.info("✓ 通知推送完成")
-    except Exception as exc:
-        logger.warning("⚠️  通知推送失败: %s", exc)
-        logger.warning("XHS notify failed for %s: %s", note_id, exc)
+    matched = None
+    for sub in ctx.config.xiaohongshu.subscriptions:
+        if sub.user_id == ctx.msg.subscription_ref:
+            matched = sub
+            break
+    if matched is None:
+        logger.warning("未找到 subscription_ref=%s 对应的订阅", ctx.msg.subscription_ref)
+        return True
+    if not matched.notify_endpoints:
+        logger.info("订阅未配置 endpoints")
+        return True
 
-    if ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
+    content = NotificationContent(
+        platform="xhs", source_id=note_id,
+        title=ctx.msg.title, author=ctx.msg.author,
+        summary=ctx.summary_text, keywords=ctx.keywords,
+        comment_highlights=ctx.comment_highlights or "",
+    )
+    logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))
+    results = await send_to_subscription(ctx.config, "xhs", matched.notify_endpoints, content)
+    ok = sum(1 for r in results if r.success)
+    logger.info("通知推送完成 (%d/%d)", ok, len(results))
+
+    if (ctx.config.transcribe.delete_after_transcribe
+            and ctx.downloaded_filepath is not None):
         try:
             cleanup_media(filepath=ctx.downloaded_filepath, source_id=note_id)
         except Exception as exc:
-            logger.warning("⚠️  媒体清理失败: %s", exc)
-            logger.warning("XHS cleanup failed for %s: %s", note_id, exc)
-
+            logger.warning("媒体清理失败 %s: %s", ctx.msg.msg_id, exc)
     return True

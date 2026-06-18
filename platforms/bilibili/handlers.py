@@ -11,14 +11,14 @@ import logging
 
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
-from core.notifier import notify_new_video
+from core.notifiers import send_to_subscription
 from core.summarizer import extract_keywords, generate_summary
 from core.transcriber import cleanup_media, transcribe_file_async
 from platforms.bilibili.comments import fetch_comment_highlights
 from platforms.bilibili.monitor import fetch_user_videos
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import ContentType, Phase, PhaseContext
+from shared.protocols import ContentType, NotificationContent, Phase, PhaseContext
 
 logger = logging.getLogger("trawler.bilibili.handlers")
 
@@ -46,6 +46,7 @@ async def bili_detector(config: Config, store: MessageStore) -> None:
                 pubdate=v.pubdate,
                 title=v.title,
                 author=v.author,
+                subscription_ref=str(sub.uid),
             )
 
 
@@ -91,6 +92,7 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
                 pubdate=dyn.pubdate,
                 title=dyn.title,
                 author=dyn.author,
+                subscription_ref=str(sub.uid),
             )
 
 
@@ -230,52 +232,51 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
 
 @PipelineEngine.register("bili", Phase.PUSHED)
 async def bili_push(ctx: PhaseContext) -> bool:
-    """推送 B站通知（视频 / 动态）。"""
-    if ctx.msg.content_type == ContentType.DYNAMIC:
-        from core.notifier import notify_dynamic
+    """推送 B站通知（视频 / 动态），fan-out 到订阅声明的所有 endpoints。"""
+    is_dynamic = ctx.msg.content_type == ContentType.DYNAMIC
+    source_id = ctx.msg.msg_id.replace("bili_dyn:" if is_dynamic else "bili:", "")
 
-        logger.info("🔔 推送动态通知...")
-        dynamic_id = ctx.msg.msg_id.replace("bili_dyn:", "")
-        try:
-            await notify_dynamic(
-                dynamic_info={
-                    "user": ctx.msg.author,
-                    "content": ctx.summary_text or ctx.msg.title,
-                    "dynamic_id": dynamic_id,
-                    "type": "动态",
-                    "url": f"https://t.bilibili.com/{dynamic_id}",
-                },
-                config=ctx.config.bilibili.notification,
-            )
-            logger.info("✓ 动态通知推送完成")
-        except Exception as exc:
-            logger.warning("⚠️  动态通知推送失败: %s", exc)
-            logger.warning("Dynamic notify failed for %s: %s", ctx.msg.msg_id, exc)
+    # 通过 subscription_ref 精确匹配订阅
+    matched = None
+    for sub in ctx.config.bilibili.subscriptions:
+        if str(sub.uid) == ctx.msg.subscription_ref:
+            matched = sub
+            break
+    if matched is None:
+        logger.warning("未找到 subscription_ref=%s 对应的订阅，跳过通知", ctx.msg.subscription_ref)
         return True
 
-    bvid = ctx.msg.msg_id.replace("bili:", "")
-    logger.info("🔔 推送通知...")
+    if not matched.notify_endpoints:
+        logger.info("订阅 %s 未配置 endpoints，跳过通知", ctx.msg.msg_id)
+        return True
 
-    try:
-        await notify_new_video(
-            bvid=bvid,
-            title=ctx.msg.title,
-            author=ctx.msg.author,
-            summary=ctx.summary_text,
-            keywords=ctx.keywords,
-            comment_highlights=ctx.comment_highlights or None,
-            config=ctx.config.bilibili.notification,
-        )
-        logger.info("✓ 通知推送完成")
-    except Exception as exc:
-        logger.warning("⚠️  通知推送失败: %s", exc)
-        logger.warning("Notify failed for %s: %s", bvid, exc)
+    content = NotificationContent(
+        platform="bili",
+        source_id=source_id,
+        title=ctx.msg.title,
+        author=ctx.msg.author,
+        summary=ctx.summary_text,
+        keywords=ctx.keywords,
+        comment_highlights=ctx.comment_highlights or "",
+        url=(f"https://t.bilibili.com/{source_id}" if is_dynamic
+             else f"https://www.bilibili.com/video/{source_id}"),
+        type="dynamic" if is_dynamic else "content",
+    )
 
-    if ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
+    logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))
+    results = await send_to_subscription(
+        ctx.config, "bili", matched.notify_endpoints, content,
+    )
+    ok = sum(1 for r in results if r.success)
+    logger.info("通知推送完成 (%d/%d)", ok, len(results))
+
+    # 媒体清理（仅视频）
+    if (not is_dynamic
+            and ctx.config.transcribe.delete_after_transcribe
+            and ctx.downloaded_filepath is not None):
         try:
-            cleanup_media(filepath=ctx.downloaded_filepath, source_id=bvid)
+            cleanup_media(filepath=ctx.downloaded_filepath, source_id=source_id)
         except Exception as exc:
-            logger.warning("⚠️  媒体清理失败: %s", exc)
-            logger.warning("Cleanup failed for %s: %s", bvid, exc)
+            logger.warning("媒体清理失败 %s: %s", ctx.msg.msg_id, exc)
 
     return True

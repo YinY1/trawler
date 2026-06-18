@@ -9,6 +9,7 @@
 # [[bilibili.subscriptions]]
 # uid = 123456
 # name = "示例UP主"
+# notify_endpoints = ["default"]
 
 # ── 小红书（Xiaohongshu） ───────────────────────────────────────
 # 每个 [[xiaohongshu.subscriptions]] 代表一个订阅的用户
@@ -16,6 +17,7 @@
 # [[xiaohongshu.subscriptions]]
 # user_id = ""
 # name = ""
+# notify_endpoints = ["default"]
 
 # ── 微博（Weibo） ───────────────────────────────────────────────
 # 每个 [[weibo.subscriptions]] 代表一个订阅的用户
@@ -23,3 +25,4 @@
 # [[weibo.subscriptions]]
 # user_id = ""
 # name = ""
+# notify_endpoints = ["default"]

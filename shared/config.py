@@ -123,17 +123,18 @@ class AnalysisConfig:
     model_name: str = ""
 
 
-# ── 推送配置 ──────────────────────────────────────────────────
+# ── 推送端点配置 ───────────────────────────────────────────────
 
 
 @dataclass
-class NotificationConfig:
-    """通知推送配置"""
-
-    enabled: bool = True
-    gotify_url: str = ""
-    gotify_token: str = ""
+class EndpointConfig:
+    """Gotify 推送端点（全局列表，订阅通过 name 引用）。"""
+    name: str
+    url: str
+    token: str
     priority: int = 5
+    enabled: bool = True
+    kind: str = "gotify"  # 预留："gotify" | "telegram" | "email"
 
 
 # ── 订阅条目 ──────────────────────────────────────────────────
@@ -143,12 +144,14 @@ class NotificationConfig:
 class BiliSubscription:
     uid: int = 0
     name: str = ""
+    notify_endpoints: list[str] = field(default_factory=list)
 
 
 @dataclass
 class UserSubscription:
     user_id: str = ""
     name: str = ""
+    notify_endpoints: list[str] = field(default_factory=list)
 
 
 # ── 平台配置 ──────────────────────────────────────────────────
@@ -159,7 +162,6 @@ class BilibiliConfig:
     auth: BilibiliAuth = field(default_factory=BilibiliAuth)
     monitor: BilibiliMonitorConfig = field(default_factory=BilibiliMonitorConfig)
     subscriptions: list[BiliSubscription] = field(default_factory=list)
-    notification: NotificationConfig = field(default_factory=NotificationConfig)
 
 
 @dataclass
@@ -168,7 +170,6 @@ class XhsConfig:
     auth: XhsAuth = field(default_factory=XhsAuth)
     monitor: XhsMonitorConfig = field(default_factory=XhsMonitorConfig)
     subscriptions: list[UserSubscription] = field(default_factory=list)
-    notification: NotificationConfig = field(default_factory=NotificationConfig)
 
 
 @dataclass
@@ -177,7 +178,6 @@ class WeiboConfig:
     auth: WeiboAuth = field(default_factory=WeiboAuth)
     monitor: WeiboMonitorConfig = field(default_factory=WeiboMonitorConfig)
     subscriptions: list[UserSubscription] = field(default_factory=list)
-    notification: NotificationConfig = field(default_factory=NotificationConfig)
 
 
 # ── 顶层配置 ──────────────────────────────────────────────────
@@ -201,6 +201,7 @@ class Config:
     bilibili: BilibiliConfig = field(default_factory=BilibiliConfig)
     xiaohongshu: XhsConfig = field(default_factory=XhsConfig)
     weibo: WeiboConfig = field(default_factory=WeiboConfig)
+    endpoints: list[EndpointConfig] = field(default_factory=list)
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────
@@ -253,21 +254,16 @@ def _parse_config(raw: dict) -> Config:
         auth = _dict_to_dataclass(BilibiliAuth, bili.get("auth", {}))
         monitor = _dict_to_dataclass(BilibiliMonitorConfig, bili.get("monitor", {}))
         subs = [BiliSubscription(**s) for s in bili.get("subscriptions", [])]
-        noti = _dict_to_dataclass(NotificationConfig, bili.get("notification", {}))
-        cfg.bilibili = BilibiliConfig(auth=auth, monitor=monitor, subscriptions=subs, notification=noti)
+        cfg.bilibili = BilibiliConfig(auth=auth, monitor=monitor, subscriptions=subs)
 
     # xiaohongshu
     if xhs := raw.get("xiaohongshu"):
         auth = _dict_to_dataclass(XhsAuth, xhs.get("auth", {}))
         monitor = _dict_to_dataclass(XhsMonitorConfig, xhs.get("monitor", {}))
         subs = [UserSubscription(**s) for s in xhs.get("subscriptions", [])]
-        noti = _dict_to_dataclass(NotificationConfig, xhs.get("notification", {}))
         cfg.xiaohongshu = XhsConfig(
             enabled=xhs.get("enabled", False),
-            auth=auth,
-            monitor=monitor,
-            subscriptions=subs,
-            notification=noti,
+            auth=auth, monitor=monitor, subscriptions=subs,
         )
 
     # weibo
@@ -275,29 +271,20 @@ def _parse_config(raw: dict) -> Config:
         auth = _dict_to_dataclass(WeiboAuth, wb.get("auth", {}))
         monitor = _dict_to_dataclass(WeiboMonitorConfig, wb.get("monitor", {}))
         subs = [UserSubscription(**s) for s in wb.get("subscriptions", [])]
-        noti = _dict_to_dataclass(NotificationConfig, wb.get("notification", {}))
         cfg.weibo = WeiboConfig(
             enabled=wb.get("enabled", False),
-            auth=auth,
-            monitor=monitor,
-            subscriptions=subs,
-            notification=noti,
+            auth=auth, monitor=monitor, subscriptions=subs,
         )
+
+    # endpoints（全局）
+    if eps := raw.get("endpoints"):
+        cfg.endpoints = [EndpointConfig(**ep) for ep in eps]
 
     return cfg
 
 
 def _apply_env_overrides(cfg: Config) -> None:
     """环境变量覆盖配置值，优先级高于配置文件"""
-    # Gotify
-    if v := os.environ.get("FEEDFLOW_GOTIFY_URL"):
-        cfg.bilibili.notification.gotify_url = v
-    if v := os.environ.get("FEEDFLOW_GOTIFY_TOKEN_BILI"):
-        cfg.bilibili.notification.gotify_token = v
-    if v := os.environ.get("FEEDFLOW_GOTIFY_TOKEN_XHS"):
-        cfg.xiaohongshu.notification.gotify_token = v
-    if v := os.environ.get("FEEDFLOW_GOTIFY_TOKEN_WEIBO"):
-        cfg.weibo.notification.gotify_token = v
     # 平台 cookies
     if v := os.environ.get("FEEDFLOW_XHS_COOKIE"):
         cfg.xiaohongshu.auth.cookie = v
