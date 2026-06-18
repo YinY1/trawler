@@ -7,9 +7,7 @@
 - transcriber.cleanup_media(filepath, source_id)
 - summarizer.generate_summary(source_id, title, author, text, config) -> (str, str, bool)
 - summarizer.extract_keywords(text, title, author, config)
-- notifier.notify_new_video(bvid, title, author, summary, keywords, comment_highlights, config)
-- notifier.notify_new_xhs_note(note_id, title, author, summary, keywords, comment_highlights, xhs_noti_config)
-- notifier.notify_dynamic(dynamic_info: dict, config: NotificationConfig) -> bool
+- notifiers.send_to_subscription(config, platform, endpoint_names, content) -> list[SendResult]
 """
 
 from __future__ import annotations

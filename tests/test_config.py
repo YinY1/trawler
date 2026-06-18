@@ -13,8 +13,8 @@ from shared.config import (
     BiliSubscription,
     Config,
     DownloadConfig,
+    EndpointConfig,
     GeneralConfig,
-    NotificationConfig,
     RenewalConfig,
     TranscribeConfig,
     UserSubscription,
@@ -65,12 +65,6 @@ watch_dynamic = false
 max_videos_per_check = 20
 rsshub_instances = ["https://custom.rsshub.local"]
 
-[bilibili.notification]
-enabled = true
-gotify_url = "https://gotify.example.com"
-gotify_token = "bili-token"
-priority = 8
-
 [xiaohongshu]
 enabled = true
 
@@ -78,24 +72,12 @@ enabled = true
 mode = "rss"
 interval_minutes = 15
 
-[xiaohongshu.notification]
-enabled = true
-gotify_url = "https://gotify.example.com"
-gotify_token = "xhs-token"
-priority = 6
-
 [weibo]
 enabled = true
 
 [weibo.monitor]
 mode = "api"
 interval_minutes = 8
-
-[weibo.notification]
-enabled = true
-gotify_url = "https://gotify.example.com"
-gotify_token = "weibo-token"
-priority = 7
 """
 
 COOKIES_TOML = """
@@ -172,7 +154,7 @@ class TestMissingFile:
         assert cfg.bilibili.auth.sessdata == ""
         assert cfg.bilibili.monitor.mode == "rss"
         assert cfg.bilibili.subscriptions == []
-        assert cfg.bilibili.notification.gotify_url == ""
+        assert cfg.endpoints == []
         assert cfg.xiaohongshu.enabled is False
         assert cfg.xiaohongshu.auth.cookie == ""
         assert cfg.weibo.enabled is False
@@ -250,13 +232,6 @@ class TestFullToml:
         assert cfg.bilibili.monitor.max_videos_per_check == 20
         assert cfg.bilibili.monitor.rsshub_instances == ["https://custom.rsshub.local"]
 
-    async def test_bilibili_notification(self, tmp_path):
-        p = _write_full_config(tmp_path)
-        cfg = await load_config(p)
-        assert cfg.bilibili.notification.gotify_url == "https://gotify.example.com"
-        assert cfg.bilibili.notification.gotify_token == "bili-token"
-        assert cfg.bilibili.notification.priority == 8
-
     async def test_bilibili_subscriptions(self, tmp_path):
         p = _write_full_config(tmp_path)
         cfg = await load_config(p)
@@ -272,8 +247,6 @@ class TestFullToml:
         assert cfg.xiaohongshu.auth.expires_at == 1735689600.0
         assert cfg.xiaohongshu.monitor.mode == "rss"
         assert cfg.xiaohongshu.monitor.interval_minutes == 15
-        assert cfg.xiaohongshu.notification.gotify_token == "xhs-token"
-        assert cfg.xiaohongshu.notification.priority == 6
         assert len(cfg.xiaohongshu.subscriptions) == 1
         assert cfg.xiaohongshu.subscriptions[0] == UserSubscription(user_id="xhs_user1", name="博主A")
 
@@ -285,8 +258,6 @@ class TestFullToml:
         assert cfg.weibo.auth.expires_at == 1735689600.0
         assert cfg.weibo.monitor.mode == "api"
         assert cfg.weibo.monitor.interval_minutes == 8
-        assert cfg.weibo.notification.gotify_token == "weibo-token"
-        assert cfg.weibo.notification.priority == 7
         assert len(cfg.weibo.subscriptions) == 1
         assert cfg.weibo.subscriptions[0] == UserSubscription(user_id="weibo_user1", name="博主B")
 
@@ -311,7 +282,7 @@ class TestMinimalToml:
         assert cfg.analysis.enabled is True
         assert cfg.bilibili.monitor.mode == "rss"
         assert cfg.bilibili.subscriptions == []
-        assert cfg.bilibili.notification.gotify_url == ""
+        assert cfg.endpoints == []
         assert cfg.xiaohongshu.enabled is False
         assert cfg.weibo.enabled is False
 
@@ -320,30 +291,6 @@ class TestMinimalToml:
 
 
 class TestEnvOverrides:
-    async def test_trawler_gotify_url(self, tmp_path, monkeypatch):
-        p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_GOTIFY_URL", "https://override.example.com")
-        cfg = await load_config(p)
-        assert cfg.bilibili.notification.gotify_url == "https://override.example.com"
-
-    async def test_trawler_gotify_token_bili(self, tmp_path, monkeypatch):
-        p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_GOTIFY_TOKEN_BILI", "override-bili-token")
-        cfg = await load_config(p)
-        assert cfg.bilibili.notification.gotify_token == "override-bili-token"
-
-    async def test_trawler_gotify_token_xhs(self, tmp_path, monkeypatch):
-        p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_GOTIFY_TOKEN_XHS", "override-xhs-token")
-        cfg = await load_config(p)
-        assert cfg.xiaohongshu.notification.gotify_token == "override-xhs-token"
-
-    async def test_trawler_gotify_token_weibo(self, tmp_path, monkeypatch):
-        p = _write_full_config(tmp_path)
-        monkeypatch.setenv("FEEDFLOW_GOTIFY_TOKEN_WEIBO", "override-weibo-token")
-        cfg = await load_config(p)
-        assert cfg.weibo.notification.gotify_token == "override-weibo-token"
-
     async def test_trawler_xhs_cookie(self, tmp_path, monkeypatch):
         p = _write_full_config(tmp_path)
         monkeypatch.setenv("FEEDFLOW_XHS_COOKIE", "override-xhs-cookie")
@@ -370,11 +317,9 @@ class TestEnvOverrides:
 
     async def test_env_override_with_empty_config(self, tmp_path, monkeypatch):
         """Env vars should work even when no config file exists."""
-        monkeypatch.setenv("FEEDFLOW_GOTIFY_URL", "https://from-env.com")
         monkeypatch.setenv("FEEDFLOW_XHS_COOKIE", "env-cookie")
         monkeypatch.setenv("FEEDFLOW_LLM_API_KEY", "env-key")
         cfg = await load_config(tmp_path / "nonexistent.toml")
-        assert cfg.bilibili.notification.gotify_url == "https://from-env.com"
         assert cfg.xiaohongshu.auth.cookie == "env-cookie"
         assert cfg.analysis.api_key == "env-key"
 
@@ -456,28 +401,22 @@ class TestDataclassDefaults:
         assert a.api_key == ""
         assert a.model_name == ""
 
-    def test_notification_config_defaults(self):
-        n = NotificationConfig()
-        assert n.enabled is True
-        assert n.gotify_url == ""
-        assert n.gotify_token == ""
-        assert n.priority == 5
-
     def test_bili_subscription_defaults(self):
         s = BiliSubscription()
         assert s.uid == 0
         assert s.name == ""
+        assert s.notify_endpoints == []
 
     def test_user_subscription_defaults(self):
         s = UserSubscription()
         assert s.user_id == ""
         assert s.name == ""
+        assert s.notify_endpoints == []
 
     def test_bilibili_config_defaults(self):
         b = BilibiliConfig()
         assert isinstance(b.auth, BilibiliAuth)
         assert isinstance(b.monitor, BilibiliMonitorConfig)
-        assert isinstance(b.notification, NotificationConfig)
         assert b.subscriptions == []
 
     def test_xhs_config_defaults(self):
@@ -485,7 +424,6 @@ class TestDataclassDefaults:
         assert x.enabled is False
         assert isinstance(x.auth, XhsAuth)
         assert isinstance(x.monitor, XhsMonitorConfig)
-        assert isinstance(x.notification, NotificationConfig)
         assert x.subscriptions == []
 
     def test_weibo_config_defaults(self):
@@ -493,7 +431,6 @@ class TestDataclassDefaults:
         assert w.enabled is False
         assert isinstance(w.auth, WeiboAuth)
         assert isinstance(w.monitor, WeiboMonitorConfig)
-        assert isinstance(w.notification, NotificationConfig)
         assert w.subscriptions == []
 
     def test_config_defaults(self):
@@ -556,3 +493,26 @@ class TestDefaultPath:
         (cfg_dir / "cookies.toml").write_text(MINIMAL_COOKIES_TOML, encoding="utf-8")
         cfg = await load_config()
         assert cfg.bilibili.auth.sessdata == "abc123"
+
+
+# ── 9. Endpoint / notify_endpoints (new notifier abstraction) ─
+
+
+class TestEndpointConfig:
+    def test_endpoint_config_defaults(self):
+        ep = EndpointConfig(name="default", url="https://g.example.com", token="tk")
+        assert ep.priority == 5
+        assert ep.enabled is True
+        assert ep.kind == "gotify"
+
+    def test_bili_subscription_notify_endpoints(self):
+        s = BiliSubscription(uid=1, name="x", notify_endpoints=["a", "b"])
+        assert s.notify_endpoints == ["a", "b"]
+
+    def test_config_endpoints_parsed(self):
+        from shared.config import _parse_config
+
+        raw = {"endpoints": [{"name": "ep1", "url": "u", "token": "t"}]}
+        cfg = _parse_config(raw)
+        assert len(cfg.endpoints) == 1
+        assert cfg.endpoints[0].name == "ep1"

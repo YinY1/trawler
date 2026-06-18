@@ -79,16 +79,6 @@ rsshub_instances = [
     "https://rss.shab.fun",
 ]
 
-[bilibili.notification]
-# 是否启用新视频通知
-enabled = true
-# Gotify 推送服务地址
-gotify_url = ""
-# Gotify 应用 Token
-gotify_token = ""
-# 通知优先级（1-10）
-priority = 5
-
 # ══════════════════════════════════════════════════════════════════
 # 小红书（Xiaohongshu）配置
 # ══════════════════════════════════════════════════════════════════
@@ -105,12 +95,6 @@ enabled = false
 mode = "api"
 # 检查间隔（分钟）
 interval_minutes = 10
-
-[xiaohongshu.notification]
-enabled = true
-gotify_url = ""
-gotify_token = ""
-priority = 5
 
 # ══════════════════════════════════════════════════════════════════
 # 微博（Weibo）配置
@@ -129,8 +113,14 @@ mode = "api"
 # 检查间隔（分钟）
 interval_minutes = 10
 
-[weibo.notification]
-enabled = true
-gotify_url = ""
-gotify_token = ""
+# ── Gotify 推送端点 ─────────────────────────────────────────────
+# 端点全局定义，订阅中通过 notify_endpoints = ["name"] 引用
+# kind 可选 "gotify"（默认） / "telegram"（占坑） / "email"（占坑）
+
+[[endpoints]]
+name = "default"
+url = ""
+token = ""
 priority = 5
+enabled = true
+kind = "gotify"

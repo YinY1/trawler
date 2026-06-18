@@ -11,7 +11,7 @@ import logging
 
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
-from core.notifier import notify_new_weibo_post
+from core.notifiers import send_to_subscription
 from core.summarizer import extract_keywords, generate_summary
 from platforms.weibo.api import fetch_user_posts
 from platforms.weibo.comments import fetch_weibo_comment_highlights
@@ -19,7 +19,7 @@ from platforms.weibo.downloader import download_weibo_media
 from platforms.weibo.parser import parse_weibo_post
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import ContentType, Phase, PhaseContext
+from shared.protocols import ContentType, NotificationContent, Phase, PhaseContext
 
 logger = logging.getLogger("trawler.weibo.handlers")
 
@@ -44,6 +44,7 @@ async def weibo_detector(config: Config, store: MessageStore) -> None:
                 pubdate=p.pubdate,
                 title=p.clean_text[:50] if p.clean_text else p.post_id,
                 author=p.author,
+                subscription_ref=sub.user_id,
             )
 
 
@@ -152,22 +153,27 @@ async def weibo_download(ctx: PhaseContext) -> bool:
 async def weibo_push(ctx: PhaseContext) -> bool:
     """推送微博通知。"""
     post_id = ctx.msg.msg_id.replace("weibo:", "")
-    display_title = ctx.msg.title
-    logger.info("🔔 推送通知...")
 
-    try:
-        await notify_new_weibo_post(
-            post_id=post_id,
-            title=display_title,
-            author=ctx.msg.author,
-            summary=ctx.summary_text,
-            keywords=ctx.keywords,
-            comment_highlights=ctx.comment_highlights or None,
-            weibo_noti_config=ctx.config.weibo.notification,
-        )
-        logger.info("✓ 通知推送完成")
-    except Exception as exc:
-        logger.warning("⚠️  通知推送失败: %s", exc)
-        logger.warning("Weibo notify failed for %s: %s", post_id, exc)
+    matched = None
+    for sub in ctx.config.weibo.subscriptions:
+        if sub.user_id == ctx.msg.subscription_ref:
+            matched = sub
+            break
+    if matched is None:
+        logger.warning("未找到 subscription_ref=%s 对应的订阅", ctx.msg.subscription_ref)
+        return True
+    if not matched.notify_endpoints:
+        logger.info("订阅未配置 endpoints")
+        return True
 
+    content = NotificationContent(
+        platform="weibo", source_id=post_id,
+        title=ctx.msg.title, author=ctx.msg.author,
+        summary=ctx.summary_text, keywords=ctx.keywords,
+        comment_highlights=ctx.comment_highlights or "",
+    )
+    logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))
+    results = await send_to_subscription(ctx.config, "weibo", matched.notify_endpoints, content)
+    ok = sum(1 for r in results if r.success)
+    logger.info("通知推送完成 (%d/%d)", ok, len(results))
     return True

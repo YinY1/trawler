@@ -19,10 +19,7 @@ class TestSettings:
     async def test_settings_page(self, mock_load, client: AsyncClient) -> None:
         mock_load.return_value.general.data_dir = "./data"
         mock_load.return_value.general.disable_ssl_verify = False
-        mock_load.return_value.bilibili.notification.gotify_url = ""
-        mock_load.return_value.bilibili.notification.gotify_token = ""
-        mock_load.return_value.xiaohongshu.notification.gotify_token = ""
-        mock_load.return_value.weibo.notification.gotify_token = ""
+        mock_load.return_value.endpoints = []
         mock_load.return_value.xiaohongshu.enabled = False
         mock_load.return_value.weibo.enabled = False
         resp = await client.get("/settings")

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field, toggle %}
+
+{% block title %}推送端点 · Trawler{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-semibold tracking-tight mb-1">推送端点</h1>
+<p class="text-sm text-[var(--text-secondary)] mb-6">全局推送端点 · 在订阅页面为每个订阅选择端点</p>
+
+<div class="space-y-3 mb-8">
+{% for ep in endpoints %}
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <span class="font-semibold text-sm">{{ ep.name }}</span>
+      <span class="ml-2 text-xs text-[var(--text-secondary)]">{{ ep.kind }} · 优先级 {{ ep.priority }}</span>
+      {% if not ep.enabled %}<span class="ml-2 text-xs text-red-500">已禁用</span>{% endif %}
+    </div>
+    <div class="flex gap-2">
+      <button onclick="toggleEdit('{{ ep.name }}')" class="text-xs text-[var(--text-secondary)] hover:text-apple-blue cursor-pointer transition-colors">编辑</button>
+      <form hx-post="/endpoints/{{ ep.name }}/delete" hx-target="body" hx-confirm="确定删除端点 {{ ep.name }}？">
+        <button type="submit" class="text-xs text-red-500 hover:text-red-700 cursor-pointer transition-colors">删除</button>
+      </form>
+    </div>
+  </div>
+  <div class="text-xs text-[var(--text-secondary)] font-mono truncate">{{ ep.url }}</div>
+
+  <form id="edit-{{ ep.name }}" class="mt-3 hidden grid grid-cols-1 md:grid-cols-2 gap-3"
+        hx-post="/endpoints/{{ ep.name }}/edit" hx-target="body">
+    {{ field("url", ep.url, "URL", width="full") }}
+    {{ field("token", ep.token, "Token", type="password") }}
+    {{ field("priority", ep.priority, "优先级", type="number", width="half") }}
+    <div class="flex items-center pt-2">{{ toggle("enabled", ep.enabled, "启用") }}</div>
+    <div class="col-span-2 flex gap-2 pt-2">
+      <button type="submit" class="px-4 py-2 bg-apple-blue text-white rounded-[8px] text-sm font-medium hover:bg-blue-600 cursor-pointer transition-colors">保存</button>
+      <button type="button" onclick="toggleEdit('{{ ep.name }}')" class="px-4 py-2 text-sm rounded-[8px] border border-gray-300 dark:border-gray-600 text-[var(--text-secondary)] cursor-pointer transition-colors">取消</button>
+    </div>
+  </form>
+</div>
+{% else %}
+<p class="text-sm text-[var(--text-secondary)]">暂无端点，请添加</p>
+{% endfor %}
+</div>
+
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-[0_4px_14px_rgba(0,0,0,0.05)] border border-[var(--card-border)]">
+  <h2 class="text-base font-semibold mb-3">添加端点</h2>
+  <form hx-post="/endpoints/add" hx-target="body" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {{ field("name", "", "名称", placeholder="default") }}
+    {{ field("kind", "gotify", "类型", placeholder="gotify") }}
+    {{ field("url", "", "URL", placeholder="https://gotify.example.com", width="full") }}
+    {{ field("token", "", "Token", type="password") }}
+    {{ field("priority", "5", "优先级", type="number") }}
+    <div class="col-span-2 pt-2">
+      <button type="submit" class="px-4 py-2 bg-apple-blue text-white rounded-[8px] text-sm font-medium hover:bg-blue-600 cursor-pointer transition-colors">添加</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function toggleEdit(name) {
+  var form = document.getElementById('edit-' + name);
+  if (form) form.classList.toggle('hidden');
+}
+</script>
+{% endblock %}

@@ -87,6 +87,7 @@ class MessageStore:
             updated_at=data.get("updated_at", 0.0),
             error=data.get("error", ""),
             dynamic_text=data.get("dynamic_text", ""),
+            subscription_ref=data.get("subscription_ref", ""),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -176,6 +177,7 @@ class MessageStore:
         pubdate: int,
         title: str,
         author: str,
+        subscription_ref: str = "",
     ) -> MessageRecord | None:
         """添加新消息。
 
@@ -200,6 +202,7 @@ class MessageStore:
             "created_at": now,
             "updated_at": now,
             "error": "",
+            "subscription_ref": subscription_ref,
         }
         self._messages[msg_id] = data
         self._dirty = True

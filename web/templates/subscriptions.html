@@ -50,13 +50,43 @@
           <div class="min-w-0">
             <div class="text-sm font-medium truncate">{{ item.get("name", "-") }}</div>
             <div class="text-xs text-[var(--text-secondary)] font-mono">{{ item.get("uid") or item.get("user_id", "-") }}</div>
+            {% set item_eps = item.get("notify_endpoints", []) %}
+            {% if item_eps %}
+            <div class="flex flex-wrap gap-1 mt-1">
+              {% for ep_name in item_eps %}
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-[10px] text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                {{ ep_name }}
+                <button type="button"
+                  hx-post="/subscriptions/{{ p.key }}/{{ item.get('uid') or item.get('user_id', '') }}/endpoints/remove"
+                  hx-vals='{"endpoint_name":"{{ ep_name }}"}'
+                  hx-target="body"
+                  class="ml-0.5 hover:text-red-500 cursor-pointer transition-colors"
+                  title="移除端点">&times;</button>
+              </span>
+              {% endfor %}
+            </div>
+            {% endif %}
           </div>
         </div>
-        <form hx-post="/subscriptions/remove" hx-target="body" hx-confirm="确定删除此订阅？">
-          <input type="hidden" name="platform" value="{{ p.key }}">
-          <input type="hidden" name="identifier" value="{{ item.get('uid') or item.get('user_id', '') }}">
-          <button type="submit" class="text-sm text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity">删除</button>
-        </form>
+        <div class="flex items-center gap-2">
+          {% set unassigned = item.get("_unassigned_eps", []) %}
+          {% if unassigned %}
+          <form hx-post="/subscriptions/{{ p.key }}/{{ item.get('uid') or item.get('user_id', '') }}/endpoints/add" hx-target="body" class="flex items-center gap-1">
+            <select name="endpoint_name"
+              class="text-xs px-2 py-1 rounded-[6px] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[var(--text-secondary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 outline-none">
+              {% for aep in unassigned %}
+              <option value="{{ aep }}">{{ aep }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="text-xs text-apple-blue hover:text-blue-600 cursor-pointer transition-colors" title="添加端点">+</button>
+          </form>
+          {% endif %}
+          <form hx-post="/subscriptions/remove" hx-target="body" hx-confirm="确定删除此订阅？">
+            <input type="hidden" name="platform" value="{{ p.key }}">
+            <input type="hidden" name="identifier" value="{{ item.get('uid') or item.get('user_id', '') }}">
+            <button type="submit" class="text-sm text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">删除</button>
+          </form>
+        </div>
       </div>
       {% endfor %}
     </div>

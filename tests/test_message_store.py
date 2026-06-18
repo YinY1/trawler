@@ -211,3 +211,25 @@ def test_get_messages_in_window(store: MessageStore) -> None:
     assert "msg-1h" in ids
     assert "msg-25h" in ids
     assert "msg-48h" not in ids
+
+
+# ── subscription_ref round-trip ─────────────────────────────────
+
+
+def test_subscription_ref_persists(tmp_path: Path) -> None:
+    """subscription_ref 写入后 reload 不丢失（落盘回归测试）。"""
+    from shared.message_store import MessageStore
+
+    s1 = MessageStore(tmp_path)
+    s1.add_new(
+        msg_id="bili:BVref", platform="bili",
+        content_type=ContentType.VIDEO, pubdate=int(time.time()),
+        title="ref test", author="A",
+        subscription_ref="42",
+    )
+    s1.save()
+
+    s2 = MessageStore(tmp_path)
+    msg = s2.get_message("bili:BVref")
+    assert msg is not None
+    assert msg.subscription_ref == "42", f"落盘丢失! got {msg.subscription_ref!r}"
