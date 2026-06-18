@@ -75,6 +75,49 @@
   <div class="h-16"></div>
 </form>
 
+<!-- Card: AI 分析（独立 form，不参与主 sticky save bar）-->
+<form hx-post="/settings/analysis/save" hx-swap="none" id="analysis-form">
+  <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)] mb-4">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="w-7 h-7 rounded-[8px] bg-apple-blue/10 text-apple-blue inline-flex items-center justify-center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14h.01M10 14h.01M14 14h.01M4 20h16a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1z"/><path d="M9 17h6"/></svg>
+      </span>
+      <h2 class="text-base font-semibold">AI 分析</h2>
+    </div>
+    <p class="text-xs text-[var(--text-secondary)] mb-4">
+      摘要与关键词生成。AI 失败时自动降级到本地 TF 摘要，不影响抓取流程。
+    </p>
+    <div class="flex items-center justify-between py-2 mb-3 border-b border-gray-100 dark:border-gray-800">
+      <span class="text-sm font-medium">启用 AI 分析</span>
+      {{ toggle("enabled", config.analysis.enabled) }}
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- provider select -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">Provider</label>
+        <select name="provider" class="px-3 py-2 rounded-[8px] border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40">
+          <option value="openai" {% if config.analysis.provider == "openai" %}selected{% endif %}>openai（OpenAI / DeepSeek 兼容）</option>
+          <option value="ollama" {% if config.analysis.provider == "ollama" %}selected{% endif %}>ollama（本地）</option>
+        </select>
+      </div>
+      {{ field("model_name", config.analysis.model_name, "模型名称", placeholder="gpt-4o-mini / qwen2.5:7b") }}
+      {{ field("api_base", config.analysis.api_base, "API Base", placeholder="https://api.openai.com/v1", width="full") }}
+      {{ field("api_key", config.analysis.api_key, "API Key", type="password", placeholder="sk-...", width="full") }}
+    </div>
+    <div class="flex items-center justify-end gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+      <button type="button"
+              hx-post="/settings/analysis/test"
+              hx-include="closest form"
+              hx-swap="none"
+              hx-on::after-request="onAnalysisTestResult(event)"
+              class="px-4 py-2 text-sm rounded-[10px] border border-gray-300 dark:border-gray-600 text-[var(--text-secondary)] hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+        测试连通性
+      </button>
+      <button type="submit" class="px-4 py-2 text-sm rounded-[10px] bg-apple-blue text-white hover:bg-blue-600 font-medium transition-colors">保存</button>
+    </div>
+  </div>
+</form>
+
 <!-- Sticky save bar -->
 <div id="save-bar" class="fixed bottom-0 md:left-60 right-0 bg-white/90 dark:bg-gray-900/90 backdrop-blur-[12px] border-t border-gray-200 dark:border-gray-800 px-6 py-3 z-30 transition-all duration-300 transform translate-y-full">
   <div class="flex items-center justify-between max-w-4xl mx-auto">
@@ -121,5 +164,15 @@
       }
     });
   })();
+
+  function onAnalysisTestResult(event) {
+    var xhr = event.detail.xhr;
+    if (xhr.status !== 200) { return; }
+    try {
+      var data = JSON.parse(xhr.responseText);
+      var type = data.ok ? 'success' : 'error';
+      document.body.dispatchEvent(new CustomEvent('showToast', { detail: { key: data.ok ? 'analysis.test.ok' : 'analysis.test.fail', type: type } }));
+    } catch (e) {}
+  }
 </script>
 {% endblock %}

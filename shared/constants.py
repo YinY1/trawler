@@ -4,7 +4,6 @@ from __future__ import annotations
 
 # 超时（秒）
 DOWNLOAD_TIMEOUT = 600  # yt-dlp 下载超时
-CODEBUDDY_TIMEOUT = 120  # CodeBuddy CLI 超时
 LLM_API_TIMEOUT = 60  # OpenAI 兼容 API 超时
 GOTIFY_TIMEOUT = 10  # Gotify 推送超时
 RSS_REQUEST_TIMEOUT = 15  # RSS 请求超时
