@@ -13,8 +13,9 @@ Multi-platform creator content trawler. Monitor Bilibili, Xiaohongshu, and Weibo
 - **Multi-platform monitoring** — Subscribe to Bilibili UP主 (RSS/API), Xiaohongshu bloggers, and Weibo users
 - **Auto download** — Video/audio download via bilibili_api, note/image download for Xiaohongshu
 - **Speech-to-text** — faster-whisper voice recognition with auto language detection
-- **AI summarization** — AI-generated summaries and keyword extraction (OpenAI / Ollama / local fallback)
-- **Push notifications** — Gotify-based notification with Markdown formatting
+- **AI summarization** — AI-generated summaries and keyword extraction (OpenAI / Ollama / local fallback, configurable via Web UI)
+- **Push notifications** — Gotify-based notification with Markdown, multi-endpoint fan-out
+- **Web UI** — FastAPI + HTMX dashboard (monitor, check, logs, settings, auth)
 - **Comment highlights** — Extract top comments for Bilibili and Xiaohongshu
 - **QR login** — Bilibili QR code authentication with auto token refresh
 - **TOML config** — TOML-driven configuration with environment variable override
@@ -96,9 +97,16 @@ trawler token status
 trawler/
 ├── core/              # Orchestration layer
 │   ├── pipeline.py    # Workflow pipeline
-│   ├── notifier.py    # Gotify push notifications
+│   ├── comments.py    # Cross-platform comment highlights
+│   ├── engine.py      # Check engine (scheduler)
+│   ├── formatter.py   # Notification message formatting
+│   ├── notifiers/     # Push notification providers
+│   │   ├── gotify.py  #   Gotify notifier
+│   │   ├── telegram.py#   Telegram (stub)
+│   │   └── email.py   #   Email (stub)
 │   ├── summarizer.py  # AI summary & keyword extraction
-│   └── transcriber.py # Speech-to-text (faster-whisper)
+│   ├── transcriber.py # Speech-to-text (faster-whisper)
+│   └── subscription_cli.py # CLI subscription management
 ├── platforms/
 │   ├── bilibili/      # B站: auth, monitor, comments, dynamic
 │   ├── xiaohongshu/   # 小红书: auth, monitor, comments, downloader, parser
@@ -109,8 +117,11 @@ trawler/
 │   ├── protocols.py   # Data models & behavior contracts
 │   ├── downloader.py  # Shared download utilities
 │   └── http.py        # Shared aiohttp session
+├── web/               # Web UI (FastAPI + HTMX + Jinja2)
+│   ├── app.py         # FastAPI application
+│   └── routes/        # Dashboard, check, settings, auth, endpoints, logs, subscriptions
 ├── run_check.py       # CLI entry point (Click)
-└── tests/             # Test suite (pytest, 259+ tests)
+└── tests/             # Test suite (pytest, 408+ tests)
 ```
 
 ### Pipeline
@@ -151,6 +162,7 @@ Trawler is a Python 3.14 async project (uv-managed) with this structure:
 4. **JsonSetStore for dedup** — `mark_known()` is memory-only, `save()` writes to disk
 5. **AI fallback chain** — OpenAI → Ollama → local TF-IDF extraction
 6. **RSS-first, API fallback** for Bilibili; API-only for Xiaohongshu/Weibo
+7. **HTMX-driven Web UI** — FastAPI + HTMX + Jinja2, inline editing without JS frameworks
 
 ### Development
 
@@ -186,10 +198,6 @@ Config
 
 | Variable | Overrides |
 |---|---|
-| `FEEDFLOW_GOTIFY_URL` | Gotify server URL |
-| `FEEDFLOW_GOTIFY_TOKEN_BILI` | Bilibili Gotify token |
-| `FEEDFLOW_GOTIFY_TOKEN_XHS` | Xiaohongshu Gotify token |
-| `FEEDFLOW_GOTIFY_TOKEN_WEIBO` | Weibo Gotify token |
 | `FEEDFLOW_XHS_COOKIE` | Xiaohongshu cookie |
 | `FEEDFLOW_WEIBO_COOKIE` | Weibo cookie |
 | `FEEDFLOW_LLM_API_KEY` | LLM API key |

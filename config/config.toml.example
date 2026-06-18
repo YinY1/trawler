@@ -47,8 +47,8 @@ delete_after_transcribe = true
 [analysis]
 # 是否启用内容分析（摘要/标签等）
 enabled = true
-# 分析服务提供者：codebuddy / openai / 其他兼容接口
-provider = "codebuddy"
+# 分析服务提供者：openai / ollama（DeepSeek 等 OpenAI 兼容接口填 openai 并指定 api_base）
+provider = "openai"
 # API 基础地址（留空使用 provider 默认地址）
 api_base = ""
 # API 密钥

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from collections import Counter
 
 from shared.config import AnalysisConfig, Config
-from shared.constants import CODEBUDDY_TIMEOUT, LLM_API_TIMEOUT
+from shared.constants import LLM_API_TIMEOUT
 from shared.protocols import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -30,71 +29,6 @@ _KEYWORDS_PROMPT_TEMPLATE = """\
 标题：{title}
 作者：{author}
 正文：{text}"""
-
-
-# ── CodeBuddy Provider ───────────────────────────────────────────
-
-
-class CodeBuddyProvider:
-    """CodeBuddy CLI 提供商
-
-    通过 subprocess 调用 codebuddy 命令行工具进行文本生成。
-    使用 glm-5.1-ioa 模型。
-    """
-
-    def __init__(self, model: str = "glm-5.1-ioa") -> None:
-        """初始化 CodeBuddy 提供商
-
-        Args:
-            model: 使用的模型名称
-        """
-        self.model = model
-
-    async def generate(self, prompt: str) -> str:
-        """调用 codebuddy CLI 生成文本
-
-        Args:
-            prompt: 输入提示文本
-
-        Returns:
-            模型生成的文本内容
-
-        Raises:
-            RuntimeError: codebuddy 执行失败时抛出
-        """
-        logger.debug("调用 CodeBuddy (model=%s)...", self.model)
-        cmd = ["codebuddy", "--model", self.model, prompt]
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            raise RuntimeError("codebuddy 命令未找到，请确保已安装")
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=CODEBUDDY_TIMEOUT
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise RuntimeError(f"CodeBuddy 调用超时 ({CODEBUDDY_TIMEOUT}s)")
-
-        stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-        stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-
-        if proc.returncode != 0:
-            raise RuntimeError(f"CodeBuddy 调用失败 (返回码 {proc.returncode}): {stderr}")
-
-        output = stdout.strip()
-        if not output:
-            raise RuntimeError("CodeBuddy 返回空结果")
-
-        return output
-
 
 # ── OpenAI 兼容 Provider ─────────────────────────────────────────
 
@@ -153,9 +87,7 @@ class OpenAIProvider:
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT
-                )
+                response = await client.post(url, json=payload, headers=headers, timeout=LLM_API_TIMEOUT)
         except httpx.TimeoutException:
             raise RuntimeError(f"OpenAI API 调用超时 ({LLM_API_TIMEOUT}s)")
         except httpx.ConnectError:
@@ -391,7 +323,7 @@ class LocalFallbackProvider:
 # ── 公共接口 ─────────────────────────────────────────────────────
 
 
-def _create_provider(config: AnalysisConfig) -> LLMProvider:
+def create_provider(config: AnalysisConfig) -> LLMProvider:
     """根据配置创建 LLM 提供商
 
     Args:
@@ -405,9 +337,7 @@ def _create_provider(config: AnalysisConfig) -> LLMProvider:
     """
     provider_name = config.provider.lower().strip()
 
-    if provider_name == "codebuddy":
-        return CodeBuddyProvider()
-    elif provider_name == "openai":
+    if provider_name == "openai":
         if not config.api_base:
             raise ValueError("OpenAI provider 需要配置 api_base")
         return OpenAIProvider(
@@ -458,7 +388,7 @@ async def generate_summary(
 
     # 尝试 AI 生成
     try:
-        provider = _create_provider(config.analysis)
+        provider = create_provider(config.analysis)
         prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
         summary = await provider.generate(prompt)
         logger.info("AI 摘要生成成功: %s", source_id)
@@ -496,7 +426,7 @@ async def extract_keywords(
     # 尝试 AI 提取
     if config and config.analysis.enabled:
         try:
-            provider = _create_provider(config.analysis)
+            provider = create_provider(config.analysis)
             prompt = _KEYWORDS_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
             result = await provider.generate(prompt)
             # 解析关键词（支持中英文分号、逗号、换行分隔）

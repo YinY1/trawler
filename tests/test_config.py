@@ -396,7 +396,7 @@ class TestDataclassDefaults:
     def test_analysis_config_defaults(self):
         a = AnalysisConfig()
         assert a.enabled is True
-        assert a.provider == "codebuddy"
+        assert a.provider == "openai"
         assert a.api_base == ""
         assert a.api_key == ""
         assert a.model_name == ""

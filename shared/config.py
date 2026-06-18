@@ -117,7 +117,7 @@ class AnalysisConfig:
     """AI 分析配置"""
 
     enabled: bool = True
-    provider: str = "codebuddy"
+    provider: str = "openai"
     api_base: str = ""
     api_key: str = ""
     model_name: str = ""
@@ -129,6 +129,7 @@ class AnalysisConfig:
 @dataclass
 class EndpointConfig:
     """Gotify 推送端点（全局列表，订阅通过 name 引用）。"""
+
     name: str
     url: str
     token: str
@@ -263,7 +264,9 @@ def _parse_config(raw: dict) -> Config:
         subs = [UserSubscription(**s) for s in xhs.get("subscriptions", [])]
         cfg.xiaohongshu = XhsConfig(
             enabled=xhs.get("enabled", False),
-            auth=auth, monitor=monitor, subscriptions=subs,
+            auth=auth,
+            monitor=monitor,
+            subscriptions=subs,
         )
 
     # weibo
@@ -273,7 +276,9 @@ def _parse_config(raw: dict) -> Config:
         subs = [UserSubscription(**s) for s in wb.get("subscriptions", [])]
         cfg.weibo = WeiboConfig(
             enabled=wb.get("enabled", False),
-            auth=auth, monitor=monitor, subscriptions=subs,
+            auth=auth,
+            monitor=monitor,
+            subscriptions=subs,
         )
 
     # endpoints（全局）

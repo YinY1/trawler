@@ -213,7 +213,7 @@ class SummaryResult:
     """摘要生成结果"""
 
     text: str
-    source: str  # "codebuddy" | "openai" | "ollama" | "local" | "local-fallback"
+    source: str  # "openai" | "ollama" | "local" | "local-fallback"
     is_ai: bool
 
 
@@ -388,6 +388,7 @@ class NotificationContent:
     渲染层根据 platform 字段选择 emoji 前缀和模板；
     Notifier 实现根据 type 字段决定是否省略某些字段。
     """
+
     platform: str  # "bili" | "xhs" | "weibo"
     source_id: str  # bvid / note_id / post_id / dynamic_id（不含 platform 前缀）
     title: str
@@ -402,6 +403,7 @@ class NotificationContent:
 @dataclass
 class SendResult:
     """单次发送结果（fan-out 中单个 endpoint 的反馈）。"""
+
     endpoint_name: str
     success: bool
     error: str = ""
@@ -412,6 +414,7 @@ class Notifier(Protocol):
 
     实现例：GotifyNotifier / TelegramNotifier（stub）/ EmailNotifier（stub）。
     """
+
     name: str
 
     async def send(self, content: NotificationContent) -> SendResult:
