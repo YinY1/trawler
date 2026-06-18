@@ -132,10 +132,16 @@ async def run_check_once(
         # return_exceptions=True 防止单个平台失败中断其他平台
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for (pkey, _pdef), result in zip(selected, results, strict=True):
-            if isinstance(result, Exception):
+            # BaseException 包含 CancelledError：取消通常来自 shutdown，记 warning 即可，
+            # 不当作普通错误打扰前端；Exception 才是真正的平台执行失败。
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                logger.warning("✗ 平台 %s 被取消/中断: %s", pkey, result)
+                if log_callback:
+                    log_callback("log", f"⏹ {pkey} 平台被取消: {result}")
+            elif isinstance(result, Exception):
                 logger.error("✗ 平台 %s 检查失败: %s", pkey, result, exc_info=result)
                 if log_callback:
-                    log_callback("log", f"✗ {pkey} 平台检查失败: {result}")
+                    log_callback("error", f"✗ {pkey} 平台检查失败: {result}")
         # 每个 run_platform 内部已各自 save()，共享 store 无需额外落盘
     else:
         # 单平台或未启用其他平台：保持原有串行路径（兼容现有调用方）

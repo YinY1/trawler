@@ -233,6 +233,9 @@
   // ── Renew (token refresh) — distinct from QR re-login ──────────
   function renewToken(platform, btn) {
     if (!platform) return;
+    // 防御性双击：按钮 disabled 后键盘/快捷键仍可能触发 onclick。
+    // 与 setRenewLoading(btn, true) 配合，确保一次续期只发一个请求。
+    if (btn && btn.disabled) return;
     setRenewLoading(btn, true);
     fetch('/auth/refresh/' + platform, { method: 'POST' })
       .then(function(r) { return r.json(); })

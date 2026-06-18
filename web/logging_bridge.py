@@ -126,8 +126,11 @@ class LogBus:
 class QueueLogHandler(logging.Handler):
     """logging.Handler that feeds a LogBus.
 
-    emit() may be called from any thread (e.g. uvicorn workers). The
-    LogBus uses an internal RLock to serialise subscribe/unsubscribe/publish.
+    emit() must be called from the event loop thread (single-worker uvicorn);
+    asyncio.Queue is not thread-safe. The LogBus uses an internal RLock only to
+    serialise subscribe/unsubscribe/publish against concurrent *synchronous*
+    callers within the same loop iteration — it does NOT make cross-thread
+    put_nowait safe.
     """
 
     def __init__(self, bus: LogBus) -> None:

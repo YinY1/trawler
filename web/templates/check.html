@@ -390,6 +390,10 @@
       if (data.running) {
         // 运行中：切到 running 态、显示 LIVE、平台卡片置为运行中（精确进度无法恢复，
         // 后续 SSE 实时事件会按 message 文本逐条更新卡片状态）
+        // 关键：重置 doneHandled。否则上一次 run 完成时设的 true 会吞掉本次 run
+        // 的 done event，UI 永远停在"运行中"。initSSE() 也会重置，但本路径
+        // (restore + connectSSE) 不经过 initSSE。
+        doneHandled = false;
         updateStatus('running', '运行中');
         setRunButtonState('running');
         document.querySelector('.live-indicator').classList.remove('hidden');
