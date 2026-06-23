@@ -33,16 +33,12 @@ async def setup_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Async
 
 
 class TestSetup:
-    async def test_setup_page_returns_200_when_not_setup(
-        self, setup_client: AsyncClient
-    ) -> None:
+    async def test_setup_page_returns_200_when_not_setup(self, setup_client: AsyncClient) -> None:
         resp = await setup_client.get("/setup")
         assert resp.status_code == 200
         assert "首次设置密码" in resp.text or "创建管理员密码" in resp.text
 
-    async def test_setup_post_success_writes_auth_toml(
-        self, setup_client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_setup_post_success_writes_auth_toml(self, setup_client: AsyncClient, tmp_path: Path) -> None:
         resp = await setup_client.post(
             "/setup",
             data={"password": "test12345", "password_confirm": "test12345"},
@@ -62,9 +58,7 @@ class TestSetup:
             data = tomllib.load(f)
         assert len(data["session_secret"]) >= 40
 
-    async def test_setup_post_password_mismatch(
-        self, setup_client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_setup_post_password_mismatch(self, setup_client: AsyncClient, tmp_path: Path) -> None:
         resp = await setup_client.post(
             "/setup",
             data={"password": "test12345", "password_confirm": "different12345"},
@@ -74,9 +68,7 @@ class TestSetup:
         assert "不一致" in resp.text
         assert not (tmp_path / "auth.toml").exists()
 
-    async def test_setup_post_password_too_short(
-        self, setup_client: AsyncClient, tmp_path: Path
-    ) -> None:
+    async def test_setup_post_password_too_short(self, setup_client: AsyncClient, tmp_path: Path) -> None:
         resp = await setup_client.post(
             "/setup",
             data={"password": "short", "password_confirm": "short"},
@@ -86,9 +78,7 @@ class TestSetup:
         assert "至少" in resp.text
         assert not (tmp_path / "auth.toml").exists()
 
-    async def test_setup_page_redirects_when_already_setup(
-        self, setup_client: AsyncClient
-    ) -> None:
+    async def test_setup_page_redirects_when_already_setup(self, setup_client: AsyncClient) -> None:
         # 先完成一次 setup
         await setup_client.post(
             "/setup",
@@ -100,9 +90,7 @@ class TestSetup:
         assert resp.status_code == 302
         assert resp.headers["location"] == "/login"
 
-    async def test_setup_post_redirects_when_already_setup(
-        self, setup_client: AsyncClient
-    ) -> None:
+    async def test_setup_post_redirects_when_already_setup(self, setup_client: AsyncClient) -> None:
         # 先 setup
         await setup_client.post(
             "/setup",

@@ -22,9 +22,7 @@ PASSWORD = "test12345"
 
 
 @pytest.fixture
-async def logged_in_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> AsyncClient:
+async def logged_in_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
     """已登录 client。"""
     monkeypatch.setattr("web.auth.AUTH_TOML_PATH", tmp_path / "auth.toml")
     set_password(PASSWORD)
@@ -37,9 +35,7 @@ async def logged_in_client(
 
 
 @pytest.fixture
-async def anon_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> AsyncClient:
+async def anon_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
     """已 setup、未登录 client（用于 /login /setup POST 测试）。"""
     monkeypatch.setattr("web.auth.AUTH_TOML_PATH", tmp_path / "auth.toml")
     set_password(PASSWORD)
@@ -50,9 +46,7 @@ async def anon_client(
 
 
 class TestCSRF:
-    async def test_post_without_header_blocked_when_logged_in(
-        self, logged_in_client: AsyncClient
-    ) -> None:
+    async def test_post_without_header_blocked_when_logged_in(self, logged_in_client: AsyncClient) -> None:
         """登录后 POST 不带 HTMX 头 / 同源 referer → 403。"""
         resp = await logged_in_client.post(
             "/settings/account",
@@ -65,9 +59,7 @@ class TestCSRF:
         )
         assert resp.status_code == 403
 
-    async def test_post_with_htmx_header_passes(
-        self, logged_in_client: AsyncClient
-    ) -> None:
+    async def test_post_with_htmx_header_passes(self, logged_in_client: AsyncClient) -> None:
         """带 X-Requested-With: XMLHttpRequest → 通过 CSRF（业务层 303/400 均可）。"""
         resp = await logged_in_client.post(
             "/settings/account",
@@ -81,9 +73,7 @@ class TestCSRF:
         )
         assert resp.status_code != 403, "HTMX 头应通过 CSRF"
 
-    async def test_post_with_same_origin_referer_passes(
-        self, logged_in_client: AsyncClient
-    ) -> None:
+    async def test_post_with_same_origin_referer_passes(self, logged_in_client: AsyncClient) -> None:
         """同源 Referer → 通过 CSRF。"""
         resp = await logged_in_client.post(
             "/logout",
@@ -92,9 +82,7 @@ class TestCSRF:
         )
         assert resp.status_code != 403, "同源 referer 应通过 CSRF"
 
-    async def test_post_with_cross_origin_referer_blocked(
-        self, logged_in_client: AsyncClient
-    ) -> None:
+    async def test_post_with_cross_origin_referer_blocked(self, logged_in_client: AsyncClient) -> None:
         """跨源 Referer → 403。"""
         resp = await logged_in_client.post(
             "/logout",
@@ -103,19 +91,13 @@ class TestCSRF:
         )
         assert resp.status_code == 403
 
-    async def test_login_post_not_blocked_by_csrf(
-        self, anon_client: AsyncClient
-    ) -> None:
+    async def test_login_post_not_blocked_by_csrf(self, anon_client: AsyncClient) -> None:
         """POST /login 未登录不带任何特殊头 → 不被 CSRF 拦（业务层 401 密码错）。"""
-        resp = await anon_client.post(
-            "/login", data={"password": "wrong"}, follow_redirects=False
-        )
+        resp = await anon_client.post("/login", data={"password": "wrong"}, follow_redirects=False)
         # 应是 401（密码错），不是 403（CSRF）
         assert resp.status_code == 401
 
-    async def test_setup_post_not_blocked_by_csrf(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_setup_post_not_blocked_by_csrf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /setup 未登录不带任何特殊头 → 不被 CSRF 拦。"""
         # 未 setup 环境
         monkeypatch.setattr("web.auth.AUTH_TOML_PATH", tmp_path / "auth.toml")

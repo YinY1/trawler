@@ -130,9 +130,12 @@ async def xhs_push(ctx: PhaseContext) -> bool:
         return True
 
     content = NotificationContent(
-        platform="xhs", source_id=note_id,
-        title=ctx.msg.title, author=ctx.msg.author,
-        summary=ctx.summary_text, keywords=ctx.keywords,
+        platform="xhs",
+        source_id=note_id,
+        title=ctx.msg.title,
+        author=ctx.msg.author,
+        summary=ctx.summary_text,
+        keywords=ctx.keywords,
         comment_highlights=ctx.comment_highlights or "",
     )
     logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))
@@ -140,8 +143,7 @@ async def xhs_push(ctx: PhaseContext) -> bool:
     ok = sum(1 for r in results if r.success)
     logger.info("通知推送完成 (%d/%d)", ok, len(results))
 
-    if (ctx.config.transcribe.delete_after_transcribe
-            and ctx.downloaded_filepath is not None):
+    if ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
         try:
             cleanup_media(filepath=ctx.downloaded_filepath, source_id=note_id)
         except Exception as exc:

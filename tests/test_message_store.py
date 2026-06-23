@@ -183,19 +183,37 @@ def test_get_messages_in_window(store: MessageStore) -> None:
     now = int(time.time())
     # Manually insert 3 messages with different ages (bypass add_new window check)
     store._messages["msg-1h"] = {
-        "platform": "bili", "content_type": ContentType.VIDEO.value, "phase": Phase.DISCOVERED.value,
-        "pubdate": now - 3600, "title": "1h ago", "author": "A",
-        "created_at": 0.0, "updated_at": 0.0, "error": "",
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": now - 3600,
+        "title": "1h ago",
+        "author": "A",
+        "created_at": 0.0,
+        "updated_at": 0.0,
+        "error": "",
     }
     store._messages["msg-25h"] = {
-        "platform": "bili", "content_type": ContentType.VIDEO.value, "phase": Phase.DISCOVERED.value,
-        "pubdate": now - 25 * 3600, "title": "25h ago", "author": "A",
-        "created_at": 0.0, "updated_at": 0.0, "error": "",
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": now - 25 * 3600,
+        "title": "25h ago",
+        "author": "A",
+        "created_at": 0.0,
+        "updated_at": 0.0,
+        "error": "",
     }
     store._messages["msg-48h"] = {
-        "platform": "bili", "content_type": ContentType.VIDEO.value, "phase": Phase.DISCOVERED.value,
-        "pubdate": now - 48 * 3600, "title": "48h ago", "author": "A",
-        "created_at": 0.0, "updated_at": 0.0, "error": "",
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": now - 48 * 3600,
+        "title": "48h ago",
+        "author": "A",
+        "created_at": 0.0,
+        "updated_at": 0.0,
+        "error": "",
     }
     store._dirty = True
 
@@ -222,9 +240,12 @@ def test_subscription_ref_persists(tmp_path: Path) -> None:
 
     s1 = MessageStore(tmp_path)
     s1.add_new(
-        msg_id="bili:BVref", platform="bili",
-        content_type=ContentType.VIDEO, pubdate=int(time.time()),
-        title="ref test", author="A",
+        msg_id="bili:BVref",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        pubdate=int(time.time()),
+        title="ref test",
+        author="A",
         subscription_ref="42",
     )
     s1.save()

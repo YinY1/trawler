@@ -65,9 +65,7 @@ async def update_auth_section(
     await _update(config_path=config_path, platform=table, auth_dict=auth_dict)
 
 
-async def clear_auth_section(
-    platform: str, config_path: str = "config/config.toml"
-) -> bool:
+async def clear_auth_section(platform: str, config_path: str = "config/config.toml") -> bool:
     """Remove [platform.auth] section from cookies.toml.
 
     Returns True if the section existed and was removed.

@@ -167,9 +167,12 @@ async def weibo_push(ctx: PhaseContext) -> bool:
         return True
 
     content = NotificationContent(
-        platform="weibo", source_id=post_id,
-        title=ctx.msg.title, author=ctx.msg.author,
-        summary=ctx.summary_text, keywords=ctx.keywords,
+        platform="weibo",
+        source_id=post_id,
+        title=ctx.msg.title,
+        author=ctx.msg.author,
+        summary=ctx.summary_text,
+        keywords=ctx.keywords,
         comment_highlights=ctx.comment_highlights or "",
     )
     logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))

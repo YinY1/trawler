@@ -119,7 +119,10 @@ class TestAdd:
 
     async def test_add_weibo(self, subs_file: Path) -> None:
         ok, msg = await add_subscription(
-            platform="weibo", identifier="weibo_user", name="微博用户", path=str(subs_file),
+            platform="weibo",
+            identifier="weibo_user",
+            name="微博用户",
+            path=str(subs_file),
         )
         assert ok
         assert "已添加" in msg

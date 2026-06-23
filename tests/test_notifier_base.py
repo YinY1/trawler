@@ -16,9 +16,15 @@ def test_notification_content_defaults():
 
 def test_notification_content_full():
     c = NotificationContent(
-        platform="weibo", source_id="123", title="t", author="a",
-        summary="s", keywords=["k1"], comment_highlights="ch",
-        url="https://weibo.com/123", type="dynamic",
+        platform="weibo",
+        source_id="123",
+        title="t",
+        author="a",
+        summary="s",
+        keywords=["k1"],
+        comment_highlights="ch",
+        url="https://weibo.com/123",
+        type="dynamic",
     )
     assert c.keywords == ["k1"]
 
@@ -38,8 +44,12 @@ from core.notifiers.base import render_markdown  # noqa: E402
 
 def test_render_bili_video():
     c = NotificationContent(
-        platform="bili", source_id="BV1xx", title="t", author="UP",
-        summary="s", keywords=["k1", "k2"],
+        platform="bili",
+        source_id="BV1xx",
+        title="t",
+        author="UP",
+        summary="s",
+        keywords=["k1", "k2"],
     )
     title, msg = render_markdown(c)
     assert title.startswith("📹")
@@ -58,7 +68,10 @@ def test_render_xhs_default_url():
 
 def test_render_weibo_custom_url():
     c = NotificationContent(
-        platform="weibo", source_id="p1", title="t", author="A",
+        platform="weibo",
+        source_id="p1",
+        title="t",
+        author="A",
         url="https://weibo.com/custom",
     )
     _, msg = render_markdown(c)
@@ -67,8 +80,12 @@ def test_render_weibo_custom_url():
 
 def test_render_dynamic_short_format():
     c = NotificationContent(
-        platform="bili", source_id="dyn123", title="t", author="UP",
-        summary="动态正文", type="dynamic",
+        platform="bili",
+        source_id="dyn123",
+        title="t",
+        author="UP",
+        summary="动态正文",
+        type="dynamic",
     )
     title, msg = render_markdown(c)
     assert title == "📢 UP 的动态"
@@ -78,7 +95,10 @@ def test_render_dynamic_short_format():
 
 def test_render_comment_highlights():
     c = NotificationContent(
-        platform="weibo", source_id="p", title="t", author="A",
+        platform="weibo",
+        source_id="p",
+        title="t",
+        author="A",
         comment_highlights="精选评论",
     )
     _, msg = render_markdown(c)
@@ -127,10 +147,12 @@ def test_get_notifiers_returns_gotify_by_default():
 
 
 def test_get_notifiers_preserves_order():
-    cfg = _cfg([
-        EndpointConfig(name="a", url="u1", token="t"),
-        EndpointConfig(name="b", url="u2", token="t"),
-    ])
+    cfg = _cfg(
+        [
+            EndpointConfig(name="a", url="u1", token="t"),
+            EndpointConfig(name="b", url="u2", token="t"),
+        ]
+    )
     ns = get_notifiers_for_subscription(cfg, "bili", ["b", "a"])
     assert [n.name for n in ns] == ["b", "a"]
 
@@ -143,10 +165,12 @@ def test_get_notifiers_telegram_kind():
 
 @pytest.mark.asyncio
 async def test_send_to_subscription_fan_out_both_succeed(monkeypatch: pytest.MonkeyPatch):
-    cfg = _cfg([
-        EndpointConfig(name="a", url="u1", token="t"),
-        EndpointConfig(name="b", url="u2", token="t"),
-    ])
+    cfg = _cfg(
+        [
+            EndpointConfig(name="a", url="u1", token="t"),
+            EndpointConfig(name="b", url="u2", token="t"),
+        ]
+    )
     content = NotificationContent(platform="bili", source_id="x", title="t", author="a")
 
     from core.notifiers import gotify as g_mod
@@ -165,10 +189,12 @@ async def test_send_to_subscription_fan_out_both_succeed(monkeypatch: pytest.Mon
 
 @pytest.mark.asyncio
 async def test_send_to_subscription_continues_after_failure(monkeypatch: pytest.MonkeyPatch):
-    cfg = _cfg([
-        EndpointConfig(name="a", url="u1", token="t"),
-        EndpointConfig(name="tg", url="u", token="t", kind="telegram"),  # NotImplementedError
-    ])
+    cfg = _cfg(
+        [
+            EndpointConfig(name="a", url="u1", token="t"),
+            EndpointConfig(name="tg", url="u", token="t", kind="telegram"),  # NotImplementedError
+        ]
+    )
     content = NotificationContent(platform="bili", source_id="x", title="t", author="a")
 
     from core.notifiers import gotify as g_mod

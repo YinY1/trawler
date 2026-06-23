@@ -44,7 +44,9 @@ def _build_notifier(ep: EndpointConfig) -> Notifier | None:
 
 
 def get_notifiers_for_subscription(
-    config: Config, platform: str, endpoint_names: Iterable[str],
+    config: Config,
+    platform: str,
+    endpoint_names: Iterable[str],
 ) -> list[Notifier]:
     """按订阅声明的 endpoint name 列表解析出 Notifier 实例列表。
 
@@ -66,7 +68,9 @@ def get_notifiers_for_subscription(
 
 
 async def send_to_subscription(
-    config: Config, platform: str, endpoint_names: Iterable[str],
+    config: Config,
+    platform: str,
+    endpoint_names: Iterable[str],
     content: NotificationContent,
 ) -> list[SendResult]:
     """Fan-out 发送：遍历订阅声明的 endpoints，每 endpoint 独立 send。

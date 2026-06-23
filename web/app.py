@@ -202,9 +202,7 @@ def create_app() -> FastAPI:
     async def unhandled_exception_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: Exception
     ) -> JSONResponse:
-        logger.exception(
-            "💥 未处理异常: %s %s — %s", request.method, request.url.path, exc
-        )
+        logger.exception("💥 未处理异常: %s %s — %s", request.method, request.url.path, exc)
         return JSONResponse(status_code=500, content={"detail": "内部错误"})
 
     # ──────────────────────────────────────────────────────────────────

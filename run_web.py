@@ -38,9 +38,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Trawler Web UI entry point.",
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help="监听地址，默认 127.0.0.1")
-    parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT, help="监听端口，默认 8080"
-    )
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="监听端口，默认 8080")
     parser.add_argument(
         "--reload",
         action="store_true",

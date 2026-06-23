@@ -55,7 +55,7 @@ def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: s
             liked_str = interact_info.get("liked_count", "0")
             try:
                 liked_count = int(liked_str)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 liked_count = 0
 
         # 发布时间：优先使用 API 返回字段，fallback 到 note_id 前 8 位 hex 编码的时间戳
@@ -71,12 +71,12 @@ def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: s
             if len(note_id_str) >= 8:
                 try:
                     pubdate = int(note_id_str[:8], 16)
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     pubdate = 0
         if isinstance(pubdate, str):
             try:
                 pubdate = int(pubdate)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pubdate = 0
 
         # xsec_token
