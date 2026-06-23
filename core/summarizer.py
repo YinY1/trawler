@@ -1,10 +1,19 @@
-"""AI 摘要生成模块 - 支持多种 LLM 提供商和本地降级"""
+"""AI 内容分析模块 — 一次性输出摘要/关键词/标签/一句话总结。
+
+设计要点（Bug 2 重构）：
+- 单次 AI 调用产出全部结构化字段，用 Markdown 模板约束输出格式。
+- 解析层鲁棒：容忍 ```markdown fence、字段缺失、混合分隔符。
+- AI 失败时返回明确的空值（summary='' / keywords=[]）并记 WARNING，
+  不再静默降级到本地 n-gram（旧实现质量差且掩盖故障）。
+- ``generate_summary`` / ``extract_keywords`` 作为薄包装保留旧签名，
+  内部委托给 ``analyze_content``，避免调用方大改。
+"""
 
 from __future__ import annotations
 
 import logging
 import re
-from collections import Counter
+from dataclasses import dataclass, field
 
 from shared.config import AnalysisConfig, Config
 from shared.constants import LLM_API_TIMEOUT
@@ -12,29 +21,122 @@ from shared.protocols import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-# ── 摘要 Prompt 模板 ─────────────────────────────────────────────
+# ── Prompt 模板 ──────────────────────────────────────────────────
 
-_SUMMARY_PROMPT_TEMPLATE = """\
-请总结以下内容的核心观点和关键信息。
-内容尽量详尽，把重要观点都覆盖到，请分点列出。
-只输出总结内容，不要额外的说明。
+_ANALYSIS_PROMPT_TEMPLATE = """\
+你是内容分析助手。请阅读以下内容，严格按下面的 Markdown 格式输出分析结果，\
+不要输出任何额外说明或前后缀。每个字段必须以指定标题开头（## 摘要 / ## 一句话总结 / \
+## 关键词 / ## 标签）。如果某字段无法填写，输出该标题并留空内容。
+
+输出格式（必须严格遵循）：
+
+## 摘要
+（分点详细总结，覆盖所有重要观点，使用「- 」开头列出要点）
+
+## 一句话总结
+（单句概括，不超过 40 字）
+
+## 关键词
+（3-5 个关键词，用中文分号「；」分隔，只输出关键词本身）
+
+## 标签
+（0-3 个内容类型标签，如 教程、评测、Vlog，用逗号「，」分隔；若无则留空）
+
+---
+
+待分析内容：
 
 标题：{title}
 作者：{author}
 正文：{text}"""
 
-_KEYWORDS_PROMPT_TEMPLATE = """\
-请从以下内容中提取 3-5 个关键词，用中文分号（；）分隔，只输出关键词，不要额外说明。
 
-标题：{title}
-作者：{author}
-正文：{text}"""
+# ── 解析层 ───────────────────────────────────────────────────────
 
-# ── OpenAI 兼容 Provider ─────────────────────────────────────────
+# 字段标题 → 输出 key。AI 偶尔会用 # 单井号或全角 ＃，正则统一兼容。
+_SECTION_PATTERNS: dict[str, re.Pattern[str]] = {
+    "summary": re.compile(r"^#{1,3}\s*摘要\s*$", re.MULTILINE),
+    "one_line_summary": re.compile(r"^#{1,3}\s*一句话总结\s*$", re.MULTILINE),
+    "keywords": re.compile(r"^#{1,3}\s*关键词\s*$", re.MULTILINE),
+    "tags": re.compile(r"^#{1,3}\s*标签\s*$", re.MULTILINE),
+}
+
+
+@dataclass
+class AnalysisResult:
+    """``analyze_content`` 的结构化结果。"""
+
+    summary: str = ""
+    one_line_summary: str = ""
+    keywords: list[str] = field(default_factory=lambda: [])
+    tags: list[str] = field(default_factory=lambda: [])
+    is_ai: bool = False
+    source: str = "none"  # provider name | "none" | "empty"
+
+
+def _strip_code_fence(text: str) -> str:
+    """剥离包裹整段输出的 ```markdown ... ``` 代码围栏。"""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # 去掉首行（可能含语言标识）和末行 ```
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines)
+    return stripped
+
+
+def _extract_section(text: str, pattern: re.Pattern[str]) -> str:
+    """提取某个 ## 标题下的内容，直到下一个 ## 标题或文本结束。"""
+    match = pattern.search(text)
+    if match is None:
+        return ""
+    start = match.end()
+    # 下一节以行首 1-3 个 # 开头
+    next_section = re.search(r"^#{1,3}\s*\S", text[start:], re.MULTILINE)
+    if next_section is None:
+        body = text[start:]
+    else:
+        body = text[start : start + next_section.start()]
+    return body.strip()
+
+
+def _parse_list_field(body: str) -> list[str]:
+    """解析分号/逗号分隔的列表字段，过滤空项。
+
+    兼容中文分号「；」、英文分号「;」、中英文逗号「,，」、换行。
+    MINOR-8: 分隔符都是固定字面量（无正则元字符），无需 ``re.escape``。
+    """
+    if not body:
+        return []
+    parts = re.split(r"[；;,，\n]+", body)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def parse_markdown_analysis(raw: str) -> AnalysisResult:
+    """将 AI 输出的 Markdown 解析为 ``AnalysisResult``。
+
+    鲁棒性：
+    - 自动剥离 ```markdown fence
+    - 缺失字段填空值
+    - 关键词/标签用混合分隔符拆分
+    """
+    text = _strip_code_fence(raw)
+    return AnalysisResult(
+        summary=_extract_section(text, _SECTION_PATTERNS["summary"]),
+        one_line_summary=_extract_section(text, _SECTION_PATTERNS["one_line_summary"]),
+        keywords=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["keywords"]))[:5],
+        tags=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["tags"]))[:3],
+    )
+
+
+# ── OpenAI 兼容 Provider（保持原样） ─────────────────────────────
 
 
 class OpenAIProvider:
-    """OpenAI 兼容 API 提供商
+    """OpenAI 兼容 API 提供商。
 
     支持任何 OpenAI 兼容的 API 端点（如 OpenAI、DeepSeek、本地 Ollama 等）。
     使用 requests 库直接调用 API，避免额外依赖。
@@ -46,29 +148,11 @@ class OpenAIProvider:
         api_key: str = "",
         model_name: str = "gpt-4o-mini",
     ) -> None:
-        """初始化 OpenAI 兼容提供商
-
-        Args:
-            api_base: API 基础地址（如 https://api.openai.com/v1）
-            api_key: API 密钥
-            model_name: 模型名称
-        """
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.model_name = model_name
 
     async def generate(self, prompt: str) -> str:
-        """调用 OpenAI 兼容 API 生成文本
-
-        Args:
-            prompt: 输入提示文本
-
-        Returns:
-            模型生成的文本内容
-
-        Raises:
-            RuntimeError: API 调用失败时抛出
-        """
         import httpx
 
         url = f"{self.api_base}/chat/completions"
@@ -105,232 +189,11 @@ class OpenAIProvider:
             raise RuntimeError(f"解析 API 响应失败: {e}")
 
 
-# ── 本地降级 Provider ────────────────────────────────────────────
-
-
-class LocalFallbackProvider:
-    """本地提取式摘要提供商
-
-    不依赖任何外部服务，使用 TF（词频）思路进行提取式摘要：
-    1. 按标点符号分句
-    2. 计算高频关键词
-    3. 对句子按关键词密度打分
-    4. 取 top N 高分句子拼接为摘要
-    """
-
-    # 中文停用词（高频但无实际意义的词）
-    _STOP_WORDS: set[str] = {
-        "的",
-        "了",
-        "是",
-        "在",
-        "我",
-        "有",
-        "和",
-        "就",
-        "不",
-        "人",
-        "都",
-        "一",
-        "一个",
-        "上",
-        "也",
-        "很",
-        "到",
-        "说",
-        "要",
-        "去",
-        "你",
-        "会",
-        "着",
-        "没有",
-        "看",
-        "好",
-        "自己",
-        "这",
-        "他",
-        "她",
-        "它",
-        "们",
-        "那",
-        "这个",
-        "那个",
-        "什么",
-        "怎么",
-        "如何",
-        "可以",
-        "但是",
-        "因为",
-        "所以",
-        "如果",
-        "虽然",
-        "而且",
-        "或者",
-        "以及",
-        "还",
-        "把",
-        "被",
-        "让",
-        "给",
-        "从",
-        "对",
-        "比",
-        "跟",
-        "与",
-        "为",
-        "等",
-        "能",
-        "才",
-        "更",
-        "最",
-        "已经",
-        "可能",
-        "应该",
-        "需要",
-        "这些",
-        "那些",
-        "之",
-        "其",
-        "此",
-        "该",
-        "每",
-        "各",
-    }
-
-    # 分句标点
-    _SENTENCE_DELIMITERS = re.compile(r"[。！？；\n]+")
-
-    def generate(self, prompt: str) -> str:
-        """本地提取式摘要生成
-
-        从输入文本中提取关键句子组成摘要。
-
-        Args:
-            prompt: 输入文本（通常包含标题、作者和正文）
-
-        Returns:
-            提取式摘要文本
-        """
-        # 从 prompt 中提取正文部分
-        text = prompt
-        body_match = re.search(r"正文[：:]\s*(.*)", prompt, re.DOTALL)
-        if body_match:
-            text = body_match.group(1).strip()
-
-        if not text.strip():
-            return "（内容为空，无法生成摘要）"
-
-        return self._extract_summary(text)
-
-    def _extract_summary(self, text: str, top_n: int = 8) -> str:
-        """基于词频的提取式摘要
-
-        Args:
-            text: 输入文本
-            top_n: 提取的句子数量
-
-        Returns:
-            摘要文本
-        """
-        # 分句
-        sentences = self._split_sentences(text)
-        if not sentences:
-            return text[:500]
-
-        # 计算词频
-        word_freq = self._compute_word_freq(text)
-
-        # 句子打分
-        scored_sentences: list[tuple[int, str, float]] = []
-        for idx, sentence in enumerate(sentences):
-            score = self._score_sentence(sentence, word_freq)
-            # 对靠前的句子给予轻微加权
-            position_bonus = 1.0 + 0.1 * (1.0 - idx / len(sentences))
-            scored_sentences.append((idx, sentence, score * position_bonus))
-
-        # 按 score 降序排列，取 top_n
-        scored_sentences.sort(key=lambda x: x[2], reverse=True)
-        top_sentences = sorted(scored_sentences[:top_n], key=lambda x: x[0])
-
-        summary = "。".join(s[1] for s in top_sentences)
-        if not summary.endswith(("。", "！", "？", "；")):
-            summary += "。"
-
-        return summary
-
-    def _split_sentences(self, text: str) -> list[str]:
-        """按标点分句
-
-        Args:
-            text: 输入文本
-
-        Returns:
-            句子列表
-        """
-        parts = self._SENTENCE_DELIMITERS.split(text)
-        return [p.strip() for p in parts if len(p.strip()) >= 5]
-
-    def _compute_word_freq(self, text: str) -> Counter[str]:
-        """计算词频（简单字符级，过滤停用词）
-
-        使用滑动窗口提取 2-4 字词组，并统计频率。
-
-        Args:
-            text: 输入文本
-
-        Returns:
-            词频 Counter
-        """
-        # 清理文本
-        clean = re.sub(r"[^\u4e00-\u9fff\u3400-\u4dbf]", "", text)
-
-        # 提取 2-4 字的中文词组
-        ngrams: list[str] = []
-        for n in (2, 3, 4):
-            for i in range(len(clean) - n + 1):
-                gram = clean[i : i + n]
-                # 跳过包含停用词的 gram
-                if any(w in gram for w in ("的", "了", "是", "在", "我", "和")):
-                    continue
-                ngrams.append(gram)
-
-        return Counter(ngrams)
-
-    def _score_sentence(self, sentence: str, word_freq: Counter[str]) -> float:
-        """计算句子的关键词得分
-
-        Args:
-            sentence: 待评分句子
-            word_freq: 全文词频
-
-        Returns:
-            得分值
-        """
-        if not word_freq:
-            return 0.0
-
-        # 取 top 50 高频词
-        top_words = {w for w, _ in word_freq.most_common(50)}
-        score = 0.0
-        for word in top_words:
-            if word in sentence:
-                score += word_freq[word]
-
-        # 归一化：除以句子长度避免长句天然优势
-        return score / max(len(sentence), 1)
-
-
 # ── 公共接口 ─────────────────────────────────────────────────────
 
 
 def create_provider(config: AnalysisConfig) -> LLMProvider:
-    """根据配置创建 LLM 提供商
-
-    Args:
-        config: AI 分析配置
-
-    Returns:
-        对应的 LLMProvider 实例
+    """根据配置创建 LLM 提供商。
 
     Raises:
         ValueError: 不支持的 provider 类型
@@ -355,6 +218,51 @@ def create_provider(config: AnalysisConfig) -> LLMProvider:
         raise ValueError(f"不支持的 provider: {config.provider}")
 
 
+async def analyze_content(
+    source_id: str,
+    title: str,
+    author: str,
+    text: str,
+    config: Config,
+) -> AnalysisResult:
+    """一次性产出摘要/关键词/标签/一句话总结（Bug 2 重构入口）。
+
+    AI 失败时返回空字段（summary='' / keywords=[]）并记 WARNING，
+    不再静默降级到本地 n-gram。
+
+    Args:
+        source_id: 来源标识（仅用于日志）
+        title/author/text: 待分析内容
+        config: 全局配置
+
+    Returns:
+        AnalysisResult（失败时 is_ai=False，字段为空）
+    """
+    if not config.analysis.enabled:
+        logger.debug("AI 分析已禁用，返回空结果: %s", source_id)
+        return AnalysisResult(source="none")
+
+    if not text.strip():
+        return AnalysisResult(source="empty")
+
+    try:
+        provider = create_provider(config.analysis)
+        prompt = _ANALYSIS_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
+        raw = await provider.generate(prompt)
+        result = parse_markdown_analysis(raw)
+        result.is_ai = True
+        result.source = config.analysis.provider
+        logger.info("AI 内容分析成功: %s", source_id)
+        return result
+    except Exception as e:
+        # Bug 2: WARNING（非 DEBUG），让运维可见
+        logger.warning("AI 内容分析失败 (%s): %s，返回空结果", source_id, e)
+        return AnalysisResult(source="none")
+
+
+# ── 旧签名薄包装（保持 handlers 调用方不变） ─────────────────────
+
+
 async def generate_summary(
     source_id: str,
     title: str,
@@ -362,46 +270,13 @@ async def generate_summary(
     text: str,
     config: Config,
 ) -> tuple[str, str, bool]:
-    """生成内容摘要（含 AI 降级机制）
+    """旧签名包装：返回 (summary, source, is_ai)。
 
-    根据配置选择 LLM 提供商生成摘要。如果 AI 生成失败，
-    自动降级到本地提取式摘要。
-
-    Args:
-        source_id: 来源标识（bvid 或 note_id）
-        title: 内容标题
-        author: 内容作者
-        text: 待摘要的文本
-        config: 全局配置对象
-
-    Returns:
-        (摘要文本, 来源标识, 是否AI生成) 三元组
+    内部委托 ``analyze_content``，失败时 summary='' / is_ai=False。
+    保留签名以兼容 ``platforms/bilibili/handlers.py:summarize_phase``。
     """
-    if not config.analysis.enabled:
-        logger.debug("AI 分析已禁用，使用本地摘要")
-        fallback = LocalFallbackProvider()
-        prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
-        return fallback.generate(prompt), "local", False
-
-    if not text.strip():
-        return "（内容为空）", "none", False
-
-    # 尝试 AI 生成
-    try:
-        provider = create_provider(config.analysis)
-        prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
-        summary = await provider.generate(prompt)
-        logger.info("AI 摘要生成成功: %s", source_id)
-        return summary, config.analysis.provider, True
-
-    except Exception as e:
-        logger.warning("AI 摘要生成失败 (%s): %s，降级到本地摘要", config.analysis.provider, e)
-
-    # 降级到本地摘要
-    fallback = LocalFallbackProvider()
-    prompt = _SUMMARY_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
-    summary = fallback.generate(prompt)
-    return summary, "local-fallback", False
+    result = await analyze_content(source_id, title, author, text, config)
+    return result.summary, result.source, result.is_ai
 
 
 async def extract_keywords(
@@ -410,79 +285,16 @@ async def extract_keywords(
     author: str,
     config: Config | None = None,
 ) -> list[str]:
-    """从文本中提取关键词
+    """旧签名包装：返回关键词列表。
 
-    优先使用 LLM 提取关键词，失败时降级到基于词频的本地提取。
+    内部委托 ``analyze_content``，失败时返回 []。
+    保留签名以兼容 ``platforms/bilibili/handlers.py:summarize_phase``。
 
-    Args:
-        text: 正文文本
-        title: 内容标题
-        author: 内容作者
-        config: 全局配置对象（可选，用于 AI 提取）
-
-    Returns:
-        3-5 个关键词列表
+    注意：调用方若已先调 ``generate_summary``，本函数会再发一次 AI 请求。
+    推荐新代码直接调 ``analyze_content`` 复用结果（见 Task 2 Step 5
+    对 summarize_phase 的改造）。
     """
-    # 尝试 AI 提取
-    if config and config.analysis.enabled:
-        try:
-            provider = create_provider(config.analysis)
-            prompt = _KEYWORDS_PROMPT_TEMPLATE.format(title=title, author=author, text=text)
-            result = await provider.generate(prompt)
-            # 解析关键词（支持中英文分号、逗号、换行分隔）
-            keywords = re.split(r"[；;，,\n]+", result)
-            keywords = [k.strip() for k in keywords if k.strip()]
-            if keywords:
-                return keywords[:5]
-        except Exception as e:
-            logger.debug("AI 关键词提取失败: %s，使用本地提取", e)
-
-    # 本地 TF 提取
-    return _extract_keywords_local(text, title)
-
-
-def _extract_keywords_local(text: str, title: str, top_n: int = 5) -> list[str]:
-    """基于词频的本地关键词提取
-
-    使用简单的 n-gram 频率统计提取关键词。
-
-    Args:
-        text: 正文文本
-        title: 标题（标题中的词额外加权）
-        top_n: 返回的关键词数量
-
-    Returns:
-        关键词列表
-    """
-    # 标题中的词加权：将标题重复拼接到文本中
-    enhanced_text = f"{title} {title} {title} {text}"
-
-    # 清理文本
-    clean = re.sub(r"[^\u4e00-\u9fff\u3400-\u4dbf]", "", enhanced_text)
-
-    # 停用词
-    stop_chars = {"的", "了", "是", "在", "我", "有", "和", "就", "不", "人", "都", "一"}
-
-    # 提取 2-4 字 n-gram
-    ngram_count: Counter[str] = Counter()
-    for n in (2, 3, 4):
-        for i in range(len(clean) - n + 1):
-            gram = clean[i : i + n]
-            if not any(c in stop_chars for c in gram):
-                ngram_count[gram] += 1
-
-    # 去除被更长 n-gram 包含的短 n-gram（如果频率相同）
-    candidates: list[str] = []
-    for word, count in ngram_count.most_common(30):
-        # 检查是否已被更长的词包含
-        dominated = False
-        for existing in candidates:
-            if word in existing and ngram_count.get(existing, 0) >= count * 0.7:
-                dominated = True
-                break
-        if not dominated:
-            candidates.append(word)
-        if len(candidates) >= top_n:
-            break
-
-    return candidates[:top_n]
+    if config is None or not config.analysis.enabled:
+        return []
+    result = await analyze_content("keywords", title, author, text, config)
+    return result.keywords

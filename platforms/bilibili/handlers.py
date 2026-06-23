@@ -12,7 +12,7 @@ import logging
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
 from core.notifiers import send_to_subscription
-from core.summarizer import extract_keywords, generate_summary
+from core.summarizer import analyze_content
 from core.transcriber import cleanup_media, transcribe_file_async
 from platforms.bilibili.comments import fetch_comment_highlights
 from platforms.bilibili.monitor import fetch_user_videos
@@ -200,29 +200,21 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
     # 让 LLM 在摘要时一并考虑 UP 主在动态里的补充说明。
     if ctx.msg.dynamic_text:
         text_to_summarize = f"【动态内容】{ctx.msg.dynamic_text}\n\n{text_to_summarize}"
+
     try:
-        summary_text, _source, _is_ai = await generate_summary(
+        analysis = await analyze_content(
             source_id=source_id,
             title=ctx.msg.title,
             author=ctx.msg.author,
             text=text_to_summarize,
             config=ctx.config,
         )
-        ctx.summary_text = summary_text
+        ctx.summary_text = analysis.summary
+        ctx.keywords = analysis.keywords
     except Exception as exc:
-        logger.error("✗ 摘要生成失败: %s", exc)
-        logger.exception("Summary failed for %s", source_id)
-
-    try:
-        ctx.keywords = await extract_keywords(
-            text=ctx.summary_text,
-            title=ctx.msg.title,
-            author=ctx.msg.author,
-            config=ctx.config,
-        )
-    except Exception as exc:
-        logger.warning("⚠️  关键词提取失败: %s", exc)
-        logger.warning("Keywords failed for %s: %s", source_id, exc)
+        # analyze_content 内部已吞异常并返回空结果；这里兜底防极端情况
+        logger.error("✗ 摘要/关键词生成失败: %s", exc)
+        logger.exception("Analysis failed for %s", source_id)
 
     return True
 
@@ -258,22 +250,22 @@ async def bili_push(ctx: PhaseContext) -> bool:
         summary=ctx.summary_text,
         keywords=ctx.keywords,
         comment_highlights=ctx.comment_highlights or "",
-        url=(f"https://t.bilibili.com/{source_id}" if is_dynamic
-             else f"https://www.bilibili.com/video/{source_id}"),
+        url=(f"https://t.bilibili.com/{source_id}" if is_dynamic else f"https://www.bilibili.com/video/{source_id}"),
         type="dynamic" if is_dynamic else "content",
     )
 
     logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))
     results = await send_to_subscription(
-        ctx.config, "bili", matched.notify_endpoints, content,
+        ctx.config,
+        "bili",
+        matched.notify_endpoints,
+        content,
     )
     ok = sum(1 for r in results if r.success)
     logger.info("通知推送完成 (%d/%d)", ok, len(results))
 
     # 媒体清理（仅视频）
-    if (not is_dynamic
-            and ctx.config.transcribe.delete_after_transcribe
-            and ctx.downloaded_filepath is not None):
+    if not is_dynamic and ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
         try:
             cleanup_media(filepath=ctx.downloaded_filepath, source_id=source_id)
         except Exception as exc:
