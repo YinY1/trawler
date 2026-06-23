@@ -148,31 +148,35 @@ async def test_process_message_handler_failure_stops_flow(config: Config, store:
 
 @pytest.mark.asyncio
 async def test_process_message_resume_from_mid_phase(config: Config, store: MessageStore) -> None:
-    """Should resume from current phase, not repeat completed phases."""
+    """Should resume from current phase, not repeat completed phases.
+
+    Uses DYNAMIC content: DYNAMIC phase flow excludes DOWNLOADED/TRANSCRIBED,
+    so the Bug-3 VIDEO-only rewind gate never fires here and this test keeps
+    verifying the pure resume semantics."""
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
     calls: list[str] = []
 
-    @PipelineEngine.register("bili", Phase.DOWNLOADED)
-    async def dl(ctx: PhaseContext) -> bool:
-        calls.append("downloaded")
+    @PipelineEngine.register("bili", Phase.SUMMARIZED)
+    async def sm(ctx: PhaseContext) -> bool:
+        calls.append("summarized")
         return True
 
-    @PipelineEngine.register("bili", Phase.TRANSCRIBED)
-    async def tr(ctx: PhaseContext) -> bool:
-        calls.append("transcribed")
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        calls.append("pushed")
         return True
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author")
+    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "Test", "Author")
     assert msg is not None
-    store.mark_phase("bili:BV1", Phase.DOWNLOADED)
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
     msg = store.get_message("bili:BV1")
     assert msg is not None
-    assert msg.phase == Phase.DOWNLOADED
+    assert msg.phase == Phase.SUMMARIZED
 
     await PipelineEngine.process_message(msg, config, store)
-    assert calls == ["transcribed"]  # only transcribed, not downloaded
+    assert calls == ["pushed"]  # only pushed, summarized is not repeated
 
 
 # ── run_platform ────────────────────────────────────────────────
@@ -209,3 +213,98 @@ async def test_run_platform_detect_and_process(config: Config, tmp_path: Path) -
     msg = store2.get_message("test:001")
     assert msg is not None
     assert msg.phase == Phase.PUSHED
+
+
+@pytest.mark.asyncio
+async def test_process_message_video_missing_filepath_rewinds_to_discovered(
+    config: Config, store: MessageStore
+) -> None:
+    """Bug 3 fix: a VIDEO message stuck at DOWNLOADED with no filepath
+    (cross-process state loss) should auto-rewind to DISCOVERED and re-run
+    the full download phase."""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    calls: list[str] = []
+
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        calls.append("downloaded")
+        ctx.downloaded_filepath = Path("/tmp/fake_video.mp4")  # simulate real download
+        return True
+
+    @PipelineEngine.register("bili", Phase.TRANSCRIBED)
+    async def tr(ctx: PhaseContext) -> bool:
+        calls.append("transcribed")
+        # Filepath is now set by re-download
+        assert ctx.downloaded_filepath is not None
+        return True
+
+    @PipelineEngine.register("bili", Phase.SUMMARIZED)
+    async def sm(ctx: PhaseContext) -> bool:
+        calls.append("summarized")
+        return True
+
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        calls.append("pushed")
+        return True
+
+    # Seed a message stuck at DOWNLOADED (phase persisted, filepath lost)
+    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+    assert msg is not None
+    store.mark_phase("bili:BV1", Phase.DOWNLOADED)
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+
+    # New PhaseContext starts with downloaded_filepath=None (the bug scenario)
+    await PipelineEngine.process_message(msg, config, store)
+
+    # Auto-rewind should have re-run DOWNLOADED then proceeded
+    assert "downloaded" in calls
+    assert calls == ["downloaded", "transcribed", "summarized", "pushed"]
+    updated = store.get_message("bili:BV1")
+    assert updated is not None
+    assert updated.phase == Phase.PUSHED
+
+
+@pytest.mark.asyncio
+async def test_transcribe_phase_missing_filepath_returns_false_with_error(
+    config: Config, store: MessageStore, tmp_path: Path
+) -> None:
+    """Bug 3 fix: transcribe_phase with filepath=None must set ctx.error and
+    return False (no silent success → no empty push).
+
+    Note: this test imports ``platforms.bilibili.handlers`` to access the real
+    ``transcribe_phase``. Python caches the module after first import, which
+    would break ``test_platform_handlers.py::test_bili_module_imports`` (its
+    "import → assert registered" logic relies on import side effects firing
+    every time). We work around this by removing the module from ``sys.modules``
+    in a finally block so the next test that imports it re-triggers the
+    decorators. Only the handlers module itself is removed — its many
+    third-party dependencies stay cached, so re-import is cheap."""
+    import sys
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    try:
+        import platforms.bilibili.handlers  # noqa: F401
+
+        # Find the registered "*" / TRANSCRIBED handler
+        handler = PipelineEngine._handlers.get(("*", Phase.TRANSCRIBED))
+        assert handler is not None, "transcribe_phase should be registered"
+
+        msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+        assert msg is not None
+        ctx = PhaseContext(msg=msg, config=config)
+        ctx.downloaded_filepath = None  # the bug scenario
+
+        result = await handler(ctx)
+
+        assert result is False
+        assert "downloaded_filepath missing" in ctx.error
+    finally:
+        # Drop the handlers module from cache so later tests that import it
+        # (e.g. test_platform_handlers.py) see the decorators re-fire.
+        sys.modules.pop("platforms.bilibili.handlers", None)
