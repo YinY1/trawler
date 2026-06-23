@@ -96,18 +96,34 @@ async def check_and_renew_tokens(
         new_tokens = await authenticator.refresh_tokens(tokens)
 
         # 检查是否真的刷新了（obtained_at 更新说明 refresh_tokens 返回了新 tokens）
-        if new_tokens.obtained_at > tokens.obtained_at:
-            from shared.auth import update_auth_section
-
-            await _update_last_refresh_at(platform, config, new_tokens.obtained_at, config_path)
-            auth_dict = _tokens_to_auth_dict(platform, new_tokens, authenticator)
-            await update_auth_section(platform, auth_dict, config_path=config_path)
-            _update_config_memory(platform, config, new_tokens, authenticator)
-            logger.info("%s token 续期成功", platform)
-            return RenewalResult(platform, "renewed", f"{platform}: token 续期成功")
-        else:
+        if new_tokens.obtained_at <= tokens.obtained_at:
             logger.info("%s token 无需续期 (refresh_tokens 返回原始 tokens)", platform)
             return RenewalResult(platform, "skipped", f"{platform}: token 无需续期")
+
+        # Bug 1 fix: XHS/Weibo refresh_tokens 无条件 bump obtained_at，
+        # 必须用 validate_tokens 二次校验服务端是否真正接受了新 cookie，
+        # 避免把无效凭证写回 config 造成"乐观成功"。
+        try:
+            is_valid = await authenticator.validate_tokens(new_tokens)
+        except Exception as ve:
+            logger.warning("%s token 续期后校验异常: %s — 视为续期失败，不写回 config", platform, ve)
+            return RenewalResult(platform, "expired", f"{platform}: token 续期后校验异常 ({ve})")
+
+        if not is_valid:
+            logger.warning(
+                "%s token 续期后 validate_tokens=False — 服务端未接受新 cookie，不写回 config",
+                platform,
+            )
+            return RenewalResult(platform, "expired", f"{platform}: token 续期后校验失败")
+
+        from shared.auth import update_auth_section
+
+        await _update_last_refresh_at(platform, config, new_tokens.obtained_at, config_path)
+        auth_dict = _tokens_to_auth_dict(platform, new_tokens, authenticator)
+        await update_auth_section(platform, auth_dict, config_path=config_path)
+        _update_config_memory(platform, config, new_tokens, authenticator)
+        logger.info("%s token 续期成功", platform)
+        return RenewalResult(platform, "renewed", f"{platform}: token 续期成功")
     except Exception as e:
         logger.warning("%s token 续期失败: %s", platform, e)
         return RenewalResult(platform, "expired", f"{platform}: token 续期失败 ({e})")
@@ -128,7 +144,7 @@ def _build_tokens_from_config(platform: str, config: Config) -> PlatformTokens |
     try:
         mod = importlib.import_module(module_name)
         return mod.build_tokens_from_config(config)
-    except (ImportError, AttributeError):
+    except ImportError, AttributeError:
         return None
 
 
