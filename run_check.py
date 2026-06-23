@@ -15,11 +15,13 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from core.notifiers import send_to_subscription
 from core.pipeline import run_check_once
 from core.subscription_cli import add_subscription, list_subscriptions, remove_subscription, search_by_name
 from shared.auth import QRExpiredError, get_authenticator, update_auth_section
 from shared.auth.base import PlatformTokens
 from shared.config import Config, load_config
+from shared.protocols import NotificationContent
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -510,6 +512,26 @@ def check(platform: str, config_path: str, verbose: bool, from_phase: str | None
         console.print(f"[red]✗ 运行出错: {exc}[/]")
         if verbose:
             console.print_exception()
+        # Bug 4 fix: cron 失败时推送健康告警到所有配置的 endpoints，
+        # 让运维在 cron 静默失败时也能收到通知
+        try:
+            health_alert = NotificationContent(
+                platform="system",
+                source_id="health",
+                title="Trawler 检查失败",
+                author="Trawler",
+                summary=f"check 命令执行失败: {exc}",
+                type="health_alert",
+            )
+            # 发到所有已配置且 enabled 的 endpoints（platform 传空字符串避免过滤）
+            all_endpoint_names = [ep.name for ep in config.endpoints if ep.enabled]
+            if all_endpoint_names:
+                logger.warning("🚨 推送健康告警到 %d 个 endpoint", len(all_endpoint_names))
+                # check 是同步 Click 命令，run_check_once 的事件循环已随异常退出，
+                # 这里开一个新的 asyncio.run 推送告警
+                asyncio.run(send_to_subscription(config, "system", all_endpoint_names, health_alert))
+        except Exception as alert_exc:
+            logger.error("推送健康告警失败: %s", alert_exc)
         sys.exit(1)
 
 
