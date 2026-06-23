@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from web.app import app
+from web.app import create_app
+from web.auth import set_password
+
+PASSWORD = "test12345"
 
 
 @pytest.fixture
-def client() -> AsyncClient:
+async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
+    """已登录 client（适配 login_guard + CSRF middleware）。"""
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", tmp_path / "auth.toml")
+    set_password(PASSWORD)
+    app = create_app()
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/login", data={"password": PASSWORD}, follow_redirects=False)
+        assert resp.status_code == 303
+        yield c
 
 
 class TestSettings:
@@ -41,7 +52,9 @@ class TestSettings:
     async def test_settings_save(self, mock_exists, mock_write, mock_dumps, client: AsyncClient) -> None:
         mock_exists.return_value = True
 
-        resp = await client.post("/settings", data={"data_dir": "/data/test"})
+        resp = await client.post(
+            "/settings", data={"data_dir": "/data/test"}, headers={"X-Requested-With": "XMLHttpRequest"}
+        )
         assert resp.status_code == 200
         assert "HX-Trigger" in resp.headers
         assert "toast" in resp.headers.get("HX-Trigger", "")

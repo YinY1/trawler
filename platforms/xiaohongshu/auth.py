@@ -51,12 +51,12 @@ def get_xhs_cookie(config: Config) -> str:
     if cookie:
         return cookie.strip()
 
-    cookie = os.environ.get("XHS_COOKIE", "")
+    cookie = os.environ.get("TRAWLER_XHS_COOKIE", "")
     if cookie:
         return cookie.strip()
 
     logger.warning("未配置小红书 Cookie，API 请求可能失败")
-    logger.warning("⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 XHS_COOKIE 中设置")
+    logger.warning("⚠ 未配置小红书 Cookie，请在 config/cookies.toml 或环境变量 TRAWLER_XHS_COOKIE 中设置")
     return ""
 
 

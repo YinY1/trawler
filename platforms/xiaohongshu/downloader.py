@@ -146,7 +146,7 @@ async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> Optional[Xh
         下载结果或 None
     """
     # 从环境变量或配置获取 API 地址
-    api_url = os.environ.get("XHS_DOWNLOADER_API", "")
+    api_url = os.environ.get("TRAWLER_XHS_DOWNLOADER_API", "")
     if not api_url:
         return None
 

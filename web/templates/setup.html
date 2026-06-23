@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>登录 · Trawler</title>
+  <title>首次设置 · Trawler</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -18,28 +18,36 @@
   <div class="w-full max-w-sm bg-[var(--card-bg)] backdrop-blur-[20px] rounded-[14px] shadow-card border border-[var(--card-border)] p-8">
     <div class="mb-6 text-center">
       <div class="inline-flex w-10 h-10 rounded-[10px] bg-[var(--color-primary)]/10 items-center justify-center mb-3">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </div>
-      <h1 class="text-xl font-semibold tracking-tight">登录</h1>
-      <p class="text-sm text-[var(--text-secondary)] mt-1">输入管理员密码以访问 Web UI</p>
+      <h1 class="text-xl font-semibold tracking-tight">首次设置密码</h1>
+      <p class="text-sm text-[var(--text-secondary)] mt-1">创建管理员密码以保护 Web UI</p>
     </div>
 
-    {% if error %}
+    {% if errors %}
     <div class="mb-4 rounded-[10px] bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
-      {{ error }}
+      <ul class="list-disc list-inside space-y-1">
+        {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
     </div>
     {% endif %}
 
-    <form method="post" action="/login{% if request.url.query %}?{{ request.url.query }}{% endif %}" accept-charset="UTF-8" class="space-y-4">
+    <form method="post" action="/setup" accept-charset="UTF-8" class="space-y-4">
       <div>
         <label class="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">密码</label>
-        <input type="password" name="password" required autofocus
+        <input type="password" name="password" required minlength="8"
                class="w-full px-3 py-2 rounded-[8px] bg-[var(--bg-base)] border border-[var(--card-border)] focus:border-apple-blue focus:outline-none transition-colors"
-               placeholder="管理员密码">
+               placeholder="至少 8 个字符">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">确认密码</label>
+        <input type="password" name="password_confirm" required minlength="8"
+               class="w-full px-3 py-2 rounded-[8px] bg-[var(--bg-base)] border border-[var(--card-border)] focus:border-apple-blue focus:outline-none transition-colors"
+               placeholder="再次输入密码">
       </div>
       <button type="submit"
               class="w-full py-2 rounded-[8px] bg-apple-blue text-white text-sm font-medium hover:bg-apple-blue-dark transition-colors">
-        登录
+        创建管理员密码
       </button>
     </form>
   </div>

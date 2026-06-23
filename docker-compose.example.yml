@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────────────────────────────
+# Trawler — docker-compose 示例片段
+#
+# 用法：把下面 services 块的内容合并进你服务器上现有的 compose 文件。
+# 假设你的主 compose 文件已经定义了 networks: / volumes: 区段，
+# 若没有，请在文件底部补上对应顶层定义（见文件末尾注释）。
+#
+# 部署前准备：
+#   1. 把仓库 clone 到服务器某个路径，例如 /opt/trawler
+#   2. cd /opt/trawler
+#   3. 准备运行时配置（不要把开发用的 cookies.toml 直接拷过去，单独生成）：
+#        cp config/config.toml.example config/config.toml
+#        cp config/cookies.toml.example config/cookies.toml
+#        cp config/subscriptions.toml.example config/subscriptions.toml
+#        # 按需填入 cookies / 订阅 / LLM key
+#   4. 把下面这段贴到现有 docker-compose.yml，按需调整路径
+#   5. docker compose up -d --build trawler
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  trawler:
+    build:
+      # 仓库根目录（含 Dockerfile）
+      context: /opt/trawler
+      dockerfile: Dockerfile
+      args:
+        # 想在构建期预热 whisper 模型（避免首次转写卡很久）就设 1
+        # 镜像会变大（~500MB-1GB，取决于模型）
+        DOWNLOAD_WHISPER_MODEL: "0"
+    image: trawler:local
+    container_name: trawler
+    restart: unless-stopped
+
+    # 只监听宿主 loopback，前面用宿主 nginx 反代
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # 凭证通过挂载的 config 目录读取；不在 image/env 里硬编码 secret
+    volumes:
+      # 配置（cookies / subscriptions / config.toml）— 只读挂载避免容器误写
+      - /opt/trawler/config:/app/config:ro
+      # 持久化数据（dedup set、日志、messages.json）
+      - trawler_data:/app/data
+      # 下载的音视频文件
+      - trawler_downloads:/app/downloads
+      # 转录结果
+      - trawler_transcripts:/app/transcripts
+      # whisper 模型缓存（避免每次重启都重新下模型）
+      - trawler_hf_cache:/app/hf_cache
+
+    environment:
+      # 减少日志缓冲，方便 docker logs 看实时输出
+      PYTHONUNBUFFERED: "1"
+      # 模型缓存路径（与 Dockerfile 里的挂载点对应）
+      HF_HOME: /app/hf_cache
+      # 如果不想把 cookies 写进 config 文件，也可以用环境变量覆盖
+      # （config.py 会优先读 env）— 按需取消注释
+      # TRAWLER_BILI_SESSDATA: ${TRAWLER_BILI_SESSDATA:-}
+      # TRAWLER_BILI_REFRESH_TOKEN: ${TRAWLER_BILI_REFRESH_TOKEN:-}
+      # TRAWLER_XHS_COOKIE: ${TRAWLER_XHS_COOKIE:-}
+      # TRAWLER_WEIBO_COOKIE: ${TRAWLER_WEIBO_COOKIE:-}
+      # TRAWLER_LLM_API_KEY: ${TRAWLER_LLM_API_KEY:-}
+      # TRAWLER_LLM_API_BASE: ${TRAWLER_LLM_API_BASE:-}
+
+      # 时区（影响 cron 触发时间和日志时间戳）
+      TZ: Asia/Shanghai
+
+    # 健康检查：访问 /login（_PUBLIC_PATH，永远 200，不受 auth_guard 拦截）
+    # 不用 / 是因为未登录访问 / 会被 302 重定向，curl -f 会把 3xx 视为失败
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    # 资源限制示例（按宿主资源调）— faster-whisper 转写吃 CPU/内存
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+        reservations:
+          memory: 256m
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ─────────────────────────────────────────────────────────────────────
+# 如果主 compose 文件还没有顶层 volumes/networks 定义，取消注释以下内容
+# ─────────────────────────────────────────────────────────────────────
+# volumes:
+#   trawler_data:
+#   trawler_downloads:
+#   trawler_transcripts:
+#   trawler_hf_cache:

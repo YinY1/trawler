@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
+
+# ── auth_guard 白名单 (Web 站点访问鉴权) ────────────────────────
+# 不需要登录/setup 检查的路径前缀/精确路径
+_PUBLIC_PATHS = {"/login", "/logout", "/setup"}
+_PUBLIC_PREFIXES = ("/static",)
+
+# CSRF 豁免路径（未登录 POST，无 session 可盗）
+_CSRF_EXEMPT_PATHS = {"/login", "/setup"}
 
 
 def _timeago(ts: float | int | None) -> str:
@@ -118,11 +126,66 @@ def create_app() -> FastAPI:
 
     app.state.log_bus = LogBus()
 
+    # ── CSRF guard (Web 站点访问鉴权) ────────────────────────────────
+    # 已登录用户的写操作校验 HTMX 头或同源 referer。
+    # 注册顺序（add_middleware 用 insert(0)，后 add 的在外层）：
+    #   请求 → SessionMiddleware（最外，注入 session scope）
+    #        → auth_guard（setup/login 检查）
+    #        → csrf_guard（写操作 CSRF 校验，仅已登录用户能到达）
+    #        → 路由
+    # 所以 add 顺序：csrf_guard 先（最内）→ auth_guard → SessionMiddleware（最后 add，最外）。
+
+    @app.middleware("http")
+    async def csrf_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:  # pyright: ignore[reportUnusedFunction]
+        path = request.url.path
+        # 豁免：/login /setup /static/*
+        if path in _CSRF_EXEMPT_PATHS or path.startswith("/static"):
+            return await call_next(request)
+        # 仅校验写方法
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return await call_next(request)
+        from web.auth import verify_csrf
+
+        if not verify_csrf(request):
+            return JSONResponse(status_code=403, content={"detail": "CSRF check failed"})
+        return await call_next(request)
+
+    # ── auth_guard: setup guard + login guard (合并) ─────────────────
+    from web.auth import is_setup_complete
+
+    @app.middleware("http")
+    async def auth_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:  # pyright: ignore[reportUnusedFunction]
+        path = request.url.path
+        if path in _PUBLIC_PATHS or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            return await call_next(request)
+        # setup guard：未初始化时强制跳 /setup
+        if not is_setup_complete():
+            return RedirectResponse("/setup", status_code=302)
+        # login guard：未登录时跳 /login?next=<path>
+        if not request.session.get("logged_in"):
+            login_url = f"/login?next={path}"
+            return RedirectResponse(login_url, status_code=302)
+        return await call_next(request)
+
+    # SessionMiddleware（最外层，注入 session scope 供 auth_guard 读取）
+    from starlette.middleware.sessions import SessionMiddleware
+
+    from web.auth import load_auth_config
+
+    auth_cfg = load_auth_config()
+    secret = auth_cfg.session_secret or "SETUP_INCOMPLETE_PLACEHOLDER"
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=secret,
+        session_cookie="trawler_session",
+        max_age=auth_cfg.session_max_age_seconds,
+        same_site="lax",
+        https_only=False,
+    )
+
     # ── 全局异常处理: 让 422 / 500 进入日志链路 ────────────────────────
     # RequestValidationError 在路由 handler 之前抛出, 不进 try/except,
     # 必须注册 exception_handler 才能被 logger 捕获并流到 /logs。
-    from fastapi import Request
-
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: RequestValidationError
@@ -158,6 +221,7 @@ def create_app() -> FastAPI:
     from web.routes.logs import router as logs_router
     from web.routes.settings import router as settings_router
     from web.routes.subscriptions import router as subscriptions_router
+    from web.routes.web_auth import router as web_auth_router
 
     app.include_router(dashboard_router)
     app.include_router(subscriptions_router)
@@ -166,6 +230,7 @@ def create_app() -> FastAPI:
     app.include_router(logs_router)
     app.include_router(endpoints_router)
     app.include_router(settings_router)
+    app.include_router(web_auth_router)
 
     return app
 

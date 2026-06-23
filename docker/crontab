@@ -1,0 +1,11 @@
+# Trawler cron 调度
+# 由 docker/crontab 文件注入到容器 /etc/cron.d/trawler
+# 频率可用环境变量 TRAWLER_CRON_SCHEDULE 覆盖，但 cron 格式固定，
+# 如需改频率建议直接编辑本文件后重建镜像。
+SHELL=/bin/bash
+PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+TRAWLER_ROOT=/app
+
+# 每 30 分钟跑一次全平台检查（用户指定频率）
+*/30 * * * * root cd ${TRAWLER_ROOT} && /entrypoint.sh run-check >> /var/log/trawler/cron.log 2>&1
+# NOTE: 入口已封装，cron.log 会记录所有运行输出
