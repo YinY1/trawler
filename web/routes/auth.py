@@ -191,7 +191,7 @@ def _build_tokens_from_config(platform_key: str, config: Config) -> PlatformToke
     try:
         mod = importlib.import_module(module_name)
         return mod.build_tokens_from_config(config)
-    except (ImportError, AttributeError):
+    except ImportError, AttributeError:
         return None
 
 

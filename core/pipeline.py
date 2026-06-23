@@ -122,9 +122,7 @@ async def run_check_once(
         from core.engine import PipelineEngine
 
         tasks = [
-            PipelineEngine.run_platform(
-                config, pkey, from_phase=_phase, log_callback=log_callback, store=shared_store
-            )
+            PipelineEngine.run_platform(config, pkey, from_phase=_phase, log_callback=log_callback, store=shared_store)
             for pkey, _pdef in selected
         ]
         # return_exceptions=True 防止单个平台失败中断其他平台
@@ -149,6 +147,4 @@ async def run_check_once(
 
             from core.engine import PipelineEngine
 
-            await PipelineEngine.run_platform(
-                config, pkey, from_phase=_phase, log_callback=log_callback
-            )
+            await PipelineEngine.run_platform(config, pkey, from_phase=_phase, log_callback=log_callback)

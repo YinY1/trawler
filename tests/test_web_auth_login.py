@@ -120,9 +120,7 @@ class TestAccount:
         assert resp.status_code == 302
         assert resp.headers["location"].startswith("/login")
 
-    async def test_account_change_password_success(
-        self, logged_in_client: AsyncClient, auth_toml_tmp: Path
-    ) -> None:
+    async def test_account_change_password_success(self, logged_in_client: AsyncClient, auth_toml_tmp: Path) -> None:
         old_cfg = load_auth_config()
         old_hash = old_cfg.admin_password_hash
         resp = await logged_in_client.post(
@@ -143,9 +141,7 @@ class TestAccount:
         # session_secret 应已轮转
         assert new_cfg.session_secret != old_cfg.session_secret
 
-    async def test_account_change_password_wrong_current(
-        self, logged_in_client: AsyncClient
-    ) -> None:
+    async def test_account_change_password_wrong_current(self, logged_in_client: AsyncClient) -> None:
         resp = await logged_in_client.post(
             "/settings/account",
             data={
@@ -165,9 +161,7 @@ class TestAccount:
         # 1. 用 fresh_app 登录拿 cookie
         transport1 = ASGITransport(app=fresh_app)
         async with AsyncClient(transport=transport1, base_url="http://test") as c1:
-            resp = await c1.post(
-                "/login", data={"password": PASSWORD}, follow_redirects=False
-            )
+            resp = await c1.post("/login", data={"password": PASSWORD}, follow_redirects=False)
             assert resp.status_code == 303
             # 提取 session cookie
             session_cookie = c1.cookies.get("trawler_session")

@@ -17,9 +17,7 @@ HTMX_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 
 
 @pytest.fixture
-async def client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> AsyncClient:
+async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
     """已登录 client（适配 login_guard + CSRF middleware）。
 
     SSE 测试需要直接访问 app.state（subscribers / log_history / check_running），
@@ -132,6 +130,7 @@ class TestCheck:
     async def test_check_run_sends_sse(self, mock_load, mock_run, client: AsyncClient) -> None:
         """Verify starting a check produces events on the SSE stream."""
         mock_load.return_value.general.data_dir = "/tmp"
+
         # Make run_check_once yield control briefly so the SSE connection
         # (opened below) can register its subscriber before _run's finally
         # broadcasts EOF. Without this, the check task may finish before SSE

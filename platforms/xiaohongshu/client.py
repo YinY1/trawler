@@ -390,7 +390,8 @@ class XhsClient:
                 }
                 collected: dict[str, str] = {}
                 await self._request(
-                    "POST", "/api/sec/v1/shield/webprofile",
+                    "POST",
+                    "/api/sec/v1/shield/webprofile",
                     json=shield_data,
                     _set_cookie_collect=collected,
                 )

@@ -66,25 +66,17 @@ async def logged_in_client(auth_tmp: Path) -> AsyncClient:
 
 
 class TestPublicPaths:
-    async def test_unprotected_path_login_get(
-        self, setup_not_logged_in_client: AsyncClient
-    ) -> None:
+    async def test_unprotected_path_login_get(self, setup_not_logged_in_client: AsyncClient) -> None:
         resp = await setup_not_logged_in_client.get("/login", follow_redirects=False)
         assert resp.status_code == 200
 
-    async def test_unprotected_path_setup_get_when_not_setup(
-        self, not_setup_client: AsyncClient
-    ) -> None:
+    async def test_unprotected_path_setup_get_when_not_setup(self, not_setup_client: AsyncClient) -> None:
         resp = await not_setup_client.get("/setup", follow_redirects=False)
         assert resp.status_code == 200
 
-    async def test_unprotected_path_static(
-        self, setup_not_logged_in_client: AsyncClient
-    ) -> None:
+    async def test_unprotected_path_static(self, setup_not_logged_in_client: AsyncClient) -> None:
         # 静态资源不在 login guard 范围；404 也表示"未被 guard 拦"
-        resp = await setup_not_logged_in_client.get(
-            "/static/tokens.css", follow_redirects=False
-        )
+        resp = await setup_not_logged_in_client.get("/static/tokens.css", follow_redirects=False)
         assert resp.status_code != 302
 
 
@@ -99,25 +91,17 @@ class TestLoginGuard:
         assert resp.status_code == 302
         assert resp.headers["location"] == "/login?next=/"
 
-    async def test_protected_path_redirects_to_next_param(
-        self, setup_not_logged_in_client: AsyncClient
-    ) -> None:
-        resp = await setup_not_logged_in_client.get(
-            "/subscriptions", follow_redirects=False
-        )
+    async def test_protected_path_redirects_to_next_param(self, setup_not_logged_in_client: AsyncClient) -> None:
+        resp = await setup_not_logged_in_client.get("/subscriptions", follow_redirects=False)
         assert resp.status_code == 302
         assert resp.headers["location"] == "/login?next=/subscriptions"
 
-    async def test_protected_path_auth_redirects(
-        self, setup_not_logged_in_client: AsyncClient
-    ) -> None:
+    async def test_protected_path_auth_redirects(self, setup_not_logged_in_client: AsyncClient) -> None:
         resp = await setup_not_logged_in_client.get("/auth", follow_redirects=False)
         assert resp.status_code == 302
         assert "/login" in resp.headers["location"]
 
-    async def test_protected_path_after_login_accessible(
-        self, logged_in_client: AsyncClient
-    ) -> None:
+    async def test_protected_path_after_login_accessible(self, logged_in_client: AsyncClient) -> None:
         resp = await logged_in_client.get("/", follow_redirects=False)
         # 登录后应不再被 login_guard 拦（dashboard 返回 200）
         assert resp.status_code == 200
@@ -127,16 +111,12 @@ class TestLoginGuard:
 
 
 class TestSetupGuard:
-    async def test_force_setup_redirect_when_not_initialized(
-        self, not_setup_client: AsyncClient
-    ) -> None:
+    async def test_force_setup_redirect_when_not_initialized(self, not_setup_client: AsyncClient) -> None:
         resp = await not_setup_client.get("/", follow_redirects=False)
         assert resp.status_code == 302
         assert resp.headers["location"] == "/setup"
 
-    async def test_force_setup_redirect_for_protected_paths(
-        self, not_setup_client: AsyncClient
-    ) -> None:
+    async def test_force_setup_redirect_for_protected_paths(self, not_setup_client: AsyncClient) -> None:
         for path in ("/auth", "/settings", "/subscriptions", "/logs", "/endpoints"):
             resp = await not_setup_client.get(path, follow_redirects=False)
             assert resp.status_code == 302, f"{path} should redirect"

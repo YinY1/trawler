@@ -13,9 +13,7 @@ from shared.protocols import NotificationContent
 
 
 def _content() -> NotificationContent:
-    return NotificationContent(
-        platform="bili", source_id="BV1xx", title="t", author="A", summary="s"
-    )
+    return NotificationContent(platform="bili", source_id="BV1xx", title="t", author="A", summary="s")
 
 
 @pytest.mark.asyncio
@@ -71,8 +69,10 @@ async def test_send_returns_error_on_failure():
     n = GotifyNotifier(ep)
 
     # GOTIFY_MAX_RETRIES 通常为 3，patch sleep 加速
-    with patch("core.notifiers.gotify.aiohttp.ClientSession") as ms, \
-         patch("core.notifiers.gotify.asyncio.sleep", new=AsyncMock()):
+    with (
+        patch("core.notifiers.gotify.aiohttp.ClientSession") as ms,
+        patch("core.notifiers.gotify.asyncio.sleep", new=AsyncMock()),
+    ):
         ms.side_effect = aiohttp.ClientConnectionError("conn refused")
         r = await n.send(_content())
     assert r.success is False

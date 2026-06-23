@@ -133,7 +133,8 @@ async def subscription_endpoint_add(
             break
     if not found:
         return HTMLResponse(
-            content="", status_code=404,
+            content="",
+            status_code=404,
             headers={"HX-Trigger": '{"toast":{"msg":"订阅不存在","type":"error"}}'},
         )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
@@ -176,7 +177,8 @@ async def subscription_endpoint_remove(
             break
     if not found:
         return HTMLResponse(
-            content="", status_code=404,
+            content="",
+            status_code=404,
             headers={"HX-Trigger": '{"toast":{"msg":"订阅不存在","type":"error"}}'},
         )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")

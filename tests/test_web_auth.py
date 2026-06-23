@@ -42,9 +42,7 @@ class TestAuth:
     @patch("web.routes.auth.get_authenticator")
     async def test_auth_qr_returns_png(self, mock_get_auth, client: AsyncClient) -> None:
         mock_auth = MagicMock()
-        mock_auth.generate_qr_code = AsyncMock(
-            return_value=MagicMock(qr_url="https://example.com/qr", qr_key="key1")
-        )
+        mock_auth.generate_qr_code = AsyncMock(return_value=MagicMock(qr_url="https://example.com/qr", qr_key="key1"))
         mock_auth.close = AsyncMock()
         mock_get_auth.return_value = mock_auth
         resp = await client.get("/auth/qr/bili")
@@ -57,9 +55,7 @@ class TestAuth:
 
         mock_auth = MagicMock()
         # generate_qr_code is called by the /auth/qr setup step (must be awaitable)
-        mock_auth.generate_qr_code = AsyncMock(
-            return_value=MagicMock(qr_url="https://example.com/qr", qr_key="key1")
-        )
+        mock_auth.generate_qr_code = AsyncMock(return_value=MagicMock(qr_url="https://example.com/qr", qr_key="key1"))
         mock_auth.poll_qr_status = AsyncMock(
             return_value=AuthStatus(success=False, status=QRStatus.WAITING, message="waiting")
         )

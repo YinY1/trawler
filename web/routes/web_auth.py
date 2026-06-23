@@ -59,9 +59,7 @@ async def setup_submit(
     if password != password_confirm:
         errors.append("两次输入的密码不一致")
     if errors:
-        return TEMPLATES.TemplateResponse(
-            request, "setup.html", {"errors": errors}, status_code=400
-        )
+        return TEMPLATES.TemplateResponse(request, "setup.html", {"errors": errors}, status_code=400)
     set_password(password)
     logger.info("🔑 Web 管理员密码已初始化")
     return RedirectResponse("/login", status_code=303)
@@ -86,9 +84,7 @@ async def login_submit(
     """登录提交。密码错 401 + 错误；成功写 session 后 303 → next（默认 /）。"""
     cfg = load_auth_config()
     if not cfg.admin_password_hash or not verify_password(password, cfg.admin_password_hash):
-        return TEMPLATES.TemplateResponse(
-            request, "login.html", {"error": "密码错误"}, status_code=401
-        )
+        return TEMPLATES.TemplateResponse(request, "login.html", {"error": "密码错误"}, status_code=401)
     request.session["logged_in"] = True
     request.session["username"] = WEB_ADMIN_USERNAME
     logger.info("🔑 Web 管理员登录成功")
@@ -112,9 +108,7 @@ async def logout(request: Request) -> RedirectResponse:
 @router.get("/settings/account", response_class=HTMLResponse)
 async def account_page(request: Request) -> HTMLResponse:
     """改密码页。"""
-    return TEMPLATES.TemplateResponse(
-        request, "account.html", {"active_nav": "account"}
-    )
+    return TEMPLATES.TemplateResponse(request, "account.html", {"active_nav": "account"})
 
 
 @router.post("/settings/account", response_model=None)
