@@ -130,14 +130,24 @@ async def bili_download(ctx: PhaseContext) -> bool:
 
 @PipelineEngine.register("*", Phase.TRANSCRIBED)
 async def transcribe_phase(ctx: PhaseContext) -> bool:
-    """视频转写（跨平台共用 handler）。"""
+    """视频转写（跨平台共用 handler）。
+
+    Bug 3 fix:
+    - ``filepath`` 缺失时不再静默 return True，而是 ``ctx.error='downloaded_filepath missing'``
+      并 return False，让消息停留在当前阶段并暴露在 dashboard 上，避免
+      空 transcript 推送低质量通知。``process_message`` 的 rewind 网关通常
+      会先一步重新下载，这里只是兜底。
+    - ``transcribe_file_async`` 真异常时记 WARNING 并降级用 ``content_text``
+      继续流程（return True），保持既有的优雅降级语义。
+    """
     if ctx.msg.content_type != ContentType.VIDEO:
         return True
 
     filepath = ctx.downloaded_filepath
     if filepath is None or not filepath.exists():
-        logger.warning("⚠️  无可用媒体文件，跳过转写")
-        return True
+        ctx.error = "downloaded_filepath missing"
+        logger.warning("⚠️  %s — 转写阶段无可用媒体文件", ctx.error)
+        return False
 
     source_id = ctx.msg.msg_id
     logger.info("📝 转写 %s...", source_id)
@@ -154,12 +164,13 @@ async def transcribe_phase(ctx: PhaseContext) -> bool:
             ctx.transcript_text = transcript.text
             logger.info("✓ 转写完成")
         else:
-            logger.warning("⚠️  转写未成功: %s", transcript.error)
+            logger.warning("⚠️  转写未成功: %s — 降级用 content_text 继续流程", transcript.error)
     except ImportError:
-        logger.info("⏭  转写依赖未安装，跳过")
+        logger.info("⏭  转写依赖未安装，跳过（降级用 content_text）")
     except Exception as exc:
-        logger.error("✗ 转写失败: %s", exc)
-        logger.exception("Transcribe failed for %s", source_id)
+        # 真异常：记 warning，不阻塞流程（return True），下游用 content_text
+        logger.warning("⚠️  转写失败: %s — 降级用 content_text 继续流程", exc)
+        logger.warning("Transcribe failed for %s: %s", source_id, exc)
 
     return True
 

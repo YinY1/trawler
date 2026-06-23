@@ -19,7 +19,7 @@ from typing import Any
 
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import PHASE_FLOW, Phase, PhaseContext
+from shared.protocols import PHASE_FLOW, ContentType, MessageRecord, Phase, PhaseContext
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +98,27 @@ class PipelineEngine:
         每推进一个阶段立即 ``save()``，避免中途崩溃丢失进度。
         如果某阶段未注册 handler，记录错误并停止（不推进 phase）。
         """
-        from shared.protocols import MessageRecord
-
         assert isinstance(msg, MessageRecord), f"expected MessageRecord, got {type(msg)}"
         ctx = PhaseContext(msg=msg, config=config)
         phases = PHASE_FLOW[msg.content_type]
+
+        # Bug 3 fix: cross-process state recovery. MessageStore only persists
+        # MessageRecord fields, so a VIDEO message that crashed after marking
+        # DOWNLOADED but before the next save() loses ctx.downloaded_filepath
+        # in the next cron process. If a VIDEO message resumes at DOWNLOADED or
+        # later without a filepath, rewind to DISCOVERED so the download phase
+        # re-runs and produces the filepath again.
+        if msg.content_type == ContentType.VIDEO and msg.phase != Phase.DISCOVERED and ctx.downloaded_filepath is None:
+            logger.warning(
+                "▶ %s:%s 处于 %s 阶段但 downloaded_filepath 缺失（跨进程状态丢失），回退到 DISCOVERED 重新下载",
+                msg.platform,
+                msg.msg_id,
+                msg.phase.name,
+            )
+            msg.phase = Phase.DISCOVERED
+            ctx.msg.phase = Phase.DISCOVERED
+            store.mark_phase(msg.msg_id, Phase.DISCOVERED)
+            store.save()
 
         start_idx = phases.index(msg.phase)
         logger.info("▶ 处理消息 %s:%s (%s)", msg.platform, msg.msg_id, msg.title)
