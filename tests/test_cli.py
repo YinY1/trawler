@@ -353,3 +353,43 @@ def test_subscription_help(runner: CliRunner) -> None:
     assert "add" in result.output
     assert "remove" in result.output
     assert "list" in result.output
+
+
+def test_check_failure_sends_health_alert(tmp_path, monkeypatch, runner: CliRunner):
+    """Bug 4 fix: when check raises, a health alert is sent to all
+    configured endpoints before sys.exit(1)."""
+    from unittest.mock import AsyncMock, patch
+
+    from shared.config import Config, EndpointConfig
+    from shared.protocols import SendResult
+
+    sent_contents = []
+
+    async def fake_send(config, platform, endpoint_names, content):
+        sent_contents.append(content)
+        return [SendResult(endpoint_name=n, success=True) for n in endpoint_names]
+
+    with (
+        patch("run_check.run_check_once", new_callable=AsyncMock) as mock_run,
+        patch("run_check.send_to_subscription", side_effect=fake_send) as mock_send,
+        patch("run_check.load_config") as mock_load,
+    ):
+        cfg = Config()
+        cfg.endpoints = [
+            EndpointConfig(name="ops", url="https://g", token="t", enabled=True),
+        ]
+        mock_load.return_value = cfg
+        mock_run.side_effect = RuntimeError("simulated check failure")
+
+        result = runner.invoke(
+            cli,
+            ["check", "--platform", "all", "--config", str(tmp_path / "unused.toml")],
+        )
+
+    assert result.exit_code == 1
+    mock_send.assert_called_once()
+    assert len(sent_contents) == 1
+    alert = sent_contents[0]
+    assert alert.platform == "system"
+    assert alert.type == "health_alert"
+    assert "simulated check failure" in alert.summary

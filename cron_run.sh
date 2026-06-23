@@ -7,6 +7,6 @@ cd "$(dirname "$0")"
 
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') Trawler check start ==="
 
-uv run python run_check.py --platform all
+uv run python run_check.py check --platform all
 
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') Trawler check end ==="
