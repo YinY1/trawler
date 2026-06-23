@@ -3,6 +3,9 @@
 #
 # 平台凭证（Cookie）请编辑 cookies.toml（参考 cookies.toml.example）
 # 订阅列表请编辑 subscriptions.toml（参考 subscriptions.toml.example）
+#
+# Web 访问鉴权配置位于 data/auth.toml（首次启动 Web 时自动创建），
+# 修改密码请访问 Web UI 的 账户 页面。
 # ═══════════════════════════════════════════════════════════════════
 
 # ── 通用设置 ─────────────────────────────────────────────────────

@@ -1,17 +1,33 @@
+"""Tests for platform credential routes (/auth, /auth/qr, /auth/poll).
+
+Web 站点访问鉴权引入后，这些路由受 login_guard 保护，测试需先登录。
+"""
+
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from web.app import app
+from web.app import create_app
+from web.auth import set_password
+
+PASSWORD = "test12345"
 
 
 @pytest.fixture
-def client() -> AsyncClient:
+async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
+    """已 setup + 已登录的 client（适配 login_guard）。"""
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", tmp_path / "auth.toml")
+    set_password(PASSWORD)
+    app = create_app()
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/login", data={"password": PASSWORD}, follow_redirects=False)
+        assert resp.status_code == 303
+        yield c
 
 
 class TestAuth:

@@ -69,7 +69,7 @@ async def auth_page(request: Request) -> HTMLResponse:
         platforms.append({**p, "token_status": status, "expires": expires, "has_auth": has_auth})
     return TEMPLATES.TemplateResponse(
         request,
-        "login.html",
+        "platform_auth.html",
         {"active_nav": "auth", "platforms": platforms},
     )
 

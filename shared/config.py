@@ -181,6 +181,22 @@ class WeiboConfig:
     subscriptions: list[UserSubscription] = field(default_factory=list)
 
 
+# ── Web 站点访问鉴权 ──────────────────────────────────────────
+
+
+@dataclass
+class WebAuthConfig:
+    """Web UI 访问鉴权配置。
+
+    存储在 ``data/auth.toml``（独立于主 ``config/config.toml``）。
+    username 固定为 ``admin``，本 dataclass 不含 username 字段。
+    """
+
+    admin_password_hash: str = ""
+    session_secret: str = ""
+    session_max_age_seconds: int = 60 * 60 * 24 * 7  # 7 天
+
+
 # ── 顶层配置 ──────────────────────────────────────────────────
 
 

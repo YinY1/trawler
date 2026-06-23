@@ -2,19 +2,39 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from web.app import app
+from web.app import create_app
+from web.auth import set_password
+
+PASSWORD = "test12345"
+HTMX_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 
 
 @pytest.fixture
-def client() -> AsyncClient:
+async def client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncClient:
+    """已登录 client（适配 login_guard + CSRF middleware）。
+
+    SSE 测试需要直接访问 app.state（subscribers / log_history / check_running），
+    所以 fixture 额外把 app 实例挂到 client._app 供测试读取。
+    """
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", tmp_path / "auth.toml")
+    set_password(PASSWORD)
+    app = create_app()
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.post("/login", data={"password": PASSWORD}, follow_redirects=False)
+        assert resp.status_code == 303
+        # SSE 测试需要访问 app.state.subscribers 等，挂到 client 上
+        c._app = app  # type: ignore[attr-defined]
+        yield c
 
 
 class TestCheck:
@@ -26,7 +46,7 @@ class TestCheck:
     @patch("web.routes.check.load_config", new_callable=AsyncMock)
     async def test_check_run(self, mock_load, mock_run, client: AsyncClient) -> None:
         mock_load.return_value.general.data_dir = "/tmp"
-        resp = await client.post("/check/run")
+        resp = await client.post("/check/run", headers=HTMX_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] in ("started",)
@@ -37,6 +57,8 @@ class TestCheck:
         # until a producer puts something. Drive a producer that broadcasts
         # EOF as soon as the per-connection sub_queue is registered so the
         # response completes and headers become readable.
+        app = client._app  # type: ignore[attr-defined]
+
         async def producer() -> None:
             await asyncio.sleep(0)
             for _ in range(50):
@@ -56,6 +78,7 @@ class TestCheck:
 
     async def test_check_stream_content(self, client: AsyncClient) -> None:
         """Verify SSE stream produces log events and done sentinel."""
+        app = client._app  # type: ignore[attr-defined]
         # Isolate from other tests: clear log_history so the SSE handler's
         # connect-time replay does not surface events produced elsewhere
         # (e.g. another test's mock pipeline, the global LogBus). Without
@@ -109,9 +132,17 @@ class TestCheck:
     async def test_check_run_sends_sse(self, mock_load, mock_run, client: AsyncClient) -> None:
         """Verify starting a check produces events on the SSE stream."""
         mock_load.return_value.general.data_dir = "/tmp"
+        # Make run_check_once yield control briefly so the SSE connection
+        # (opened below) can register its subscriber before _run's finally
+        # broadcasts EOF. Without this, the check task may finish before SSE
+        # connects, dropping the EOF sentinel and hanging the stream.
+        async def _slow_run(*args: Any, **kwargs: Any) -> None:
+            await asyncio.sleep(0.1)
+
+        mock_run.side_effect = _slow_run
 
         # Start a check run
-        resp = await client.post("/check/run")
+        resp = await client.post("/check/run", headers=HTMX_HEADERS)
         assert resp.status_code == 200
 
         # Read SSE stream
@@ -129,9 +160,10 @@ class TestCheck:
 
     async def test_check_run_twice_returns_already_running(self, client: AsyncClient) -> None:
         """Second POST /check/run while running returns already_running."""
+        app = client._app  # type: ignore[attr-defined]
         # Mark as running
         app.state.check_running = True
-        resp = await client.post("/check/run")
+        resp = await client.post("/check/run", headers=HTMX_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "already_running"
