@@ -67,7 +67,7 @@ async def endpoint_add(
         return HTMLResponse(
             content="",
             status_code=400,
-            headers={"HX-Trigger": '{"toast":{"msg":"端点名称已存在","type":"error"}}'},
+            headers={"HX-Trigger": '{"toast":{"key":"endpoint.name_exists","type":"error"}}'},
         )
     endpoints.append(EndpointConfig(name=name, url=url, token=token, priority=priority, kind=kind))
     _save_endpoints(endpoints)
@@ -97,7 +97,7 @@ async def endpoint_edit(
         return HTMLResponse(
             content="",
             status_code=404,
-            headers={"HX-Trigger": '{"toast":{"msg":"端点不存在","type":"error"}}'},
+            headers={"HX-Trigger": '{"toast":{"key":"endpoint.not_found","type":"error"}}'},
         )
     _save_endpoints(endpoints)
     return HTMLResponse(
