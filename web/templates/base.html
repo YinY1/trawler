@@ -172,6 +172,25 @@
       }
     });
 
+    // ── URL flash → toast on page load ─────────────────────────
+    // Supports two query-string contracts:
+    //   ?msg=<text>&type=<success|error>          → show text as-is
+    //   ?toast_key=<key>&type=<success|error>     → look up TOAST_KEY_MAP
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var type = params.get('type');
+      var msg = params.get('msg');
+      if (!msg) {
+        var key = params.get('toast_key');
+        if (key) msg = TOAST_KEY_MAP[key] || '';
+      }
+      if (msg) {
+        showToast(msg, type || 'info');
+        // Clean URL so refresh/toast doesn't replay
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    })();
+
     // ── Mobile sidebar toggle ───────────────────────────────────
     function toggleSidebar() {
       var sb = document.getElementById('sidebar');

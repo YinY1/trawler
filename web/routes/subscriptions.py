@@ -103,11 +103,16 @@ async def subscription_endpoint_add(
     platform: str,
     identifier: str,
     endpoint_name: str = Form(...),
-) -> HTMLResponse:
+) -> RedirectResponse:
     """Add an endpoint reference to a subscription."""
     p = Path("config/subscriptions.toml")
     if not p.exists():
-        return HTMLResponse(content="", status_code=404)
+        # file-missing and identifier-not-found both surface as the same
+        # "subscription not found" error toast to the user.
+        return RedirectResponse(
+            url="/subscriptions?toast_key=subscription.not_found&type=error",
+            status_code=303,
+        )
     plat_name = _platform_key_to_name(platform)
     doc = tomlkit.parse(p.read_text(encoding="utf-8"))
     doc_dict = cast(dict[str, Any], doc)
@@ -132,15 +137,14 @@ async def subscription_endpoint_add(
             found = True
             break
     if not found:
-        return HTMLResponse(
-            content="",
-            status_code=404,
-            headers={"HX-Trigger": '{"toast":{"key":"subscription.not_found","type":"error"}}'},
+        return RedirectResponse(
+            url="/subscriptions?toast_key=subscription.not_found&type=error",
+            status_code=303,
         )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
-    return HTMLResponse(
-        content="",
-        headers={"HX-Trigger": '{"toast":{"key":"subscription.endpoint_added","type":"success"}}'},
+    return RedirectResponse(
+        url="/subscriptions?toast_key=subscription.endpoint_added&type=success",
+        status_code=303,
     )
 
 
@@ -149,11 +153,14 @@ async def subscription_endpoint_remove(
     platform: str,
     identifier: str,
     endpoint_name: str = Form(...),
-) -> HTMLResponse:
+) -> RedirectResponse:
     """Remove an endpoint reference from a subscription."""
     p = Path("config/subscriptions.toml")
     if not p.exists():
-        return HTMLResponse(content="", status_code=404)
+        return RedirectResponse(
+            url="/subscriptions?toast_key=subscription.not_found&type=error",
+            status_code=303,
+        )
     plat_name = _platform_key_to_name(platform)
     doc = tomlkit.parse(p.read_text(encoding="utf-8"))
     doc_dict = cast(dict[str, Any], doc)
@@ -176,13 +183,12 @@ async def subscription_endpoint_remove(
             found = True
             break
     if not found:
-        return HTMLResponse(
-            content="",
-            status_code=404,
-            headers={"HX-Trigger": '{"toast":{"key":"subscription.not_found","type":"error"}}'},
+        return RedirectResponse(
+            url="/subscriptions?toast_key=subscription.not_found&type=error",
+            status_code=303,
         )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
-    return HTMLResponse(
-        content="",
-        headers={"HX-Trigger": '{"toast":{"key":"subscription.endpoint_removed","type":"success"}}'},
+    return RedirectResponse(
+        url="/subscriptions?toast_key=subscription.endpoint_removed&type=success",
+        status_code=303,
     )

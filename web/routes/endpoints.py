@@ -6,7 +6,7 @@ from pathlib import Path
 
 import tomlkit
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from tomlkit.items import AoT, Table
 
 from shared.config import EndpointConfig, load_config
@@ -61,19 +61,18 @@ async def endpoint_add(
     token: str = Form(...),
     priority: int = Form(5),
     kind: str = Form("gotify"),
-) -> HTMLResponse:
+) -> RedirectResponse:
     endpoints = await _load_endpoints()
     if any(ep.name == name for ep in endpoints):
-        return HTMLResponse(
-            content="",
-            status_code=400,
-            headers={"HX-Trigger": '{"toast":{"key":"endpoint.name_exists","type":"error"}}'},
+        return RedirectResponse(
+            url="/endpoints?toast_key=endpoint.name_exists&type=error",
+            status_code=303,
         )
     endpoints.append(EndpointConfig(name=name, url=url, token=token, priority=priority, kind=kind))
     _save_endpoints(endpoints)
-    return HTMLResponse(
-        content="",
-        headers={"HX-Trigger": '{"toast":{"key":"endpoint.saved","type":"success"}}'},
+    return RedirectResponse(
+        url="/endpoints?toast_key=endpoint.saved&type=success",
+        status_code=303,
     )
 
 
@@ -84,7 +83,7 @@ async def endpoint_edit(
     token: str = Form(...),
     priority: int = Form(5),
     enabled: bool = Form(False),
-) -> HTMLResponse:
+) -> RedirectResponse:
     endpoints = await _load_endpoints()
     for ep in endpoints:
         if ep.name == name:
@@ -94,24 +93,23 @@ async def endpoint_edit(
             ep.enabled = enabled
             break
     else:
-        return HTMLResponse(
-            content="",
-            status_code=404,
-            headers={"HX-Trigger": '{"toast":{"key":"endpoint.not_found","type":"error"}}'},
+        return RedirectResponse(
+            url="/endpoints?toast_key=endpoint.not_found&type=error",
+            status_code=303,
         )
     _save_endpoints(endpoints)
-    return HTMLResponse(
-        content="",
-        headers={"HX-Trigger": '{"toast":{"key":"endpoint.saved","type":"success"}}'},
+    return RedirectResponse(
+        url="/endpoints?toast_key=endpoint.saved&type=success",
+        status_code=303,
     )
 
 
 @router.post("/endpoints/{name}/delete")
-async def endpoint_delete(name: str) -> HTMLResponse:
+async def endpoint_delete(name: str) -> RedirectResponse:
     endpoints = await _load_endpoints()
     endpoints = [ep for ep in endpoints if ep.name != name]
     _save_endpoints(endpoints)
-    return HTMLResponse(
-        content="",
-        headers={"HX-Trigger": '{"toast":{"key":"endpoint.deleted","type":"success"}}'},
+    return RedirectResponse(
+        url="/endpoints?toast_key=endpoint.deleted&type=success",
+        status_code=303,
     )
