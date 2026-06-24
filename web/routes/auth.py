@@ -59,6 +59,48 @@ def _get_auth_status(config: Config, platform_key: str) -> tuple[str, str, bool]
         return f"有效 (剩余 {remaining} 天)", time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)), has_auth
 
 
+# Nickname 缓存：避免每次访问 /auth 都 probe 3 个平台 API
+# key: platform_key, value: (nickname: str | None, fetched_at: float)
+# TTL 10 分钟——nickname 几乎不变，长 TTL 可接受。None 也缓存，避免已知失败反复重试。
+_NICKNAME_TTL_SECONDS = 600
+_nickname_cache: dict[str, tuple[str | None, float]] = {}
+
+
+async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
+    """获取带 TTL 缓存的账号昵称；失败/未登录返回 None。
+
+    不会抛异常——调用方用 None 表示"显示 —"，不影响 status 渲染。
+    """
+    cached = _nickname_cache.get(platform_key)
+    if cached is not None and (time.time() - cached[1]) < _NICKNAME_TTL_SECONDS:
+        return cached[0]
+
+    # 从 config 构造 tokens；未配置 → 缓存 None 后返回
+    tokens = _build_tokens_from_config(platform_key, config)
+    if tokens is None:
+        _nickname_cache[platform_key] = (None, time.time())
+        return None
+
+    # 通过 authenticator probe；异常降级 None
+    auth = get_authenticator(platform_key)
+    try:
+        try:
+            nick = await auth.get_user_nickname(tokens)
+        except Exception as exc:
+            logger.warning("🔑 %s nickname 获取异常: %s", platform_key, exc)
+            nick = None
+        _nickname_cache[platform_key] = (nick, time.time())
+        return nick
+    finally:
+        # bili/weibo authenticators 无状态——每次 close 安全。
+        # xhs 持有内部 _client；get_user_nickname 内部已通过 _ensure_client 重建，
+        # close 这里会强制下次重连，10min TTL 下可接受。
+        try:
+            await auth.close()
+        except Exception as exc:
+            logger.warning("🔑 %s 关闭 authenticator 失败: %s", platform_key, exc)
+
+
 @router.get("/auth", response_class=HTMLResponse)
 async def auth_page(request: Request) -> HTMLResponse:
     """Login management page."""
@@ -66,7 +108,16 @@ async def auth_page(request: Request) -> HTMLResponse:
     platforms: list[dict[str, Any]] = []
     for p in PLATFORM_INFO:
         status, expires, has_auth = _get_auth_status(config, p["key"])
-        platforms.append({**p, "token_status": status, "expires": expires, "has_auth": has_auth})
+        nickname = await _fetch_nickname(config, p["key"]) if has_auth else None
+        platforms.append(
+            {
+                **p,
+                "token_status": status,
+                "expires": expires,
+                "has_auth": has_auth,
+                "nickname": nickname,
+            }
+        )
     return TEMPLATES.TemplateResponse(
         request,
         "platform_auth.html",
@@ -82,7 +133,14 @@ async def auth_card(request: Request, platform_key: str) -> HTMLResponse:
         return HTMLResponse("not found", status_code=404)
     config = await load_config()
     status, expires, has_auth = _get_auth_status(config, platform_key)
-    p: dict[str, Any] = {**info, "token_status": status, "expires": expires, "has_auth": has_auth}
+    nickname = await _fetch_nickname(config, platform_key) if has_auth else None
+    p: dict[str, Any] = {
+        **info,
+        "token_status": status,
+        "expires": expires,
+        "has_auth": has_auth,
+        "nickname": nickname,
+    }
     return TEMPLATES.TemplateResponse(
         request,
         "_auth_card.html",
@@ -100,6 +158,7 @@ async def auth_logout(platform_key: str) -> dict[str, Any]:
     logger.warning("⚠️ 清除 %s 平台的登录凭证", platform_key)
     # Drop any in-flight QR session + cached authenticator for this platform
     _qr_sessions.pop(platform_key, None)
+    _nickname_cache.pop(platform_key, None)
     auth = _auth_instances.pop(platform_key, None)
     if auth is not None:
         try:
@@ -191,7 +250,7 @@ def _build_tokens_from_config(platform_key: str, config: Config) -> PlatformToke
     try:
         mod = importlib.import_module(module_name)
         return mod.build_tokens_from_config(config)
-    except ImportError, AttributeError:
+    except (ImportError, AttributeError):
         return None
 
 

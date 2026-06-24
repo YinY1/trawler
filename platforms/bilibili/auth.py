@@ -216,6 +216,36 @@ class BilibiliAuthenticator(BaseAuthenticator):
             logger.warning("B站 token 有效性检查失败: %s", e)
             return False
 
+    async def get_user_nickname(self, tokens: PlatformTokens) -> str | None:
+        """通过 User.get_user_info() 拉取当前登录账号昵称。
+
+        依赖 cookie 里的 dedeuserid (uid)。任一环节失败都返回 None，
+        不向上抛异常——保证 web UI 的 auth 页面不会因 nickname 拉取失败而 500。
+        """
+        import bilibili_api
+
+        uid_str = tokens.cookies.get("dedeuserid", "")
+        if not uid_str:
+            return None
+        try:
+            uid = int(uid_str)
+        except ValueError:
+            return None
+        cred = bilibili_api.Credential(
+            sessdata=tokens.cookies.get("sessdata", ""),
+            bili_jct=tokens.cookies.get("bili_jct", ""),
+            buvid3=tokens.cookies.get("buvid3", ""),
+            dedeuserid=uid_str,
+        )
+        try:
+            info = await bilibili_api.user.User(uid=uid, credential=cred).get_user_info()
+            # 按 SocialSisterYi/bilibili-API-collect，name 字段为用户昵称
+            name = info.get("name") if isinstance(info, dict) else None
+            return name or None
+        except Exception as e:
+            logger.warning("B站 nickname 获取失败: %s", e)
+            return None
+
     def supports_refresh(self) -> bool:
         return True
 

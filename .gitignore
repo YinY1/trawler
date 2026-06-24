@@ -9,6 +9,9 @@ build/
 __pycache__/
 *.egg-info/
 
+# Tailwind CSS 构建产物（由 scripts/build-css.sh 或 Dockerfile css-builder 生成）
+web/static/css/main.css
+
 # Virtual environment
 .venv/
 

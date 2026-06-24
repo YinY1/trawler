@@ -229,6 +229,21 @@ class XhsAuthenticator(BaseAuthenticator):
         except Exception:
             return False
 
+    async def get_user_nickname(self, tokens: PlatformTokens) -> str | None:
+        """通过 XhsClient.get_user_info() 拉取当前登录账号昵称。
+
+        复用内部 _client（按 token cookies 懒创建）。任一环节失败返回 None，
+        不向上抛异常——保证 web auth 页面不会因 nickname 拉取失败而 500。
+        """
+        try:
+            client = await self._ensure_client(build_cookie_str(tokens.cookies))
+            info = await client.get_user_info()
+            nick = info.get("nickname") if isinstance(info, dict) else None
+            return nick or None
+        except Exception as e:
+            logger.warning("XHS nickname 获取失败: %s", e)
+            return None
+
     def supports_refresh(self) -> bool:
         return True
 
