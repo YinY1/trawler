@@ -280,6 +280,23 @@ class TestSpecificMethods:
 
         assert result["qr_id"] == "q1"
 
+    async def test_create_qrcode_payload_is_qr_type_int(self, client, mock_session):
+        """Regression: qr_type must be integer 1, not string "qr_login".
+
+        Server (Go) does strconv.ParseInt on qrType; sending "qr_login" returns
+        HTTP 400 ``parse: put "qr_login" to field qrType``. See
+        docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:811 for the
+        captured real value.
+        """
+        resp = _mock_json_response(200, {"success": True, "data": {"qr_id": "q1", "qr_url": "u", "code": "c"}})
+        mock_session.request.return_value = resp
+
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
+            await client.create_qrcode({"a1": "init"})
+
+        _call = mock_session.request.call_args
+        assert _call.kwargs["json"] == {"qr_type": 1}
+
     async def test_check_qrcode_status(self, client, mock_session):
         resp = _mock_json_response(200, {"success": True, "data": {"status": 3}})
         mock_session.request.return_value = resp
