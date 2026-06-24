@@ -135,12 +135,12 @@ async def subscription_endpoint_add(
         return HTMLResponse(
             content="",
             status_code=404,
-            headers={"HX-Trigger": '{"toast":{"msg":"订阅不存在","type":"error"}}'},
+            headers={"HX-Trigger": '{"toast":{"key":"subscription.not_found","type":"error"}}'},
         )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return HTMLResponse(
         content="",
-        headers={"HX-Trigger": '{"toast":{"msg":"端点已添加","type":"success"}}'},
+        headers={"HX-Trigger": '{"toast":{"key":"subscription.endpoint_added","type":"success"}}'},
     )
 
 
@@ -179,10 +179,10 @@ async def subscription_endpoint_remove(
         return HTMLResponse(
             content="",
             status_code=404,
-            headers={"HX-Trigger": '{"toast":{"msg":"订阅不存在","type":"error"}}'},
+            headers={"HX-Trigger": '{"toast":{"key":"subscription.not_found","type":"error"}}'},
         )
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return HTMLResponse(
         content="",
-        headers={"HX-Trigger": '{"toast":{"msg":"端点已移除","type":"success"}}'},
+        headers={"HX-Trigger": '{"toast":{"key":"subscription.endpoint_removed","type":"success"}}'},
     )

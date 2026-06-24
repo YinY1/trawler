@@ -152,7 +152,12 @@
     var TOAST_KEY_MAP = {
       'settings.saved': '设置已保存',
       'endpoint.saved': '端点已保存',
-      'endpoint.deleted': '端点已删除'
+      'endpoint.deleted': '端点已删除',
+      'endpoint.name_exists': '端点名称已存在',
+      'endpoint.not_found': '端点不存在',
+      'subscription.not_found': '订阅不存在',
+      'subscription.endpoint_added': '端点已添加',
+      'subscription.endpoint_removed': '端点已移除'
     };
     document.addEventListener('htmx:afterOnLoad', function(e) {
       var trigger = e.detail.xhr.getResponseHeader('HX-Trigger');
