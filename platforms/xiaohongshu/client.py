@@ -331,11 +331,7 @@ class XhsClient:
         self._cookie_dict = dict(init_cookies)
         self._a1 = init_cookies.get("a1", "")
         try:
-            payload = {
-                "qr_type": "qr_login",
-                "qr_style": "default",
-                "scene": "login",
-            }
+            payload = {"qr_type": 1}
             return await self._request("POST", "/api/sns/web/v1/login/qrcode/create", json=payload)
         finally:
             self._cookie_str, self._cookie_dict = old_str, old_dict
