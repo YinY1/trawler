@@ -206,6 +206,7 @@ class TestRefreshTokens:
         )
 
         mock_client = MagicMock()
+        mock_client.close = AsyncMock()
         mock_client.refresh_cookies = AsyncMock(return_value={"a1": "new_a1", "web_session": "new_ws"})
         auth._client = mock_client
 
@@ -232,6 +233,7 @@ class TestRefreshTokens:
 
         mock_client = MagicMock()
         mock_client.refresh_cookies = AsyncMock(return_value=None)
+        mock_client.close = AsyncMock()
         auth._client = mock_client
 
         with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
@@ -269,6 +271,7 @@ class TestValidateTokens:
 
         mock_client = MagicMock()
         mock_client.probe = AsyncMock(return_value=True)
+        mock_client.close = AsyncMock()
         auth._client = mock_client
 
         with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
@@ -286,6 +289,7 @@ class TestValidateTokens:
 
         mock_client = MagicMock()
         mock_client.probe = AsyncMock(return_value=False)
+        mock_client.close = AsyncMock()
         auth._client = mock_client
 
         with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
@@ -304,10 +308,86 @@ class TestValidateTokens:
 
         mock_client = MagicMock()
         mock_client.probe = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_client.close = AsyncMock()
         auth._client = mock_client
 
         with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
             assert await auth.validate_tokens(tokens) is False
+
+
+# ── ──
+
+
+class TestEnsureClientClosesOldClient:
+    """Regression: _ensure_client(cookie) must close the previous client's
+    aiohttp session to avoid 'Unclosed client session' warnings.
+
+    Root cause: refresh_tokens and validate_tokens call _ensure_client with a
+    non-empty cookie, which replaced self._client without closing the old one.
+    """
+
+    @pytest.mark.asyncio
+    async def test_replacing_cookie_closes_old_client(self):
+        """Passing a non-empty cookie must await close() on the old client."""
+        auth = XhsAuthenticator()
+        old_client = MagicMock()
+        old_client.close = AsyncMock()
+        auth._client = old_client
+
+        new_client = MagicMock()
+        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=new_client):
+            await auth._ensure_client(cookie="a1=new; web_session=fresh")
+
+        # AC: old client's close was awaited exactly once
+        old_client.close.assert_awaited_once()
+        # AC: self._client now points to the new client
+        assert auth._client is new_client
+
+    @pytest.mark.asyncio
+    async def test_no_cookie_does_not_close_existing_client(self):
+        """Calling _ensure_client() without cookie must keep the current client."""
+        auth = XhsAuthenticator()
+        existing = MagicMock()
+        existing.close = AsyncMock()
+        auth._client = existing
+
+        returned = await auth._ensure_client()
+
+        existing.close.assert_not_awaited()
+        assert returned is existing
+        assert auth._client is existing
+
+    @pytest.mark.asyncio
+    async def test_first_call_with_cookie_does_not_close(self):
+        """When self._client is None, no close attempt is made on None."""
+        auth = XhsAuthenticator()
+        new_client = MagicMock()
+        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=new_client):
+            await auth._ensure_client(cookie="a1=fresh")
+        # AC: no exception raised, client assigned
+        assert auth._client is new_client
+
+    @pytest.mark.asyncio
+    async def test_refresh_tokens_does_not_leak_old_client(self):
+        """End-to-end: refresh_tokens replacing cookie should close prior client."""
+        auth = XhsAuthenticator()
+        old_client = MagicMock()
+        old_client.close = AsyncMock()
+        old_client.refresh_cookies = AsyncMock(return_value={"a1": "new"})
+        auth._client = old_client
+
+        new_client = MagicMock()
+        new_client.refresh_cookies = AsyncMock(return_value={"a1": "new_a1"})
+        tokens = PlatformTokens(
+            platform="xhs",
+            cookies=_sample_cookies(),
+            obtained_at=time.time(),
+            expires_at=time.time() + 86400,
+        )
+        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=new_client):
+            await auth.refresh_tokens(tokens)
+
+        old_client.close.assert_awaited_once()
 
 
 # ── ──
