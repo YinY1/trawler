@@ -7,7 +7,6 @@ import logging
 import re
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from shared.config import Config
 from shared.protocols import DownloadResult
@@ -56,7 +55,7 @@ def _classify_error(error_msg: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _write_bili_cookies(config: Config) -> Optional[Path]:
+def _write_bili_cookies(config: Config) -> Path | None:
     """将 B站 登录凭证写入临时 Netscape cookie 文件。"""
     auth = config.bilibili.auth
     if not auth.sessdata or not auth.bili_jct:
