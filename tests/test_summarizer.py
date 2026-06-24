@@ -80,8 +80,8 @@ class TestParseMarkdownAnalysis:
 
     def test_parse_well_formed(self) -> None:
         raw = """## 摘要
-- 第一点
-- 第二点
+1. 第一点
+2. 第二点
 
 ## 一句话总结
 这是个测试视频
@@ -138,6 +138,17 @@ A；B,C；D
         result = parse_markdown_analysis(raw)
         assert result.keywords == ["A", "B", "C", "D"]
 
+    def test_parse_preserves_bold_inside_summary(self) -> None:
+        """LLM 偶尔不遵守 plain 约束返回 **bold**，解析层应容忍并原样保留。
+        渲染层（plain text）将原样透传，不再尝试去除 markdown。"""
+        raw = """## 摘要
+这是 **粗体** 测试
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "**粗体**" in result.summary  # 原样保留，渲染时 plain 端只是显示字面量
+
 
 class TestAnalyzeContent:
     """Tests for analyze_content — AI orchestration + failure semantics."""
@@ -151,7 +162,7 @@ class TestAnalyzeContent:
         config.analysis.api_key = "k"
 
         ai_output = """## 摘要
-- 要点一
+1. 要点一
 
 ## 一句话总结
 一句话

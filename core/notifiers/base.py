@@ -36,23 +36,21 @@ def render_markdown(content: NotificationContent) -> tuple[str, str]:
 
     if content.type == "dynamic":
         # 动态：简短格式，无 keywords/comment
-        parts: list[str] = [f"**{style['author_label']}:** {content.author}"]
+        parts: list[str] = [f"{style['author_label']}: {content.author}"]
         if url:
-            parts.append(f"**链接:** [{content.source_id}]({url})")
-        parts.extend(["", "---", "", content.summary or content.title])
+            parts.append(f"链接: {content.source_id} {url}")
+        parts.extend(["", content.summary or content.title])
         return f"📢 {content.author} 的动态", "\n".join(parts)
 
     # 默认：完整内容模板
     parts = [
-        f"**{style['author_label']}:** {content.author}",
-        f"**链接:** [{content.source_id}]({url})" if url else "",
-        f"**关键词:** {keywords_str}",
+        f"{style['author_label']}: {content.author}",
+        f"链接: {content.source_id} {url}" if url else "",
+        f"关键词: {keywords_str}",
         "",
-        "---",
-        "",
-        "**详情:**",
+        "详情:",
         content.summary,
     ]
     if content.comment_highlights:
-        parts.extend(["", "**评论区补充:**", content.comment_highlights])
+        parts.extend(["", "评论区补充:", content.comment_highlights])
     return f"{style['emoji']} {content.title}", "\n".join(parts)
