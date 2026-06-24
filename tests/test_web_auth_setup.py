@@ -49,7 +49,7 @@ class TestSetup:
         auth_toml = tmp_path / "auth.toml"
         assert auth_toml.exists()
         content = auth_toml.read_text(encoding="utf-8")
-        assert "$2" in content, "auth.toml 应含 bcrypt hash"
+        assert "$argon2id$" in content, "auth.toml 应含 argon2id hash"
         assert "session_secret" in content
         # session_secret 是 token_urlsafe(64)，长度 >= 86
         import tomllib

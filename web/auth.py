@@ -4,7 +4,10 @@
 username 固定为 ``admin``（常量 :data:`WEB_ADMIN_USERNAME`）。
 
 设计要点：
-- 密码用 ``passlib[bcrypt]`` 的 :class:`CryptContext`，bcrypt scheme
+- 密码用 :class:`argon2.PasswordHasher` 直调（argon2id），不经过 passlib。
+  历史原因：``passlib 1.7.x`` 与 ``bcrypt>=4.1`` 不兼容（``bcrypt.__about__``
+  被移除），passlib CryptContext 探测 backend 时崩溃、静默回退到默认 bcrypt，
+  偏离设计意图。argon2-cffi 是密码哈希竞赛冠军算法的官方实现，维护活跃。
 - ``data/auth.toml`` 不存在或无 ``admin_password_hash`` → setup 未完成
 - :func:`set_password` 更新密码同时**轮转** ``session_secret``，
   让 starlette ``SessionMiddleware`` 在 ``secret_key`` 变化后无法验签旧 cookie，
@@ -18,12 +21,12 @@ import logging
 import secrets
 import tomllib
 from pathlib import Path
-from typing import Any, cast
 from urllib.parse import urlparse
 
 import tomlkit
+from argon2 import PasswordHasher
+from argon2.exceptions import Argon2Error, InvalidHash, VerificationError, VerifyMismatchError
 from fastapi import Request
-from passlib.context import CryptContext
 
 from shared.config import WebAuthConfig
 
@@ -33,24 +36,35 @@ logger = logging.getLogger(__name__)
 
 WEB_ADMIN_USERNAME = "admin"
 AUTH_TOML_PATH = Path("data/auth.toml")
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# argon2-cffi 默认参数已是 PHC 推荐值（memory_cost=19456, time_cost=2, parallelism=1）。
+# 这里显式构造一次，未来调参集中在此。
+_hasher = PasswordHasher()
 
 # ── 密码 hash ───────────────────────────────────────────────────
 
 
 def hash_password(plain: str) -> str:
-    """返回 bcrypt hash（``$2...`` 前缀，自带随机 salt）。"""
-    # passlib 无类型 stub；通过 Any 规避 pyright reportUnknownMemberType
-    return cast(Any, _pwd_context).hash(plain)
+    """返回 argon2id hash（``$argon2id$`` 前缀，自带随机 salt）。"""
+    return _hasher.hash(plain)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """校验明文与 hash。空 hash / verify 失败均返回 False，不抛异常。"""
+    """校验明文与 hash。
+
+    - 空 hash / 格式错误 / hash 不匹配 / 任何 argon2 内部异常 → 返回 False
+    - 不向上抛异常（路由层依赖此契约：失败即 False，不 500）
+
+    彻底切换后不再兼容旧 bcrypt 哈希（``$2b$``）。已部署实例需通过 ``/setup``
+    或 ``/settings/account`` 重设密码升级到 argon2id。
+    """
     if not hashed:
         return False
     try:
-        return bool(cast(Any, _pwd_context).verify(plain, hashed))
-    except Exception:
+        return _hasher.verify(hashed, plain)
+    except VerifyMismatchError:
+        return False
+    except InvalidHash, VerificationError, Argon2Error:
+        # 畸形 hash、被篡改的 hash、或非 argon2 串（含旧 bcrypt）→ 验证失败
         return False
 
 
