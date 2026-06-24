@@ -159,7 +159,7 @@ Trawler 是一个 Python 3.14 异步项目（uv 管理），结构如下：
 1. **纯编排 in `core/pipeline.py`** — 不含业务逻辑，只做流程编排
 2. **所有跨模块契约 in `shared/protocols.py`** — dataclass + Protocol
 3. **TOML 配置 + 环境变量覆盖** — `Config` dataclass 层级结构，环境变量优先
-4. **JsonSetStore 去重** — `mark_known()` 仅内存操作，`save()` 写磁盘
+4. **MessageStore 状态管理** — `mark_phase()` 仅内存操作，`save()` 写磁盘
 5. **AI 降级链** — OpenAI → Ollama → 本地 TF-IDF 提取
 6. **B站 RSS 优先、API 降级**；小红书/微博仅 API
 7. **HTMX 驱动 Web UI** — FastAPI + HTMX + Jinja2，免 JS 框架内联编辑

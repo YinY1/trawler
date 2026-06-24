@@ -159,7 +159,7 @@ Trawler is a Python 3.14 async project (uv-managed) with this structure:
 1. **Pure orchestration in `core/pipeline.py`** — no business logic, only wiring
 2. **All cross-module contracts in `shared/protocols.py`** — dataclasses + Protocols
 3. **TOML config with env override** — `Config` dataclass hierarchy, env vars take priority
-4. **JsonSetStore for dedup** — `mark_known()` is memory-only, `save()` writes to disk
+4. **MessageStore for state** — `mark_phase()` is memory-only, `save()` writes to disk
 5. **AI fallback chain** — OpenAI → Ollama → local TF-IDF extraction
 6. **RSS-first, API fallback** for Bilibili; API-only for Xiaohongshu/Weibo
 7. **HTMX-driven Web UI** — FastAPI + HTMX + Jinja2, inline editing without JS frameworks

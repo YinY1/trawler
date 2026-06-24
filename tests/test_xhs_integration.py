@@ -41,7 +41,7 @@ async def main():
     assert tokens.cookies.get("a1"), "必须有 a1"
 
     # 保存凭证供后续分析
-    # 使用 write_text 而非 JsonSetStore，因为 tokens 是键值凭证存储而非去重集合
+    # 使用 write_text 直接落盘，因为 tokens 是键值凭证存储而非去重集合
     out = Path("tests/xhs_debug_tokens.json")
     out.write_text(
         json.dumps(

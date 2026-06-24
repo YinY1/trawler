@@ -59,10 +59,7 @@ class MessageStore:
             return
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "version": 2,
-                "messages": self._messages,
-            }
+            payload = {"messages": self._messages}
             tmp = self._path.with_suffix(".json.tmp")
             tmp.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),

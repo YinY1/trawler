@@ -1,8 +1,8 @@
 """小红书 API 签名模块 - 纯 Python (xhshow)
 
 设计：
-- ``get_xhs_sign()`` 保持旧契约，返回 ``{xs, xt, xs_common}``（短键名）
-- ``get_xhs_sign_full()`` 返回完整 7-key header set，供新代码使用
+- ``get_xhs_sign()`` 返回完整 7-key header set（hyphenated keys），可直接 spread
+  到 HTTP request headers。
 - 内部委托给 ``xhshow.Xhshow.sign_headers()`` 处理 GET/POST 统一签名
 
 Spike verified (2026-06-15, xhshow 0.2.0):
@@ -64,41 +64,10 @@ def get_xhs_sign(
     a1: str = "",
     method: Literal["GET", "POST"] = "POST",
 ) -> dict[str, str]:
-    """Generate XHS API signature headers (short-form 3-key contract).
-
-    Maintained for backward compatibility with existing callers. New code should
-    prefer ``get_xhs_sign_full()`` to obtain the complete header set (the XHS
-    server now validates ``x-b3-traceid`` / ``x-xray-traceid`` / ``x-mns`` /
-    ``xy-direction`` in addition to the legacy 3).
-
-    Args:
-        api: API path, e.g. "/api/sns/web/v1/user_posted"
-        data: dict body (POST), dict params (GET), or query string (GET)
-        a1: a1 cookie value (may be empty for initial requests)
-        method: "GET" or "POST" (default POST)
-
-    Returns:
-        Dict with keys: ``xs``, ``xt``, ``xs_common`` (short-form names).
-    """
-    headers = _sign(api, data, a1, method)
-    return {
-        "xs": headers["x-s"],
-        "xt": headers["x-t"],
-        "xs_common": headers["x-s-common"],
-    }
-
-
-def get_xhs_sign_full(
-    api: str,
-    data: dict[str, Any] | str = "",
-    a1: str = "",
-    method: Literal["GET", "POST"] = "POST",
-) -> dict[str, str]:
     """Generate XHS API signature headers (full header set).
 
-    Like ``get_xhs_sign()`` but returns every header xhshow produces:
-    ``x-s``, ``x-t``, ``x-s-common``, ``x-b3-traceid``, ``x-mns``,
-    ``x-xray-traceid``, ``xy-direction``.
+    Returns every header xhshow produces: ``x-s``, ``x-t``, ``x-s-common``,
+    ``x-b3-traceid``, ``x-mns``, ``x-xray-traceid``, ``xy-direction``.
 
     Args:
         api: API path

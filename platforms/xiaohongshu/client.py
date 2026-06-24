@@ -3,7 +3,7 @@
 设计：
 - ``XhsClient`` 是小红书平台唯一的 HTTP 入口。所有 API 调用——内容获取、
   认证、签名验证——都通过这一个类进行。
-- 内部使用 ``signer.get_xhs_sign_full()`` 获取完整 header set（7 个签名头：
+- 内部使用 ``signer.get_xhs_sign()`` 获取完整 header set（7 个签名头：
   x-s, x-t, x-s-common, x-b3-traceid, x-mns, x-xray-traceid, xy-direction）。
 - ``__init__`` 接受可选的 ``aiohttp.ClientSession`` 注入，方便测试。
 """
@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from platforms.xiaohongshu.signer import get_xhs_sign_full
+from platforms.xiaohongshu.signer import get_xhs_sign
 from shared.cookie_utils import build_cookie_str, extract_cookie_value, parse_cookie_str, parse_set_cookie_headers
 from shared.exceptions import (
     CaptchaError,
@@ -168,7 +168,7 @@ class XhsClient:
         # Sign — pass the BASE api path (no query) for signing. xhshow internally
         # deals with params/payload separately.
         data_for_sign: dict[str, Any] = (json or {}) if method == "POST" else (params or {})
-        sign_headers = get_xhs_sign_full(
+        sign_headers = get_xhs_sign(
             api,
             data=data_for_sign,
             a1=self._a1,
