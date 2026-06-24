@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # pyright: basic
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from shared.config import Config
 from shared.protocols import DynamicInfo
@@ -58,7 +58,7 @@ async def _fetch_user_dynamics(
     return items[:max_count]
 
 
-def _parse_dynamic(item: dict, uid: int) -> Optional[DynamicInfo]:
+def _parse_dynamic(item: dict, uid: int) -> DynamicInfo | None:
     """解析单条动态。
 
     支持多种动态类型: DYNAMIC_TYPE_AV (视频), DYNAMIC_TYPE_WORD (纯文字),

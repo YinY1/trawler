@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urljoin
 
 import aiohttp
@@ -43,7 +43,7 @@ def _get_note_dir(config: Config, note_id: str) -> Path:
 # ── 第一层：XHS-Downloader Python 库 ──────────────────────
 
 
-async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> Optional[XhsDownloadResult]:
+async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> XhsDownloadResult | None:
     """尝试使用 XHS-Downloader Python 库下载。
 
     Args:
@@ -133,7 +133,7 @@ async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> Optional[Xh
 # ── 第二层：XHS-Downloader API Server ─────────────────────
 
 
-async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> Optional[XhsDownloadResult]:
+async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> XhsDownloadResult | None:
     """尝试通过 XHS-Downloader API Server 下载。
 
     需要在配置中指定 API Server 地址。
@@ -208,7 +208,7 @@ async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> Optional[Xh
 # ── 第三层：直接 HTTP 下载（兜底） ─────────────────────────
 
 
-async def _fetch_note_detail(note: NoteInfo, cookie: str) -> Optional[dict[str, Any]]:
+async def _fetch_note_detail(note: NoteInfo, cookie: str) -> dict[str, Any] | None:
     """直接请求笔记详情 API (via XhsClient)。
 
     Args:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # pyright: basic
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from platforms.xiaohongshu.auth import get_xhs_cookie
 from platforms.xiaohongshu.client import XhsClient
@@ -17,7 +17,7 @@ logger = logging.getLogger("trawler.xiaohongshu.monitor")
 DEFAULT_PAGE_SIZE = 20
 
 
-def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: str) -> Optional[NoteInfo]:
+def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: str) -> NoteInfo | None:
     """从 API 响应中解析单条笔记信息。
 
     Args:

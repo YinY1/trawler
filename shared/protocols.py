@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from shared.config import Config
@@ -115,7 +115,7 @@ class WeiboPost:
     is_original: bool = True
     is_long_text: bool = False
     long_text: str = ""  # 长文全文（isLongText=True 时填充）
-    reposted_post: Optional[WeiboPost] = None  # 转发时可嵌套
+    reposted_post: WeiboPost | None = None  # 转发时可嵌套
 
 
 @dataclass
@@ -127,7 +127,7 @@ class WeiboDownloadResult:
     title: str
     text: str = ""
     image_paths: list[Path] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -142,8 +142,8 @@ class DownloadResult:
     success: bool
     source_id: str  # bvid
     title: str
-    filepath: Optional[Path] = None
-    error: Optional[str] = None
+    filepath: Path | None = None
+    error: str | None = None
     access_limited: bool = False
     access_note: str = ""
 
@@ -155,10 +155,10 @@ class XhsDownloadResult:
     success: bool
     source_id: str  # note_id
     title: str
-    filepath: Optional[Path] = None  # 视频文件路径（视频笔记）
+    filepath: Path | None = None  # 视频文件路径（视频笔记）
     image_paths: list[Path] = field(default_factory=list)
     content_text: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -182,12 +182,12 @@ class TranscriptResult:
     success: bool
     source_id: str
     title: str
-    transcript_path: Optional[Path] = None
-    json_path: Optional[Path] = None
+    transcript_path: Path | None = None
+    json_path: Path | None = None
     text: str = ""
     language: str = "zh"
     duration_seconds: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -197,7 +197,7 @@ class ParsedNote:
     note_id: str
     is_video: bool
     text: str
-    video_path: Optional[Path] = None
+    video_path: Path | None = None
     image_paths: list[Path] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
 
@@ -301,7 +301,7 @@ class PhaseContext:
 
     msg: MessageRecord
     config: Config
-    downloaded_filepath: Optional[Path] = None
+    downloaded_filepath: Path | None = None
     image_paths: list[Path] = field(default_factory=list)
     content_text: str = ""
     transcript_text: str = ""
