@@ -5,34 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Trawler{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'media',
-      theme: {
-        extend: {
-          colors: {
-            apple: {
-              blue: '#0071e3',
-              'blue-dark': '#0a84ff',
-              green: '#34c759',
-              'green-dark': '#30d158',
-              orange: '#ff9500',
-              'orange-dark': '#ff9f0a',
-              red: '#ff3b30',
-              'red-dark': '#ff453a',
-            }
-          },
-          boxShadow: {
-            'stat': 'var(--shadow-stat)',
-            'card': 'var(--shadow-card)',
-            'tooltip': 'var(--shadow-tooltip)',
-          }
-        }
-      }
-    }
-  </script>
-  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body class="h-full bg-[var(--bg-base)] text-[var(--text-primary)] font-sans antialiased">
 

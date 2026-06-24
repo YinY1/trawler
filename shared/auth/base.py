@@ -72,6 +72,16 @@ class BaseAuthenticator(ABC):
     @abstractmethod
     async def validate_tokens(self, tokens: PlatformTokens) -> bool: ...
 
+    async def get_user_nickname(self, tokens: PlatformTokens) -> str | None:
+        """Return the logged-in user's display name, or None if unavailable.
+
+        Default implementation returns None; subclasses override to probe
+        platform-specific user-info APIs. Used by web UI to show account names.
+
+        MUST NOT raise — failures return None so the auth page still renders.
+        """
+        return None
+
     def supports_qr_login(self) -> bool:
         return True
 
