@@ -1,4 +1,4 @@
-"""跨平台评论格式化 — 将统一 CommentHighlight 列表格式化为 Markdown
+"""跨平台评论格式化 — 将统一 CommentHighlight 列表格式化为纯文本 (plain text)
 
 为何独立文件而非放在 handlers 或 protocols 中：
 - `shared/protocols.py` 是纯数据模型层，不应包含展示逻辑
@@ -12,7 +12,9 @@ from shared.protocols import CommentHighlight
 
 
 def format_comment_highlights(highlights: list[CommentHighlight]) -> str:
-    """将评论亮点列表格式化为 Markdown 文本。
+    """将评论亮点列表格式化为纯文本（plain text）。
+
+    输出无 markdown 语法，每条评论单行，便于推送端原样显示。
 
     兼容统一 CommentHighlight 模型的字段：
     - user_name, content, like_count
@@ -24,7 +26,7 @@ def format_comment_highlights(highlights: list[CommentHighlight]) -> str:
         highlights: CommentHighlight 列表
 
     Returns:
-        Markdown 格式字符串
+        纯文本字符串（无 markdown 标记）
     """
     if not highlights:
         return ""
@@ -46,7 +48,7 @@ def format_comment_highlights(highlights: list[CommentHighlight]) -> str:
         tag = f" ({', '.join(tags)})" if tags else ""
 
         if reply_to and parent_content:
-            parts.append(f"- **{reply_to}**:\n  > {parent_content}\n  **{name}**{tag} (👍{like}):\n  {content}")
+            parts.append(f"  ↳ {reply_to}: {parent_content}\n{name}{tag} (👍{like}): {content}")
         else:
-            parts.append(f"- **{name}**{tag} (👍{like}):\n  {content}")
+            parts.append(f"• {name}{tag} (👍{like}): {content}")
     return "\n".join(parts)

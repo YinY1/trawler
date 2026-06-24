@@ -55,7 +55,7 @@ def test_render_bili_video():
     assert title.startswith("📹")
     assert "BV1xx" in msg
     assert "https://www.bilibili.com/video/BV1xx" in msg
-    assert "UP主:** UP" in msg
+    assert "UP主: UP" in msg
     assert "k1；k2" in msg
 
 
@@ -63,7 +63,7 @@ def test_render_xhs_default_url():
     c = NotificationContent(platform="xhs", source_id="note1", title="t", author="A")
     _, msg = render_markdown(c)
     assert "https://www.xiaohongshu.com/explore/note1" in msg
-    assert "作者:** A" in msg
+    assert "作者: A" in msg
 
 
 def test_render_weibo_custom_url():
@@ -91,6 +91,8 @@ def test_render_dynamic_short_format():
     assert title == "📢 UP 的动态"
     assert "动态正文" in msg
     assert "关键词" not in msg  # 动态无 keywords 段
+    assert "**" not in msg
+    assert "---" not in msg
 
 
 def test_render_comment_highlights():
@@ -104,6 +106,7 @@ def test_render_comment_highlights():
     _, msg = render_markdown(c)
     assert "评论区补充" in msg
     assert "精选评论" in msg
+    assert "**" not in msg
 
 
 def test_render_unknown_platform_uses_default_emoji():
@@ -210,3 +213,19 @@ async def test_send_to_subscription_continues_after_failure(monkeypatch: pytest.
     assert results[0].success is True  # a (gotify) 成功
     assert results[1].success is False  # tg NotImplementedError 被吞
     assert "not implemented" in results[1].error
+
+
+def test_render_output_is_plain_text_no_markdown():
+    """渲染结果不含任何 markdown 标记（**、---、[text](url)、> 引用）。"""
+    c = NotificationContent(
+        platform="bili",
+        source_id="BV1xx",
+        title="t",
+        author="UP",
+        summary="s",
+        keywords=["k1"],
+        comment_highlights="评论",
+    )
+    _, msg = render_markdown(c)
+    for token in ("**", "---", "##", "> ", "]("):
+        assert token not in msg, f"渲染结果含 markdown 标记: {token!r}"
