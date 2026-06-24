@@ -39,7 +39,7 @@ platforms/       平台适配层: bilibili/, xiaohongshu/
 - Section 注释用 Unicode box-drawing：`# ═══════════════` / `# ── ──`
 - import 顺序：标准库 → 第三方 → 本地，用 ruff I 维护
 - 新增平台必须：`platforms/<name>/__init__.py`（docstring only）+ `auth.py` + `monitor.py` + `comments.py`
-- json 持久化用 `shared/protocols.JsonSetStore` (mark_known 仅内存, save 才写盘)
+- json 持久化用 `shared/message_store.MessageStore` (mark_phase/mark_error 仅内存, save 才写盘)
 - 异步：`async def` + `await`，CLI 入口 `asyncio.run()`
 
 ## Common Tasks
@@ -59,7 +59,6 @@ platforms/       平台适配层: bilibili/, xiaohongshu/
 
 ## Gotchas
 
-- `JsonSetStore.mark_known()` 只改内存不改磁盘，必须调用方在适当时机调 `save()`
 - 不要改 `print()` / `console.print()` 的 emoji 和颜色标签，它们是外部接口的一部分
 - 不要改已有 error message 的文本，CI 和日志分析可能依赖它们
 - 新增依赖：必须确认是否真需要，标准库优先

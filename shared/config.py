@@ -333,18 +333,6 @@ async def load_config(path: str | Path = "config/config.toml") -> Config:
     p = Path(path)
     logger.debug("⚙️ 加载配置: %s", p)
 
-    # 检测旧版 config.yaml 并给出迁移提示
-    yaml_path = p.with_suffix(".yaml")
-    if yaml_path.exists():
-        logger.warning("⚙️ 检测到旧版 config.yaml，请迁移至 TOML")
-        import warnings
-
-        warnings.warn(
-            f"检测到旧的配置文件 {yaml_path}，但新版使用 TOML 格式。\n请参考 config/config.toml.example 创建配置文件。",
-            UserWarning,
-            stacklevel=2,
-        )
-
     raw: dict = {}
 
     # ── 1. 加载基础配置 ────────────────────────────────────────

@@ -91,7 +91,7 @@ class TestRequest:
         resp = _mock_json_response(200, {"success": True, "data": {"notes": []}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full") as mock_sign:
+        with patch("platforms.xiaohongshu.client.get_xhs_sign") as mock_sign:
             mock_sign.return_value = {"x-s": "s", "x-t": "t", "x-s-common": "c"}
             result = await client._request("POST", "/api/test", json={"x": 1})
 
@@ -108,7 +108,7 @@ class TestRequest:
         resp = _mock_json_response(200, {"success": True, "data": {"items": []}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full") as mock_sign:
+        with patch("platforms.xiaohongshu.client.get_xhs_sign") as mock_sign:
             mock_sign.return_value = {"x-s": "s", "x-t": "t", "x-s-common": "c"}
             result = await client._request("GET", "/api/test", params={"num": "10"})
 
@@ -123,7 +123,7 @@ class TestRequest:
         resp = _mock_json_response(200, {"success": True, "data": {}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full") as mock_sign:
+        with patch("platforms.xiaohongshu.client.get_xhs_sign") as mock_sign:
             mock_sign.return_value = {
                 "x-s": "XYS_test",
                 "x-t": "1700000000000",
@@ -146,7 +146,7 @@ class TestRequest:
 
         from shared.exceptions import DataError
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             with pytest.raises(DataError, match="invalid params"):
                 await client._request("GET", "/api/test")
 
@@ -157,7 +157,7 @@ class TestRequest:
 
         from shared.exceptions import DataError
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             with pytest.raises(DataError, match="404"):
                 await client._request("GET", "/api/test")
 
@@ -168,7 +168,7 @@ class TestRequest:
 
         from shared.exceptions import RetryableError
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             with pytest.raises(RetryableError):
                 await client._request("GET", "/api/test")
 
@@ -179,7 +179,7 @@ class TestRequest:
 
         from shared.exceptions import RetryableError
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             with pytest.raises(RetryableError):
                 await client._request("GET", "/api/test")
 
@@ -190,7 +190,7 @@ class TestRequest:
 
         from shared.exceptions import CaptchaError
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             with pytest.raises(CaptchaError):
                 await client._request("GET", "/api/test")
 
@@ -201,7 +201,7 @@ class TestRequest:
 
         from shared.exceptions import IpBlockError
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             with pytest.raises(IpBlockError):
                 await client._request("GET", "/api/test")
 
@@ -216,7 +216,7 @@ class TestSpecificMethods:
         resp = _mock_json_response(200, {"success": True, "data": {"notes": [{"id": "n1"}]}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.get_user_notes("uid123")
 
         assert result == [{"id": "n1"}]
@@ -225,7 +225,7 @@ class TestSpecificMethods:
         resp = _mock_json_response(200, {"success": True, "data": {"items": [{"note_card": {"title": "T"}}]}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.get_note_detail("nid", "token_x")
 
         assert result == {"title": "T"}
@@ -234,7 +234,7 @@ class TestSpecificMethods:
         resp = _mock_json_response(200, {"success": True, "data": {"comments": [{"id": "c1"}], "cursor": "c2"}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.get_comments("nid")
 
         assert result == {"comments": [{"id": "c1"}], "cursor": "c2"}
@@ -243,7 +243,7 @@ class TestSpecificMethods:
         resp = _mock_json_response(200, {"success": True, "data": {"nickname": "User"}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.get_user_info()
 
         assert result == {"nickname": "User"}
@@ -252,21 +252,21 @@ class TestSpecificMethods:
         resp = _mock_json_response(200, {"success": True, "data": {"nickname": "User"}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             assert await client.probe() is True
 
     async def test_probe_failure(self, client, mock_session):
         resp = _mock_json_response(200, {"success": False})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             assert await client.probe() is False
 
     async def test_probe_http_error(self, client, mock_session):
         resp = _mock_json_response(500, {})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             assert await client.probe() is False
 
     async def test_create_qrcode(self, client, mock_session):
@@ -275,7 +275,7 @@ class TestSpecificMethods:
         )
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.create_qrcode({"a1": "init"})
 
         assert result["qr_id"] == "q1"
@@ -284,7 +284,7 @@ class TestSpecificMethods:
         resp = _mock_json_response(200, {"success": True, "data": {"status": 3}})
         mock_session.request.return_value = resp
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.check_qrcode_status("q1", "c")
 
         assert result["status"] == 3
@@ -297,7 +297,7 @@ class TestSpecificMethods:
 
         mock_session.request.side_effect = [resp1, resp2]
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.fetch_sec_cookies({"a1": "abc"})
 
         assert result.get("sec_poison_id") == "spid1"
@@ -312,7 +312,7 @@ class TestSpecificMethods:
             },
         )
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.refresh_cookies()
 
         assert result is not None
@@ -321,7 +321,7 @@ class TestSpecificMethods:
     async def test_refresh_cookies_no_set_cookie(self, client, mock_session):
         mock_session.get.return_value = _mock_raw_response(200)
 
-        with patch("platforms.xiaohongshu.client.get_xhs_sign_full"):
+        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.refresh_cookies()
 
         assert result is None

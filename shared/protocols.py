@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 # pyright: basic
-import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -227,70 +226,6 @@ class LLMProvider(Protocol):
     """LLM 提供商协议"""
 
     async def generate(self, prompt: str) -> str: ...
-
-
-# ═══════════════════════════════════════════════════════════
-# 通用存储基类
-# ═══════════════════════════════════════════════════════════
-
-
-class JsonSetStore:
-    """通用的 JSON 集合存储，用于内容去重。
-
-    管理 ``data/<filename>`` 文件，维护一个 ``set[str]`` 集合。
-    - ``mark_known`` 只修改内存，不写磁盘（高性能）
-    - 由调用方在适当时机调用 ``save()`` 持久化（安全）
-    """
-
-    def __init__(self, data_dir: str | Path, filename: str) -> None:
-        self._path = Path(data_dir) / filename
-        self._data: set[str] = self._load()
-
-    def _load(self) -> set[str]:
-        """从 JSON 文件加载已知 ID 集合。"""
-        if not self._path.exists():
-            return set()
-        try:
-            text = self._path.read_text(encoding="utf-8")
-            data = json.loads(text)
-            if isinstance(data, dict):
-                return set(data.get("known_ids", []))
-            elif isinstance(data, list):
-                return set(data)
-            return set()
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("加载 %s 失败，将使用空集合: %s", self._path, e)
-            return set()
-
-    def save(self) -> None:
-        """持久化已知 ID 集合到磁盘。"""
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            payload = json.dumps(
-                {"known_ids": sorted(self._data)},
-                ensure_ascii=False,
-                indent=2,
-            )
-            self._path.write_text(payload, encoding="utf-8")
-        except OSError as e:
-            logger.error("保存 %s 失败: %s", self._path, e)
-
-    def is_known(self, key: str) -> bool:
-        """检查 key 是否已知。"""
-        return key in self._data
-
-    def mark_known(self, key: str) -> None:
-        """将 key 标记为已知（仅内存）。"""
-        self._data.add(key)
-
-    def mark_known_batch(self, keys: list[str]) -> None:
-        """批量标记 key 为已知（仅内存）。"""
-        self._data.update(keys)
-
-    @property
-    def known_count(self) -> int:
-        """已知条目数量。"""
-        return len(self._data)
 
 
 # ═══════════════════════════════════════════════════════════

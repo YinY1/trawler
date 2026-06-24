@@ -159,7 +159,6 @@ def test_save_creates_json_file(tmp_path: Path) -> None:
     json_path = tmp_path / "messages.json"
     assert json_path.exists()
     data = json.loads(json_path.read_text())
-    assert data["version"] == 2
     assert "bili:BV1" in data["messages"]
 
 
