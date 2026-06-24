@@ -44,47 +44,73 @@
         {% if p["items"] %}
         <div class="space-y-1 mb-4">
           {% for item in p["items"] %}
-      <div class="flex items-center justify-between py-2 px-3 rounded-[10px] hover:bg-gray-50 dark:hover:bg-gray-800/30 group">
-        <div class="flex items-center gap-3 min-w-0">
+      <div class="flex items-center justify-between py-2.5 px-3 rounded-[10px] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 group transition-colors duration-200">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
           {{ status_dot("active") }}
-          <div class="min-w-0">
-            <div class="text-sm font-medium truncate">{{ item.get("name", "-") }}</div>
-            <div class="text-xs text-[var(--text-secondary)] font-mono">{{ item.get("uid") or item.get("user_id", "-") }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium truncate">{{ item.get("name", "-") }}</span>
+              <span class="text-[11px] text-[var(--text-tertiary)] font-mono truncate">{{ item.get("uid") or item.get("user_id", "-") }}</span>
+            </div>
             {% set item_eps = item.get("notify_endpoints", []) %}
             {% if item_eps %}
-            <div class="flex flex-wrap gap-1 mt-1">
+            <div class="flex flex-wrap gap-1 mt-1.5">
               {% for ep_name in item_eps %}
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-[10px] text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+              <span class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-[11px] font-medium border bg-blue-50/70 text-blue-700 border-blue-200/60 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800/40">
                 {{ ep_name }}
                 <button type="button"
                   hx-post="/subscriptions/{{ p.key }}/{{ item.get('uid') or item.get('user_id', '') }}/endpoints/remove"
                   hx-vals='{"endpoint_name":"{{ ep_name }}"}'
                   hx-target="body"
-                  class="ml-0.5 hover:text-red-500 cursor-pointer transition-colors"
-                  title="移除端点">&times;</button>
+                  class="ml-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full text-blue-500/70 hover:bg-red-500/15 hover:text-red-500 cursor-pointer transition-colors duration-200"
+                  title="移除端点 {{ ep_name }}"
+                  aria-label="移除端点 {{ ep_name }}">
+                  <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
               </span>
               {% endfor %}
             </div>
             {% endif %}
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5 shrink-0">
           {% set unassigned = item.get("_unassigned_eps", []) %}
           {% if unassigned %}
-          <form hx-post="/subscriptions/{{ p.key }}/{{ item.get('uid') or item.get('user_id', '') }}/endpoints/add" hx-target="body" class="flex items-center gap-1">
+          <form hx-post="/subscriptions/{{ p.key }}/{{ item.get('uid') or item.get('user_id', '') }}/endpoints/add" hx-target="body" class="inline-flex items-center gap-1">
             <select name="endpoint_name"
-              class="text-xs px-2 py-1 rounded-[6px] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[var(--text-secondary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 outline-none">
+              class="text-xs px-2 py-1 rounded-[8px] border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-secondary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] outline-none transition-colors duration-200 cursor-pointer max-w-[120px]">
               {% for aep in unassigned %}
               <option value="{{ aep }}">{{ aep }}</option>
               {% endfor %}
             </select>
-            <button type="submit" class="text-xs text-apple-blue hover:text-blue-600 cursor-pointer transition-colors" title="添加端点">+</button>
+            <button type="submit"
+                    class="inline-flex items-center justify-center w-6 h-6 rounded-[6px] bg-apple-blue/10 text-apple-blue hover:bg-apple-blue hover:text-white cursor-pointer transition-colors duration-200"
+                    title="添加端点"
+                    aria-label="添加端点">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
           </form>
           {% endif %}
           <form hx-post="/subscriptions/remove" hx-target="body" hx-confirm="确定删除此订阅？">
             <input type="hidden" name="platform" value="{{ p.key }}">
             <input type="hidden" name="identifier" value="{{ item.get('uid') or item.get('user_id', '') }}">
-            <button type="submit" class="text-sm text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">删除</button>
+            <button type="submit"
+                    class="inline-flex items-center justify-center w-7 h-7 rounded-[6px] text-[var(--text-tertiary)] hover:bg-red-500/10 hover:text-red-500 cursor-pointer transition-colors duration-200"
+                    title="删除订阅"
+                    aria-label="删除订阅">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+                <path d="M10 11v6M14 11v6"/>
+                <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
           </form>
         </div>
       </div>
@@ -119,17 +145,4 @@
 </div>
 {% endfor %}
 </div>
-
-<script>
-  // URL flash → toast on page load
-  (function() {
-    var params = new URLSearchParams(window.location.search);
-    var msg = params.get('msg');
-    var type = params.get('type');
-    if (msg) {
-      showToast(msg, type || 'info');
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  })();
-</script>
 {% endblock %}
