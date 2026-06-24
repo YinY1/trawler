@@ -1,4 +1,4 @@
-"""通知内容渲染层 — 跨 Provider 共享的 Markdown 渲染。"""
+"""通知内容渲染层 — 跨 Provider 共享的纯文本 (plain text) 渲染。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,10 @@ def _build_url(content: NotificationContent) -> str:
 
 
 def render_markdown(content: NotificationContent) -> tuple[str, str]:
-    """渲染通知为 (title, message_markdown)。
+    """渲染通知为 (title, message_text)。
+
+    输出为纯文本 (plain text)，不含任何 markdown 标记；函数名 render_markdown
+    保留作为兼容外部接口（改名会破坏 import）。
 
     根据 content.platform 选择 emoji 和"作者"标签；
     根据 content.type == "dynamic" 使用更简短的动态模板。
