@@ -92,13 +92,18 @@ class XhsAuthenticator(BaseAuthenticator):
         self._init_cookies: dict[str, str] = {}
         self._qr_code: str = ""
 
-    def _ensure_client(self, cookie: str = "") -> XhsClient:
+    async def _ensure_client(self, cookie: str = "") -> XhsClient:
         """获取或创建内部 XhsClient。
 
         Args:
             cookie: 若非空，则强制使用该 cookie 创建/替换内部 client。
+                    替换前会关闭旧 client 释放其 aiohttp session，
+                    避免 "Unclosed client session" 警告。
         """
         if self._client is None or cookie:
+            if cookie and self._client is not None:
+                # close old client to release its aiohttp session before replacing
+                await self._client.close()
             self._client = XhsClient(cookie=cookie)
         return self._client
 
@@ -108,7 +113,7 @@ class XhsAuthenticator(BaseAuthenticator):
         a1 = generate_a1()
         init_cookies: dict[str, str] = {"a1": a1, "webId": generate_web_id(a1)}
 
-        client = self._ensure_client()
+        client = await self._ensure_client()
         sec = await client.fetch_sec_cookies(init_cookies)
         init_cookies.update(sec)
 
@@ -128,7 +133,7 @@ class XhsAuthenticator(BaseAuthenticator):
         状态码映射: 1=waiting, 2=scanned, 3=success, 4=expired
         """
         logger.info("🔑 XhsAuthenticator 轮询扫码状态...")
-        client = self._ensure_client()
+        client = await self._ensure_client()
         try:
             result = await client.check_qrcode_status(qr_key, self._qr_code)
         except Exception as e:
@@ -172,7 +177,7 @@ class XhsAuthenticator(BaseAuthenticator):
         qr = await self.generate_qr_code()
         display_qr_in_terminal(qr.qr_url)
 
-        client = self._ensure_client()
+        client = await self._ensure_client()
         deadline = time.monotonic() + qr.expires_in
 
         while time.monotonic() < deadline:
@@ -198,7 +203,7 @@ class XhsAuthenticator(BaseAuthenticator):
     async def refresh_tokens(self, tokens: PlatformTokens) -> PlatformTokens:
         """通过访问 XHS 主页捕获 Set-Cookie 续期。"""
         logger.info("🔑 XhsAuthenticator 续期 token...")
-        client = self._ensure_client(build_cookie_str(tokens.cookies))
+        client = await self._ensure_client(build_cookie_str(tokens.cookies))
         new_cookies = await client.refresh_cookies()
 
         cookies = dict(tokens.cookies)
@@ -218,7 +223,7 @@ class XhsAuthenticator(BaseAuthenticator):
         """通过 XhsClient.probe() 验证 cookie 有效性。"""
         if tokens.expires_at < time.time():
             return False
-        client = self._ensure_client(build_cookie_str(tokens.cookies))
+        client = await self._ensure_client(build_cookie_str(tokens.cookies))
         try:
             return await client.probe()
         except Exception:
