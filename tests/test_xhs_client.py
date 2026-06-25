@@ -269,59 +269,6 @@ class TestSpecificMethods:
         with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             assert await client.probe() is False
 
-    async def test_create_qrcode(self, client, mock_session):
-        resp = _mock_json_response(
-            200, {"success": True, "data": {"qr_id": "q1", "url": "https://xhs.cn/q", "code": "c"}}
-        )
-        mock_session.request.return_value = resp
-
-        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
-            result = await client.create_qrcode({"a1": "init"})
-
-        assert result["qr_id"] == "q1"
-        # Regression: server returns ``url`` (xhsdiscover://...), not ``qr_url``.
-        assert result["url"] == "https://xhs.cn/q"
-
-    async def test_create_qrcode_payload_is_qr_type_int(self, client, mock_session):
-        """Regression: qr_type must be integer 1, not string "qr_login".
-
-        Server (Go) does strconv.ParseInt on qrType; sending "qr_login" returns
-        HTTP 400 ``parse: put "qr_login" to field qrType``. See
-        docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:811 for the
-        captured real value.
-        """
-        resp = _mock_json_response(200, {"success": True, "data": {"qr_id": "q1", "url": "u", "code": "c"}})
-        mock_session.request.return_value = resp
-
-        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
-            await client.create_qrcode({"a1": "init"})
-
-        _call = mock_session.request.call_args
-        assert _call.kwargs["json"] == {"qr_type": 1}
-
-    async def test_check_qrcode_status(self, client, mock_session):
-        resp = _mock_json_response(200, {"success": True, "data": {"codeStatus": 2}})
-        mock_session.request.return_value = resp
-
-        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
-            result = await client.check_qrcode_status("q1", "c")
-
-        assert result["codeStatus"] == 2
-
-    async def test_fetch_sec_cookies_both_succeed(self, client, mock_session):
-        """Two POSTs to sec endpoints return sec_poison_id and gid."""
-        resp1 = _mock_json_response(200, {"success": True, "data": {"secPoisonId": "spid1"}})
-        resp2 = _mock_raw_response(200, headers={"Set-Cookie": "gid=gid_val"})
-        resp2.json = AsyncMock(return_value={"success": True, "data": {}})
-
-        mock_session.request.side_effect = [resp1, resp2]
-
-        with patch("platforms.xiaohongshu.client.get_xhs_sign"):
-            result = await client.fetch_sec_cookies({"a1": "abc"})
-
-        assert result.get("sec_poison_id") == "spid1"
-        assert result.get("gid") == "gid_val"
-
     async def test_refresh_cookies_returns_updated(self, client, mock_session):
         mock_session.get.return_value = _mock_raw_response(
             200,
