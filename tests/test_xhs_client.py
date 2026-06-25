@@ -271,7 +271,7 @@ class TestSpecificMethods:
 
     async def test_create_qrcode(self, client, mock_session):
         resp = _mock_json_response(
-            200, {"success": True, "data": {"qr_id": "q1", "qr_url": "https://xhs.cn/q", "code": "c"}}
+            200, {"success": True, "data": {"qr_id": "q1", "url": "https://xhs.cn/q", "code": "c"}}
         )
         mock_session.request.return_value = resp
 
@@ -279,6 +279,8 @@ class TestSpecificMethods:
             result = await client.create_qrcode({"a1": "init"})
 
         assert result["qr_id"] == "q1"
+        # Regression: server returns ``url`` (xhsdiscover://...), not ``qr_url``.
+        assert result["url"] == "https://xhs.cn/q"
 
     async def test_create_qrcode_payload_is_qr_type_int(self, client, mock_session):
         """Regression: qr_type must be integer 1, not string "qr_login".
@@ -288,7 +290,7 @@ class TestSpecificMethods:
         docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:811 for the
         captured real value.
         """
-        resp = _mock_json_response(200, {"success": True, "data": {"qr_id": "q1", "qr_url": "u", "code": "c"}})
+        resp = _mock_json_response(200, {"success": True, "data": {"qr_id": "q1", "url": "u", "code": "c"}})
         mock_session.request.return_value = resp
 
         with patch("platforms.xiaohongshu.client.get_xhs_sign"):

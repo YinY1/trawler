@@ -323,7 +323,10 @@ class XhsClient:
             init_cookies: 初始 cookies (a1, web_id, sec_poison_id, gid 等)
 
         Returns:
-            dict 含 ``qr_id``, ``qr_url``, ``code``
+            dict 含 ``qr_id``, ``url``, ``code``
+
+            Note: 服务端字段是 ``url`` (形如 ``xhsdiscover://...``)，不是 ``qr_url``。
+            字段名依据真实抓包响应 (ReaJason/xhs core.py + 项目 phase-3 plan)。
         """
         # Temporarily switch to the init cookies for this request
         old_str, old_dict = self._cookie_str, self._cookie_dict
