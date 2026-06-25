@@ -109,11 +109,16 @@ class TestGenerateQrCode:
 
 
 class TestPollQrStatus:
+    """Regression: field name is 'codeStatus' (not 'status'), codes are 0/1/2/3 (not 1/2/3/4).
+
+    Evidence: docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:880-907
+    """
+
     @pytest.mark.asyncio
-    async def test_waiting_status_code_1(self):
+    async def test_waiting_code_status_0(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"status": 1})
+        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 0})
         auth._client = mock_client
 
         status = await auth.poll_qr_status("qr_abc")
@@ -121,10 +126,10 @@ class TestPollQrStatus:
         assert not status.success
 
     @pytest.mark.asyncio
-    async def test_scanned_status_code_2(self):
+    async def test_scanned_code_status_1(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"status": 2})
+        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 1})
         auth._client = mock_client
 
         status = await auth.poll_qr_status("qr_abc")
@@ -132,10 +137,10 @@ class TestPollQrStatus:
         assert not status.success
 
     @pytest.mark.asyncio
-    async def test_success_status_code_3(self):
+    async def test_success_code_status_2(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"status": 3})
+        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 2})
         auth._client = mock_client
 
         status = await auth.poll_qr_status("qr_abc")
@@ -143,10 +148,10 @@ class TestPollQrStatus:
         assert status.success
 
     @pytest.mark.asyncio
-    async def test_expired_status_code_4(self):
+    async def test_expired_code_status_3(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"status": 4})
+        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 3})
         auth._client = mock_client
 
         status = await auth.poll_qr_status("qr_abc")
@@ -154,8 +159,8 @@ class TestPollQrStatus:
         assert not status.success
 
     @pytest.mark.asyncio
-    async def test_default_status_when_missing(self):
-        """Missing 'status' field defaults to WAITING (code 1)."""
+    async def test_default_code_status_when_missing(self):
+        """Missing 'codeStatus' field defaults to WAITING (code 0)."""
         auth = XhsAuthenticator()
         mock_client = MagicMock()
         mock_client.check_qrcode_status = AsyncMock(return_value={})

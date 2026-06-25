@@ -300,13 +300,13 @@ class TestSpecificMethods:
         assert _call.kwargs["json"] == {"qr_type": 1}
 
     async def test_check_qrcode_status(self, client, mock_session):
-        resp = _mock_json_response(200, {"success": True, "data": {"status": 3}})
+        resp = _mock_json_response(200, {"success": True, "data": {"codeStatus": 2}})
         mock_session.request.return_value = resp
 
         with patch("platforms.xiaohongshu.client.get_xhs_sign"):
             result = await client.check_qrcode_status("q1", "c")
 
-        assert result["status"] == 3
+        assert result["codeStatus"] == 2
 
     async def test_fetch_sec_cookies_both_succeed(self, client, mock_session):
         """Two POSTs to sec endpoints return sec_poison_id and gid."""

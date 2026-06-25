@@ -344,7 +344,8 @@ class XhsClient:
         """轮询 QR 登录状态 (GET /api/sns/web/v1/login/qrcode/status)。
 
         Returns:
-            dict 含 ``status`` (1=waiting, 2=scanned, 3=success, 4=expired) 和可能的 ``cookies``
+            dict 含 ``codeStatus`` (0=waiting, 1=scanned, 2=success, 3=expired)。
+            字段名依据真实抓包: docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:880
         """
         params = {"qr_id": qr_id, "code": code}
         return await self._request("GET", "/api/sns/web/v1/login/qrcode/status", params=params)
