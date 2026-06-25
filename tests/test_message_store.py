@@ -230,6 +230,78 @@ def test_get_messages_in_window(store: MessageStore) -> None:
     assert "msg-48h" not in ids
 
 
+# ── body / summary (plan 2026-06-25) ─────────────────────────────
+
+
+def test_record_has_body_and_summary_defaults() -> None:
+    """MessageRecord 新字段 body/summary 必须默认空字符串。"""
+    from shared.protocols import MessageRecord
+
+    r = MessageRecord(
+        msg_id="x",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        phase=Phase.DISCOVERED,
+        pubdate=0,
+        title="t",
+        author="a",
+    )
+    assert r.body == ""
+    assert r.summary == ""
+
+
+def test_msg_from_dict_loads_body_and_summary(store: MessageStore) -> None:
+    """_msg_from_dict 必须把存储中的 body/summary 反序列化进 MessageRecord。"""
+    store._messages["bili:BV1"] = {
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+        "body": "正文",
+        "summary": "摘要",
+    }
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.body == "正文"
+    assert msg.summary == "摘要"
+
+
+def test_msg_from_dict_defaults_body_summary_when_missing(store: MessageStore) -> None:
+    """旧 messages.json 不含新字段时，反序列化默认空（向后兼容）。"""
+    store._messages["bili:BV1"] = {
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+    }
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.body == ""
+    assert msg.summary == ""
+
+
+def test_mark_body_sets_body(store: MessageStore) -> None:
+    """mark_body 写入后 get_message 必须读回。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_body("bili:BV1", "新正文")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.body == "新正文"
+
+
+def test_mark_summary_sets_summary(store: MessageStore) -> None:
+    """mark_summary 写入后 get_message 必须读回。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_summary("bili:BV1", "AI 摘要")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.summary == "AI 摘要"
+
+
 # ── subscription_ref round-trip ─────────────────────────────────
 
 

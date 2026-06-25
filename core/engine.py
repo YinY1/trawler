@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 # Handler 类型：接收 PhaseContext，返回 bool（True=成功）
 PhaseHandler = Callable[[PhaseContext], Awaitable[bool]]
 
+# body 硬截断上限（plan D3）：xhs/weibo 长文截断 5000 字 + 省略号；
+# store 层不做限制，保持薄层
+_BODY_MAX_CHARS = 5000
+
+
+def _flush_ctx_to_store(msg_id: str, ctx: PhaseContext, store: MessageStore, just_completed: Phase) -> None:
+    """阶段推进成功后，把 ctx 上对应阶段的产出回写到 store（plan D5）。
+
+    - DOWNLOADED 完成：ctx.content_text → body（截断到 _BODY_MAX_CHARS）
+    - DOWNLOADED 或 SUMMARIZED 完成：ctx.summary_text → summary
+      （weibo 在 download handler 内联生成摘要，所以 DOWNLOADED 也捞 summary；
+       双 if 而非 if/elif，见 plan R2/D5）
+    """
+    if just_completed == Phase.DOWNLOADED and ctx.content_text:
+        body = ctx.content_text[:_BODY_MAX_CHARS]
+        if len(ctx.content_text) > _BODY_MAX_CHARS:
+            body += "…"
+        store.mark_body(msg_id, body)
+    if ctx.summary_text and just_completed in (Phase.DOWNLOADED, Phase.SUMMARIZED):
+        store.mark_summary(msg_id, ctx.summary_text)
+
 
 class PipelineEngine:
     """统一流水线引擎。
@@ -141,6 +162,7 @@ class PipelineEngine:
 
             msg.phase = next_phase
             store.mark_phase(msg.msg_id, next_phase)
+            _flush_ctx_to_store(msg.msg_id, ctx, store, next_phase)
             logger.info("%s:%s → %s ✓", msg.platform, msg.msg_id, next_phase.name)
             store.save()
 

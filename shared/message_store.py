@@ -85,6 +85,8 @@ class MessageStore:
             error=data.get("error", ""),
             dynamic_text=data.get("dynamic_text", ""),
             subscription_ref=data.get("subscription_ref", ""),
+            body=data.get("body", ""),
+            summary=data.get("summary", ""),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -236,6 +238,26 @@ class MessageStore:
             self._messages[msg_id]["dynamic_text"] = f"{existing}\n{text}"
         else:
             self._messages[msg_id]["dynamic_text"] = text
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
+    def mark_body(self, msg_id: str, body: str) -> None:
+        """更新消息的正文（download 阶段回写）。
+
+        set（覆盖）语义：download handler 各只跑一次，无追加需求。
+        截断逻辑在调用方（engine flush）做，store 保持薄层。
+        """
+        if msg_id not in self._messages:
+            return
+        self._messages[msg_id]["body"] = body
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
+    def mark_summary(self, msg_id: str, summary: str) -> None:
+        """更新消息的 AI 摘要（summarize 阶段或 download 内联摘要回写）。"""
+        if msg_id not in self._messages:
+            return
+        self._messages[msg_id]["summary"] = summary
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
