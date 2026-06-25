@@ -130,21 +130,23 @@ class XhsAuthenticator(BaseAuthenticator):
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
         """通过 XhsClient 轮询 QR 状态。
 
-        状态码映射: 1=waiting, 2=scanned, 3=success, 4=expired
+        状态码映射: 0=waiting, 1=scanned, 2=success, 3=expired
+        字段名依据真实抓包: docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:880
         """
         logger.info("🔑 XhsAuthenticator 轮询扫码状态...")
         client = await self._ensure_client()
         try:
             result = await client.check_qrcode_status(qr_key, self._qr_code)
         except Exception as e:
+            logger.warning("🔑 XhsAuthenticator 轮询异常: %s", e)
             return AuthStatus(success=False, status=QRStatus.WAITING, message=f"轮询失败: {e}")
 
-        status_code = result.get("status", 1)
-        if status_code == 3:
+        status_code = result.get("codeStatus", 0)
+        if status_code == 2:
             return AuthStatus(success=True, status=QRStatus.SUCCESS, message="登录成功")
-        elif status_code == 2:
+        elif status_code == 1:
             return AuthStatus(success=False, status=QRStatus.SCANNED, message="已扫描，请确认")
-        elif status_code == 4:
+        elif status_code == 3:
             return AuthStatus(success=False, status=QRStatus.EXPIRED, message="二维码已过期")
         else:
             return AuthStatus(success=False, status=QRStatus.WAITING, message="等待扫描")
