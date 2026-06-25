@@ -1,6 +1,9 @@
-"""Tests for XhsAuthenticator — fully mocked XhsClient, no real XHS API calls.
+"""Tests for XhsAuthenticator — fully mocked AsyncXhsClient.
 
-P4-1 rewrite: vendor helpers replaced by XhsClient method mocking.
+Rewrite (2026-06-26): auth moved to ReaJason/xhs library via AsyncXhsClient.
+All XHS HTTP is mocked; no real network calls.
+
+See docs/superpowers/specs/2026-06-26-xhs-auth-xhs-library-migration-design.md
 """
 
 from __future__ import annotations
@@ -9,14 +12,18 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import requests
 
 from platforms.xiaohongshu.auth import XhsAuthenticator
 from shared.auth.base import (
+    AuthStatus,
     BaseAuthenticator,
     PlatformTokens,
     QRCodeResult,
+    QRExpiredError,
     QRStatus,
 )
+from shared.exceptions import CaptchaError, DataError, IpBlockError, RetryableError
 
 # ── ──
 
@@ -30,78 +37,77 @@ def _sample_cookies() -> dict[str, str]:
     }
 
 
+def _make_tokens(cookies: dict[str, str] | None = None) -> PlatformTokens:
+    return PlatformTokens(
+        platform="xhs",
+        cookies=cookies or _sample_cookies(),
+        obtained_at=time.time(),
+        expires_at=time.time() + 7 * 86400,
+    )
+
+
 # ── ──
 
 
 class TestGenerateQrCode:
-    @pytest.mark.asyncio
-    async def test_returns_qr_code_result(self):
-        """generate_qr_code returns QRCodeResult with qr_url/qr_key/expires_in."""
+    """generate_qr_code returns QRCodeResult sourced from AsyncXhsClient.get_qrcode.
+
+    Flow (spec §4.1):
+      a1 = generate_a1()
+      web_id = generate_web_id(a1)
+      client = AsyncXhsClient(cookie=f"a1={a1};webId={web_id}")
+      qr = await client.get_qrcode()  # {qr_id, code, url, multi_flag}
+      cache qr_id+code on instance
+      return QRCodeResult(qr_url=qr["url"], qr_key=qr["qr_id"], expires_in=180)
+    """
+
+    async def test_returns_qr_code_result_with_correct_fields(self):
         auth = XhsAuthenticator()
 
         mock_client = MagicMock()
-        mock_client.fetch_sec_cookies = AsyncMock(return_value={"sec_poison_id": "sec1", "gid": "gid1"})
-        mock_client.create_qrcode = AsyncMock(
+        mock_client.get_qrcode = AsyncMock(
             return_value={
                 "qr_id": "qr_abc",
-                "url": "https://qr.xhs.com/abc",
                 "code": "code_123",
+                "url": "https://qr.xhs.com/abc",
+                "multi_flag": 0,
             }
         )
+        mock_client.close = AsyncMock()
 
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client) as mock_cls:
             result = await auth.generate_qr_code()
 
         assert isinstance(result, QRCodeResult)
         assert result.qr_key == "qr_abc"
-        # QRCodeResult.qr_url must be sourced from the server's ``url`` field,
-        # NOT ``qr_url`` (which does not exist in real XHS responses).
         assert result.qr_url == "https://qr.xhs.com/abc"
         assert result.expires_in == 180
-        # init cookies captured for later polling
-        assert auth._init_cookies.get("a1")
-        assert auth._init_cookies.get("sec_poison_id") == "sec1"
-        assert auth._qr_code == "code_123"
+        # Verify cookie passed to AsyncXhsClient contains a1 + webId
+        mock_cls.assert_called_once()
+        init_cookie = mock_cls.call_args.kwargs.get("cookie") or mock_cls.call_args.args[0]
+        assert "a1=" in init_cookie
+        assert "webId=" in init_cookie
+        # Verify client cached for later poll/get_tokens
+        assert auth._client is mock_client
+        # Verify qr_id + code cached for poll_qr_status
+        assert auth._qr_id == "qr_abc"
+        assert auth._code == "code_123"
 
-    @pytest.mark.asyncio
-    async def test_qr_url_field_must_be_url_not_qr_url(self):
-        """Regression: server returns ``url`` only; ``qr_url`` MUST NOT be required.
+    async def test_propagates_get_qrcode_error_as_retryable(self):
+        """If get_qrcode raises a non-translated exception, it bubbles up.
 
-        Original bug (PR #13): auth.py read ``qr_data["qr_url"]`` but the real
-        XHS ``qrcode/create`` response uses ``url`` (verified against
-        ReaJason/xhs core.py docstring + project phase-3 captured payload).
-        The mock below mirrors the real shape (only ``url``, no ``qr_url``);
-        generate_qr_code must not raise KeyError.
+        _wrap_xhs_call translates known xhs exceptions; unknown exceptions
+        should still propagate (caller decides).
         """
+        from xhs.exception import DataFetchError
+
         auth = XhsAuthenticator()
-
         mock_client = MagicMock()
-        mock_client.fetch_sec_cookies = AsyncMock(return_value={})
-        mock_client.create_qrcode = AsyncMock(
-            return_value={
-                "qr_id": "qr_xyz",
-                "url": "xhsdiscover://login?qr_id=qr_xyz",
-                "code": "c9",
-            }
-        )
+        mock_client.get_qrcode = AsyncMock(side_effect=DataFetchError("server down"))
+        mock_client.close = AsyncMock()
 
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            result = await auth.generate_qr_code()
-
-        assert result.qr_url == "xhsdiscover://login?qr_id=qr_xyz"
-        assert result.qr_key == "qr_xyz"
-
-    @pytest.mark.asyncio
-    async def test_propagates_create_qrcode_error(self):
-        """If create_qrcode raises, generate_qr_code propagates the error."""
-        auth = XhsAuthenticator()
-
-        mock_client = MagicMock()
-        mock_client.fetch_sec_cookies = AsyncMock(return_value={})
-        mock_client.create_qrcode = AsyncMock(side_effect=RuntimeError("rate limited"))
-
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            with pytest.raises(RuntimeError, match="rate limited"):
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            with pytest.raises(DataError, match="server down"):
                 await auth.generate_qr_code()
 
 
@@ -109,102 +115,108 @@ class TestGenerateQrCode:
 
 
 class TestPollQrStatus:
-    """Regression: field name is 'codeStatus' (not 'status'), codes are 0/1/2/3 (not 1/2/3/4).
+    """poll_qr_status reads code_status (snake_case!). Regression for spec §1.2 #1.
 
-    Evidence: docs/superpowers/plans/2026-06-13-xhs-qr-login-phase-3.md:880-907
+    Mapping: 2=SUCCESS, 1=SCANNED, 3=EXPIRED, else=WAITING
     """
 
-    @pytest.mark.asyncio
-    async def test_waiting_code_status_0(self):
+    async def test_code_status_2_returns_success(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 0})
+        mock_client.check_qrcode = AsyncMock(return_value={"code_status": 2})
         auth._client = mock_client
+        auth._qr_id = "q1"
+        auth._code = "c1"
 
-        status = await auth.poll_qr_status("qr_abc")
-        assert status.status == QRStatus.WAITING
-        assert not status.success
-
-    @pytest.mark.asyncio
-    async def test_scanned_code_status_1(self):
-        auth = XhsAuthenticator()
-        mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 1})
-        auth._client = mock_client
-
-        status = await auth.poll_qr_status("qr_abc")
-        assert status.status == QRStatus.SCANNED
-        assert not status.success
-
-    @pytest.mark.asyncio
-    async def test_success_code_status_2(self):
-        auth = XhsAuthenticator()
-        mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 2})
-        auth._client = mock_client
-
-        status = await auth.poll_qr_status("qr_abc")
+        status = await auth.poll_qr_status("q1")
         assert status.status == QRStatus.SUCCESS
-        assert status.success
+        assert status.success is True
+        mock_client.check_qrcode.assert_awaited_once_with("q1", "c1")
 
-    @pytest.mark.asyncio
-    async def test_expired_code_status_3(self):
+    async def test_code_status_1_returns_scanned(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={"codeStatus": 3})
+        mock_client.check_qrcode = AsyncMock(return_value={"code_status": 1})
         auth._client = mock_client
+        auth._qr_id = "q1"
+        auth._code = "c1"
 
-        status = await auth.poll_qr_status("qr_abc")
+        status = await auth.poll_qr_status("q1")
+        assert status.status == QRStatus.SCANNED
+
+    async def test_code_status_3_returns_expired(self):
+        auth = XhsAuthenticator()
+        mock_client = MagicMock()
+        mock_client.check_qrcode = AsyncMock(return_value={"code_status": 3})
+        auth._client = mock_client
+        auth._qr_id = "q1"
+        auth._code = "c1"
+
+        status = await auth.poll_qr_status("q1")
         assert status.status == QRStatus.EXPIRED
-        assert not status.success
 
-    @pytest.mark.asyncio
-    async def test_default_code_status_when_missing(self):
-        """Missing 'codeStatus' field defaults to WAITING (code 0)."""
+    async def test_code_status_0_or_other_returns_waiting(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(return_value={})
+        mock_client.check_qrcode = AsyncMock(return_value={"code_status": 0})
         auth._client = mock_client
+        auth._qr_id = "q1"
+        auth._code = "c1"
 
-        status = await auth.poll_qr_status("qr_abc")
+        status = await auth.poll_qr_status("q1")
         assert status.status == QRStatus.WAITING
-        assert not status.success
 
-    @pytest.mark.asyncio
-    async def test_poll_exception_returns_waiting(self):
-        """Network/poll errors return a WAITING AuthStatus, not raise."""
+    async def test_missing_code_status_defaults_to_waiting(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.check_qrcode_status = AsyncMock(side_effect=RuntimeError("network down"))
+        mock_client.check_qrcode = AsyncMock(return_value={})
         auth._client = mock_client
+        auth._qr_id = "q1"
+        auth._code = "c1"
 
-        status = await auth.poll_qr_status("qr_abc")
+        status = await auth.poll_qr_status("q1")
+        assert status.status == QRStatus.WAITING
+
+    async def test_exception_returns_waiting(self):
+        """Any poll exception → WAITING (never raise; UI polls in loop)."""
+        from xhs.exception import DataFetchError
+
+        auth = XhsAuthenticator()
+        mock_client = MagicMock()
+        mock_client.check_qrcode = AsyncMock(side_effect=DataFetchError("net down"))
+        auth._client = mock_client
+        auth._qr_id = "q1"
+        auth._code = "c1"
+
+        status = await auth.poll_qr_status("q1")
         assert status.status == QRStatus.WAITING
         assert not status.success
-        assert "network down" in status.message
 
 
 # ── ──
 
 
 class TestGetTokens:
-    @pytest.mark.asyncio
-    async def test_returns_platform_tokens_from_client(self):
+    """get_tokens: SUCCESS → activate() → read cookie str → parse into PlatformTokens."""
+
+    async def test_activate_then_returns_cookies_from_client_cookie_str(self):
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.cookies = {"a1": "v1", "web_session": "ws", "gid": "g"}
+        mock_client.activate = AsyncMock(return_value={})
+        # cookie property returns "k=v; k=v" string
+        type(mock_client).cookie = property(lambda self: "a1=v1; web_session=ws123; gid=g1")
         auth._client = mock_client
 
         tokens = await auth.get_tokens("qr_abc")
 
+        mock_client.activate.assert_awaited_once()
         assert tokens.platform == "xhs"
         assert tokens.cookies["a1"] == "v1"
-        assert tokens.cookies["web_session"] == "ws"
+        assert tokens.cookies["web_session"] == "ws123"
+        assert tokens.cookies["gid"] == "g1"
         assert tokens.expires_at > time.time()
 
-    @pytest.mark.asyncio
-    async def test_returns_empty_when_no_client(self):
-        """When client is None (init never happened), return empty cookies."""
+    async def test_returns_empty_cookies_when_no_client(self):
         auth = XhsAuthenticator()
         auth._client = None
 
@@ -212,79 +224,221 @@ class TestGetTokens:
         assert tokens.cookies == {}
         assert tokens.expires_at <= time.time() + 5
 
-    @pytest.mark.asyncio
-    async def test_drops_empty_cookie_values(self):
-        """Empty string values are filtered out."""
+    async def test_propagates_activate_error_as_data_error(self):
+        from xhs.exception import DataFetchError
+
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.cookies = {"a1": "v1", "empty": "", "gid": "g"}
+        mock_client.activate = AsyncMock(side_effect=DataFetchError("activate failed"))
         auth._client = mock_client
 
-        tokens = await auth.get_tokens("qr_abc")
-        assert "empty" not in tokens.cookies
-        assert tokens.cookies["a1"] == "v1"
+        with pytest.raises(DataError):
+            await auth.get_tokens("qr_abc")
 
 
 # ── ──
 
 
-class TestRefreshTokens:
-    @pytest.mark.asyncio
-    async def test_updates_cookies_and_expiry(self):
-        """refresh_cookies returns new cookies: merged + expires_at bumped."""
-        auth = XhsAuthenticator()
-        tokens = PlatformTokens(
-            platform="xhs",
-            cookies=_sample_cookies(),
-            obtained_at=time.time(),
-            expires_at=time.time() + 86400,
-        )
+class TestExceptionTranslation:
+    """_wrap_xhs_call decorator translates xhs library exceptions to trawler types.
 
+    Mapping (spec §5.2):
+      NeedVerifyError → CaptchaError
+      IPBlockError    → IpBlockError
+      SignError       → RetryableError
+      DataFetchError  → DataError
+      RequestException→ RetryableError  (catch-all)
+    """
+
+    @pytest.mark.parametrize(
+        "xhs_exc, trawler_exc",
+        [
+            ("NeedVerifyError", CaptchaError),
+            ("IPBlockError", IpBlockError),
+            ("SignError", RetryableError),
+            ("DataFetchError", DataError),
+        ],
+    )
+    async def test_decorator_translates_each_xhs_exception(self, xhs_exc, trawler_exc):
+        """get_tokens wrapped → activate raises xhs_exc → caller sees trawler_exc."""
+        import xhs.exception as xe
+
+        auth = XhsAuthenticator()
+        exc_class = getattr(xe, xhs_exc)
         mock_client = MagicMock()
-        mock_client.close = AsyncMock()
-        mock_client.refresh_cookies = AsyncMock(return_value={"a1": "new_a1", "web_session": "new_ws"})
+        mock_client.activate = AsyncMock(side_effect=exc_class("boom"))
         auth._client = mock_client
 
-        # _ensure_client(cookie) should create a new XhsClient — patch the class
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            result = await auth.refresh_tokens(tokens)
+        with pytest.raises(trawler_exc):
+            await auth.get_tokens("q1")
 
-        assert result.expires_at >= tokens.expires_at
-        assert result.cookies["a1"] == "new_a1"
-        assert result.cookies["web_session"] == "new_ws"
-        # Other cookies preserved
-        assert result.cookies["gid"] == "test_gid"
-
-    @pytest.mark.asyncio
-    async def test_bumps_expiry_when_no_new_cookies(self):
-        """refresh_cookies returns None: cookies preserved, expires_at bumped."""
+    async def test_generic_requests_exception_becomes_retryable(self):
+        """Any other requests.RequestException subclass → RetryableError."""
         auth = XhsAuthenticator()
-        tokens = PlatformTokens(
-            platform="xhs",
-            cookies=_sample_cookies(),
-            obtained_at=time.time(),
-            expires_at=time.time() + 100,
-        )
-
         mock_client = MagicMock()
-        mock_client.refresh_cookies = AsyncMock(return_value=None)
-        mock_client.close = AsyncMock()
+        mock_client.activate = AsyncMock(
+            side_effect=requests.ConnectionError("network gone")
+        )
         auth._client = mock_client
 
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            result = await auth.refresh_tokens(tokens)
+        with pytest.raises(RetryableError):
+            await auth.get_tokens("q1")
 
-        # AC: cookies may differ OR expires_at bumped
-        assert result.expires_at >= tokens.expires_at
+
+# ── ──
+
+
+class TestGetUserNickname:
+    """get_user_nickname MUST NOT raise — failures return None."""
+
+    async def test_returns_nickname_from_get_self_info(self):
+        auth = XhsAuthenticator()
+        mock_client = MagicMock()
+        mock_client.get_self_info = AsyncMock(return_value={"nickname": "alice"})
+        mock_client.close = AsyncMock()
+
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            nick = await auth.get_user_nickname(_make_tokens())
+
+        assert nick == "alice"
+        mock_client.close.assert_awaited_once()
+
+    async def test_returns_none_on_xhs_exception(self):
+        from xhs.exception import DataFetchError
+
+        auth = XhsAuthenticator()
+        mock_client = MagicMock()
+        mock_client.get_self_info = AsyncMock(side_effect=DataFetchError("denied"))
+        mock_client.close = AsyncMock()
+
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            nick = await auth.get_user_nickname(_make_tokens())
+
+        assert nick is None
+
+    async def test_returns_none_when_nickname_missing(self):
+        auth = XhsAuthenticator()
+        mock_client = MagicMock()
+        mock_client.get_self_info = AsyncMock(return_value={"user_id": "u1"})  # no nickname
+        mock_client.close = AsyncMock()
+
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            nick = await auth.get_user_nickname(_make_tokens())
+
+        assert nick is None
+
+
+# ── ──
+
+
+class TestQrLogin:
+    """qr_login 主流程 — 串联 generate_qr_code/poll_qr_status/get_tokens,CLI 入口依赖。
+
+    覆盖 spec §4.1-4.3 的 deadline 循环、QRExpiredError 分支、asyncio.sleep。
+    无此测试类 = qr_login 假绿(CLI 入口 run_check.py 的 trawler auth xhs 走这条路径)。
+
+    不加 @pytest.mark.asyncio 装饰器(pyproject asyncio_mode=auto,见 plan 顶部说明)。
+    """
+
+    async def test_success_path_returns_tokens(self):
+        """mock 三步全成功:generate_qr_code → QRCodeResult;
+        poll_qr_status 先 SCANNED 再 SUCCESS;get_tokens → PlatformTokens;
+        display_qr_in_terminal 被 patch 掉(避免终端输出)。断言返回值是 PlatformTokens 且 success。
+        """
+        auth = XhsAuthenticator()
+
+        qr_result = QRCodeResult(
+            qr_url="https://qr.xhs.com/abc",
+            qr_key="qr_abc",
+            expires_in=180,
+        )
+        tokens = _make_tokens()
+
+        poll_mock = AsyncMock(side_effect=[
+            AuthStatus(success=False, status=QRStatus.SCANNED, message="scanned"),
+            AuthStatus(success=True, status=QRStatus.SUCCESS, message="ok"),
+        ])
+        get_tokens_mock = AsyncMock(return_value=tokens)
+
+        with (
+            patch.object(auth, "generate_qr_code", new=AsyncMock(return_value=qr_result)),
+            patch.object(auth, "poll_qr_status", new=poll_mock),
+            patch.object(auth, "get_tokens", new=get_tokens_mock),
+            patch("platforms.xiaohongshu.auth.display_qr_in_terminal") as mock_display,
+        ):
+            result = await auth.qr_login()
+
+        assert isinstance(result, PlatformTokens)
         assert result.cookies == tokens.cookies
+        mock_display.assert_called_once_with("https://qr.xhs.com/abc")
+        # poll 调了 2 次(SCANNED + SUCCESS),SUCCESS 后立即 return 不再 poll
+        assert poll_mock.await_count == 2
+        # get_tokens 只在 SUCCESS 分支调一次
+        get_tokens_mock.assert_awaited_once()
+
+    async def test_expired_raises(self):
+        """poll_qr_status 返回 EXPIRED → qr_login 立即抛 QRExpiredError,不再循环。
+        """
+        auth = XhsAuthenticator()
+
+        qr_result = QRCodeResult(
+            qr_url="https://qr.xhs.com/abc",
+            qr_key="qr_abc",
+            expires_in=180,
+        )
+
+        poll_mock = AsyncMock(return_value=AuthStatus(
+            success=False, status=QRStatus.EXPIRED, message="expired",
+        ))
+
+        with (
+            patch.object(auth, "generate_qr_code", new=AsyncMock(return_value=qr_result)),
+            patch.object(auth, "poll_qr_status", new=poll_mock),
+            patch("platforms.xiaohongshu.auth.display_qr_in_terminal"),
+            patch("platforms.xiaohongshu.auth.asyncio.sleep", new=AsyncMock()),
+        ):
+            with pytest.raises(QRExpiredError):
+                await auth.qr_login()
+
+        # EXPIRED 立即 raise,get_tokens 不应被调
+        poll_mock.assert_awaited()
+
+    async def test_timeout_raises(self):
+        """deadline 超时(expires_in 极短 + poll 永远 WAITING)→ qr_login 抛 QRExpiredError。
+        """
+        auth = XhsAuthenticator()
+
+        # expires_in=0 → deadline 立即到期,while 条件首次检查即 false 之前先 poll 一次
+        qr_result = QRCodeResult(
+            qr_url="https://qr.xhs.com/abc",
+            qr_key="qr_abc",
+            expires_in=0,
+        )
+
+        with (
+            patch.object(auth, "generate_qr_code", new=AsyncMock(return_value=qr_result)),
+            patch.object(
+                auth,
+                "poll_qr_status",
+                new=AsyncMock(return_value=AuthStatus(
+                    success=False, status=QRStatus.WAITING, message="waiting",
+                )),
+            ),
+            patch("platforms.xiaohongshu.auth.display_qr_in_terminal"),
+            patch("platforms.xiaohongshu.auth.asyncio.sleep", new=AsyncMock()),
+            patch("platforms.xiaohongshu.auth.time.monotonic", side_effect=[0.0, 100.0]),
+        ):
+            with pytest.raises(QRExpiredError):
+                await auth.qr_login()
 
 
 # ── ──
 
 
 class TestValidateTokens:
-    @pytest.mark.asyncio
-    async def test_expired_returns_false(self):
+    """validate_tokens: xhs lib has no refresh → validate == probe via get_self_info."""
+
+    async def test_expired_at_returns_false(self):
         auth = XhsAuthenticator()
         tokens = PlatformTokens(
             platform="xhs",
@@ -294,135 +448,100 @@ class TestValidateTokens:
         )
         assert await auth.validate_tokens(tokens) is False
 
-    @pytest.mark.asyncio
-    async def test_probe_true_returns_true(self):
+    async def test_get_self_info_with_nickname_returns_true(self):
         auth = XhsAuthenticator()
-        tokens = PlatformTokens(
-            platform="xhs",
-            cookies=_sample_cookies(),
-            obtained_at=time.time(),
-            expires_at=time.time() + 86400,
-        )
-
         mock_client = MagicMock()
-        mock_client.probe = AsyncMock(return_value=True)
+        mock_client.get_self_info = AsyncMock(return_value={"nickname": "x"})
         mock_client.close = AsyncMock()
-        auth._client = mock_client
 
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            assert await auth.validate_tokens(tokens) is True
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            result = await auth.validate_tokens(_make_tokens())
 
-    @pytest.mark.asyncio
-    async def test_probe_false_returns_false(self):
+        assert result is True
+
+    async def test_get_self_info_without_nickname_returns_false(self):
         auth = XhsAuthenticator()
-        tokens = PlatformTokens(
-            platform="xhs",
-            cookies=_sample_cookies(),
-            obtained_at=time.time(),
-            expires_at=time.time() + 86400,
-        )
-
         mock_client = MagicMock()
-        mock_client.probe = AsyncMock(return_value=False)
+        mock_client.get_self_info = AsyncMock(return_value={})
         mock_client.close = AsyncMock()
-        auth._client = mock_client
 
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            assert await auth.validate_tokens(tokens) is False
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            result = await auth.validate_tokens(_make_tokens())
 
-    @pytest.mark.asyncio
-    async def test_probe_exception_returns_false(self):
-        """probe() raising should be swallowed, returning False."""
+        assert result is False
+
+    async def test_xhs_exception_returns_false(self):
+        from xhs.exception import DataFetchError
+
         auth = XhsAuthenticator()
-        tokens = PlatformTokens(
-            platform="xhs",
-            cookies=_sample_cookies(),
-            obtained_at=time.time(),
-            expires_at=time.time() + 86400,
-        )
-
         mock_client = MagicMock()
-        mock_client.probe = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_client.get_self_info = AsyncMock(side_effect=DataFetchError("expired"))
         mock_client.close = AsyncMock()
-        auth._client = mock_client
 
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
-            assert await auth.validate_tokens(tokens) is False
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            result = await auth.validate_tokens(_make_tokens())
+
+        assert result is False
 
 
 # ── ──
 
 
-class TestEnsureClientClosesOldClient:
-    """Regression: _ensure_client(cookie) must close the previous client's
-    aiohttp session to avoid 'Unclosed client session' warnings.
+class TestRefreshTokens:
+    """refresh_tokens is degraded to validate-only (spec §4.5).
 
-    Root cause: refresh_tokens and validate_tokens call _ensure_client with a
-    non-empty cookie, which replaced self._client without closing the old one.
+    xhs lib has no refresh concept. If get_self_info succeeds → return
+    original tokens with bumped expires_at. If fails → raise (caller asks
+    user to re-login).
     """
 
-    @pytest.mark.asyncio
-    async def test_replacing_cookie_closes_old_client(self):
-        """Passing a non-empty cookie must await close() on the old client."""
+    async def test_valid_tokens_returned_with_bumped_expiry(self):
         auth = XhsAuthenticator()
-        old_client = MagicMock()
-        old_client.close = AsyncMock()
-        auth._client = old_client
+        tokens = _make_tokens()
+        original_expiry = tokens.expires_at
+        mock_client = MagicMock()
+        mock_client.get_self_info = AsyncMock(return_value={"nickname": "x"})
+        mock_client.close = AsyncMock()
 
-        new_client = MagicMock()
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=new_client):
-            await auth._ensure_client(cookie="a1=new; web_session=fresh")
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            result = await auth.refresh_tokens(tokens)
 
-        # AC: old client's close was awaited exactly once
-        old_client.close.assert_awaited_once()
-        # AC: self._client now points to the new client
-        assert auth._client is new_client
+        assert result.cookies == tokens.cookies
+        assert result.expires_at >= original_expiry
 
-    @pytest.mark.asyncio
-    async def test_no_cookie_does_not_close_existing_client(self):
-        """Calling _ensure_client() without cookie must keep the current client."""
+    async def test_invalid_tokens_raises(self):
+        from xhs.exception import DataFetchError
+
         auth = XhsAuthenticator()
-        existing = MagicMock()
-        existing.close = AsyncMock()
-        auth._client = existing
+        tokens = _make_tokens()
+        mock_client = MagicMock()
+        mock_client.get_self_info = AsyncMock(side_effect=DataFetchError("expired"))
+        mock_client.close = AsyncMock()
 
-        returned = await auth._ensure_client()
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            with pytest.raises(DataError):
+                await auth.refresh_tokens(tokens)
 
-        existing.close.assert_not_awaited()
-        assert returned is existing
-        assert auth._client is existing
 
-    @pytest.mark.asyncio
-    async def test_first_call_with_cookie_does_not_close(self):
-        """When self._client is None, no close attempt is made on None."""
+# ── ──
+
+
+class TestClose:
+    async def test_close_closes_cached_client(self):
         auth = XhsAuthenticator()
-        new_client = MagicMock()
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=new_client):
-            await auth._ensure_client(cookie="a1=fresh")
-        # AC: no exception raised, client assigned
-        assert auth._client is new_client
+        mock_client = MagicMock()
+        mock_client.close = AsyncMock()
+        auth._client = mock_client
 
-    @pytest.mark.asyncio
-    async def test_refresh_tokens_does_not_leak_old_client(self):
-        """End-to-end: refresh_tokens replacing cookie should close prior client."""
+        await auth.close()
+
+        mock_client.close.assert_awaited_once()
+        assert auth._client is None
+
+    async def test_close_when_no_client_is_noop(self):
         auth = XhsAuthenticator()
-        old_client = MagicMock()
-        old_client.close = AsyncMock()
-        old_client.refresh_cookies = AsyncMock(return_value={"a1": "new"})
-        auth._client = old_client
-
-        new_client = MagicMock()
-        new_client.refresh_cookies = AsyncMock(return_value={"a1": "new_a1"})
-        tokens = PlatformTokens(
-            platform="xhs",
-            cookies=_sample_cookies(),
-            obtained_at=time.time(),
-            expires_at=time.time() + 86400,
-        )
-        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=new_client):
-            await auth.refresh_tokens(tokens)
-
-        old_client.close.assert_awaited_once()
+        auth._client = None
+        await auth.close()  # must not raise
 
 
 # ── ──
@@ -435,5 +554,7 @@ class TestIsAuthenticator:
     def test_supports_qr_login(self):
         assert XhsAuthenticator().supports_qr_login() is True
 
-    def test_supports_refresh(self):
+    def test_supports_refresh_returns_true(self):
+        """Web UI refresh button needs supports_refresh()==True even though
+        refresh is degraded to validate. Spec §4.5."""
         assert XhsAuthenticator().supports_refresh() is True
