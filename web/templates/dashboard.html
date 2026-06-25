@@ -27,6 +27,42 @@
 </div>
 {% endmacro %}
 
+{# Hover detail card for a single message row (plan 2026-06-25 D7) #}
+{% macro msg_hover_card(msg) %}
+<div class="absolute left-0 top-full hidden group-hover:block z-50 w-96 pt-2">
+  <div class="bg-[var(--card-bg)] backdrop-blur-[12px] border border-[var(--card-border)] rounded-[10px] shadow-tooltip p-3 max-h-96 overflow-y-auto">
+    <div class="text-sm font-semibold text-[var(--text-primary)] mb-1">{{ msg.title }}</div>
+    <div class="text-xs text-[var(--text-secondary)] mb-2 flex items-center gap-1.5">
+      <span class="font-mono">{{ msg.platform }}</span>
+      <span>·</span>
+      <span>{{ msg.author }}</span>
+      <span>·</span>
+      <span>{{ msg.phase.name }}</span>
+    </div>
+    {% if msg.error %}
+    <div class="mb-2">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-0.5">错误</div>
+      <div class="text-xs text-red-500 leading-relaxed">{{ msg.error }}</div>
+    </div>
+    {% endif %}
+    {% if msg.summary %}
+    <div class="mb-2">
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-0.5">AI 摘要</div>
+      <div class="text-xs text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">{{ msg.summary }}</div>
+    </div>
+    {% endif %}
+    {% if msg.body %}
+    <div>
+      <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-0.5">正文</div>
+      <div class="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{{ msg.body }}</div>
+    </div>
+    {% else %}
+    <div class="text-xs text-[var(--text-tertiary)] italic">（此消息无正文，如视频仅含转写）</div>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 <h1 class="text-2xl font-semibold tracking-tight mb-1">仪表盘</h1>
 <p class="text-sm text-[var(--text-secondary)] mb-6">
@@ -98,13 +134,16 @@
       </thead>
       <tbody>
         {% for msg in recent_messages %}
-        <tr class="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+        <tr class="relative group border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
           <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.updated_at | timeago }}</td>
           <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.pubdate | timeago }}</td>
           <td class="px-5 py-3">{{ platform_tag(msg.platform) }}</td>
           <td class="px-5 py-3 max-w-xs truncate" title="{{ msg.title }}">{{ msg.title }}</td>
           <td class="px-5 py-3 text-[var(--text-secondary)]">{{ msg.author }}</td>
           <td class="px-5 py-3">{{ badge(msg.phase.name, msg.phase | phase_color) }}</td>
+          <td class="p-0 m-0 relative">
+            {{ msg_hover_card(msg) }}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

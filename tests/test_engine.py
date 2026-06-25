@@ -308,3 +308,119 @@ async def test_transcribe_phase_missing_filepath_returns_false_with_error(
         # Drop the handlers module from cache so later tests that import it
         # (e.g. test_platform_handlers.py) see the decorators re-fire.
         sys.modules.pop("platforms.bilibili.handlers", None)
+
+
+# ── body/summary flush (plan 2026-06-25 D5) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_process_message_flushes_body_after_download(config: Config, store: MessageStore) -> None:
+    """DOWNLOADED 阶段 handler 设置 ctx.content_text 后，engine 必须 flush 到 store.body。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("xhs", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.content_text = "正文内容"
+        return True
+
+    @PipelineEngine.register("xhs", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("xhs:note1", "xhs", ContentType.TEXT, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("xhs:note1")
+    assert updated is not None
+    assert updated.body == "正文内容"
+
+
+@pytest.mark.asyncio
+async def test_process_message_flushes_summary_after_summarized(config: Config, store: MessageStore) -> None:
+    """SUMMARIZED 阶段 handler 设置 ctx.summary_text 后，engine 必须 flush 到 store.summary。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.downloaded_filepath = Path("/tmp/fake.mp4")
+        return True
+
+    @PipelineEngine.register("bili", Phase.TRANSCRIBED)
+    async def tr(ctx: PhaseContext) -> bool:
+        return True
+
+    @PipelineEngine.register("bili", Phase.SUMMARIZED)
+    async def sm(ctx: PhaseContext) -> bool:
+        ctx.summary_text = "AI 摘要内容"
+        return True
+
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili:BV1")
+    assert updated is not None
+    assert updated.summary == "AI 摘要内容"
+
+
+@pytest.mark.asyncio
+async def test_process_message_flushes_inline_summary_after_downloaded(config: Config, store: MessageStore) -> None:
+    """覆盖 weibo 内联摘要路径（F6/R2/D5）：DOWNLOADED handler 内直接设置
+    ctx.summary_text，流程不经过 SUMMARIZED 阶段（TEXT 类型）。
+    engine 集中 flush 必须在 DOWNLOADED 后也捞 summary。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("weibo", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.content_text = "微博正文"
+        ctx.summary_text = "内联摘要"  # 模拟 weibo download handler 内联生成摘要
+        return True
+
+    @PipelineEngine.register("weibo", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("weibo:post1", "weibo", ContentType.TEXT, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("weibo:post1")
+    assert updated is not None
+    # body 来自 content_text
+    assert updated.body == "微博正文"
+    # summary 来自内联摘要（关键：DOWNLOADED 阶段也要 flush summary）
+    assert updated.summary == "内联摘要"
+
+
+@pytest.mark.asyncio
+async def test_process_message_flush_truncates_long_body(config: Config, store: MessageStore) -> None:
+    """body 超过 5000 字必须截断并加省略号（plan D3）。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    long_text = "X" * 6000
+
+    @PipelineEngine.register("xhs", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.content_text = long_text
+        return True
+
+    @PipelineEngine.register("xhs", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("xhs:note2", "xhs", ContentType.TEXT, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("xhs:note2")
+    assert updated is not None
+    assert len(updated.body) == 5001  # 5000 字 + "…"
