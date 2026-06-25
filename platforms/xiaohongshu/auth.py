@@ -122,7 +122,7 @@ class XhsAuthenticator(BaseAuthenticator):
         self._qr_code = qr_data.get("code", "")
 
         return QRCodeResult(
-            qr_url=qr_data["qr_url"],
+            qr_url=qr_data.get("url", ""),   # server returns "url", not "qr_url"
             qr_key=qr_data["qr_id"],
             expires_in=180,
         )

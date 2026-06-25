@@ -44,7 +44,7 @@ class TestGenerateQrCode:
         mock_client.create_qrcode = AsyncMock(
             return_value={
                 "qr_id": "qr_abc",
-                "qr_url": "https://qr.xhs.com/abc",
+                "url": "https://qr.xhs.com/abc",
                 "code": "code_123",
             }
         )
@@ -54,12 +54,42 @@ class TestGenerateQrCode:
 
         assert isinstance(result, QRCodeResult)
         assert result.qr_key == "qr_abc"
+        # QRCodeResult.qr_url must be sourced from the server's ``url`` field,
+        # NOT ``qr_url`` (which does not exist in real XHS responses).
         assert result.qr_url == "https://qr.xhs.com/abc"
         assert result.expires_in == 180
         # init cookies captured for later polling
         assert auth._init_cookies.get("a1")
         assert auth._init_cookies.get("sec_poison_id") == "sec1"
         assert auth._qr_code == "code_123"
+
+    @pytest.mark.asyncio
+    async def test_qr_url_field_must_be_url_not_qr_url(self):
+        """Regression: server returns ``url`` only; ``qr_url`` MUST NOT be required.
+
+        Original bug (PR #13): auth.py read ``qr_data["qr_url"]`` but the real
+        XHS ``qrcode/create`` response uses ``url`` (verified against
+        ReaJason/xhs core.py docstring + project phase-3 captured payload).
+        The mock below mirrors the real shape (only ``url``, no ``qr_url``);
+        generate_qr_code must not raise KeyError.
+        """
+        auth = XhsAuthenticator()
+
+        mock_client = MagicMock()
+        mock_client.fetch_sec_cookies = AsyncMock(return_value={})
+        mock_client.create_qrcode = AsyncMock(
+            return_value={
+                "qr_id": "qr_xyz",
+                "url": "xhsdiscover://login?qr_id=qr_xyz",
+                "code": "c9",
+            }
+        )
+
+        with patch("platforms.xiaohongshu.auth.XhsClient", return_value=mock_client):
+            result = await auth.generate_qr_code()
+
+        assert result.qr_url == "xhsdiscover://login?qr_id=qr_xyz"
+        assert result.qr_key == "qr_xyz"
 
     @pytest.mark.asyncio
     async def test_propagates_create_qrcode_error(self):
