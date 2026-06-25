@@ -31,10 +31,10 @@ QR_REFERER = "https://passport.weibo.com/"
 KEEPALIVE_URL = "https://weibo.com"
 
 # 微博用户信息端点（取登录账号昵称）
-# 字段路径：data.loginProfile.screen_name
-# 注意：该端点字段路径未经真实 cookie 实测确认，部署后需用真实 cookie curl 验证；
-# 失败时 get_user_nickname() 降级返回 None，不影响 auth 页面 status 显示。
-WEIBO_USER_INFO_URL = "https://m.weibo.cn/api/config"
+# PC 主站 ajax 接口，对应服务器这套 SUB/SUBP 域 cookie
+# 字段路径：data.user.screen_name（基于 weibo.com/ajax/profile/info 抓包假设，
+# 需 cookie 未风控时实测验证；被风控(6102) 会返回 text/html 拦截页，非 JSON）
+WEIBO_USER_INFO_URL = "https://weibo.com/ajax/profile/info"
 
 # 微博 QR 状态 retcode 映射
 # 50114001 = 未扫码, 50114002 = 已扫码待确认, 20000000 = 登录成功, 50114004 = 已过期
@@ -326,34 +326,37 @@ class WeiboAuthenticator(BaseAuthenticator):
                 return False
 
     async def get_user_nickname(self, tokens: PlatformTokens) -> str | None:
-        """从 m.weibo.cn /api/config 拉取当前登录账号昵称。
+        """从 weibo.com/ajax/profile/info 拉取当前登录账号昵称。
 
-        字段路径: data.loginProfile.screen_name（plan §3.3 R1）。
-        **该路径未经真实 cookie 实测确认**——部署后需 curl 验证；任一环节失败
-        返回 None，不向上抛异常，不影响 web auth 页面 status 显示。
+        字段路径: data.user.screen_name（基于 weibo.com/ajax/profile/info 抓包假设，
+        需 cookie 未风控时实测验证）。失败/被风控(6102/HTML) 返回 None。
         """
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         async with aiohttp.ClientSession(trust_env=False) as session:
             try:
                 resp = await session.get(
                     WEIBO_USER_INFO_URL,
-                    headers={"User-Agent": _get_user_agent(), "Cookie": cookie_str},
+                    headers={
+                        "User-Agent": _get_user_agent(),
+                        "Cookie": cookie_str,
+                        "Referer": "https://weibo.com/",
+                        "Accept": "application/json",
+                    },
                     timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
                     allow_redirects=False,
                 )
                 try:
+                    # 风控会返回 text/html（6102 拦截页），不是 JSON
+                    ctype = resp.headers.get("Content-Type", "")
                     if resp.status != 200:
+                        return None
+                    if "json" not in ctype:
                         return None
                     data = await resp.json(content_type=None)
                 finally:
                     resp.close()
-                # 期望: {"data": {"loginStatus": true, "loginProfile": {"screen_name": ...}}}
-                profile = (
-                    data.get("data", {}).get("loginProfile", {})
-                    if isinstance(data, dict)
-                    else {}
-                )
-                nick = profile.get("screen_name") if isinstance(profile, dict) else None
+                user = data.get("data", {}).get("user", {}) if isinstance(data, dict) else {}
+                nick = user.get("screen_name") if isinstance(user, dict) else None
                 return nick or None
             except Exception as e:
                 logger.warning("微博 nickname 获取失败: %s", e)

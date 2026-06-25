@@ -445,6 +445,104 @@ class TestValidateTokens:
             assert await auth.validate_tokens(tokens) is False
 
 
+# ── WeiboAuthenticator.get_user_nickname ───────────────────
+
+
+class TestGetUserNickname:
+    @pytest.mark.asyncio
+    async def test_success_returns_screen_name(self):
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.json = AsyncMock(
+            return_value={"data": {"user": {"screen_name": "测试用户"}}}
+        )
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            nick = await auth.get_user_nickname(tokens)
+
+        assert nick == "测试用户"
+
+    @pytest.mark.asyncio
+    async def test_wind_control_html_returns_none(self):
+        """风控(6102) 返回 text/html 拦截页 → 返回 None，不抛异常。"""
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+        # 即使 json() 能解析也走不到——content-type 检查先拦截
+        mock_resp.json = AsyncMock(return_value={})
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            nick = await auth.get_user_nickname(tokens)
+
+        assert nick is None
+
+    @pytest.mark.asyncio
+    async def test_missing_user_field_returns_none(self):
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.json = AsyncMock(return_value={"data": {"user": {}}})
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            nick = await auth.get_user_nickname(tokens)
+
+        assert nick is None
+
+    @pytest.mark.asyncio
+    async def test_bad_status_returns_none(self):
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
+
+        mock_resp = MagicMock()
+        mock_resp.status = 401
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.json = AsyncMock(return_value={})
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            nick = await auth.get_user_nickname(tokens)
+
+        assert nick is None
+
+    @pytest.mark.asyncio
+    async def test_network_error_returns_none(self):
+        """aiohttp.ClientError 被捕获 → 返回 None，不向上抛。"""
+        import aiohttp
+
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
+
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(side_effect=aiohttp.ClientError("connection reset"))
+
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            nick = await auth.get_user_nickname(tokens)
+
+        assert nick is None
+
+
 # ── WeiboAuthenticator.supports_refresh ────────────────────
 
 
