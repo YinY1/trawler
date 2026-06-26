@@ -19,6 +19,7 @@ from shared.auth.base import (
 )
 from shared.config import Config
 from shared.constants import WEIBO_POLL_TIMEOUT, WEIBO_REQUEST_TIMEOUT
+from shared.dump import DUMP_ENABLED, dump_response
 
 logger = logging.getLogger("trawler.weibo.auth")
 
@@ -163,6 +164,10 @@ class WeiboAuthenticator(BaseAuthenticator):
             finally:
                 resp.close()
 
+        # TEMP DEBUG DUMP: 完整 poll 响应落盘到 /tmp 供 nickname 排查
+        if DUMP_ENABLED:
+            dump_response("weibo_poll", data)
+
         if not isinstance(data, dict):
             logger.warning("轮询二维码响应数据类型异常: %s", type(data).__name__)
             data = {}
@@ -246,6 +251,19 @@ class WeiboAuthenticator(BaseAuthenticator):
                 raise RefreshFailedError("未获取到 Cookie 响应头")
 
         cookies = _parse_weibo_cookies(set_cookie)
+
+        # TEMP DEBUG DUMP: get_tokens 抓到的 Set-Cookie / 解析后 cookies / login_url
+        if DUMP_ENABLED:
+            dump_response(
+                "weibo_get_tokens",
+                {
+                    "set_cookie": set_cookie,
+                    "parsed_cookies": cookies,
+                    "login_url": login_url,
+                    "last_check_data": self._last_check_data,
+                },
+            )
+
         if "SUB" not in cookies:
             raise RefreshFailedError("未获取到 SUB Cookie，登录可能失败")
 

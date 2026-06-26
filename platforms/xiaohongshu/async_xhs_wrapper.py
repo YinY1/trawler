@@ -14,14 +14,50 @@ from __future__ import annotations
 
 # pyright: basic
 import asyncio
+import contextlib
+import io
 import logging
+import os
 from typing import Any
 
 from xhs.core import XhsClient
 
 from platforms.xiaohongshu.signer import get_xhs_sign
+from shared.dump import DUMP_ENABLED, dump_response
 
 logger = logging.getLogger("trawler.xiaohongshu.async_wrapper")
+
+
+# TEMP DEBUG: xhs 库内部 print(data) 副作用会污染 stdout。
+# 抑制(print 副作用)是无条件的——xhs 库的 print 在生产也会破坏 Rich console
+# 和 JSON 输出,所以无论 dump 是否开启都必须吞掉。
+# 但"把吞掉的内容 tee 到文件"是 debug-only 行为,跟 dump 工具共用 TRAWLER_DUMP
+# 开关:默认关闭零开销,开启时(且 target 含 "xhs_selfinfo")才落盘。
+_SUPPRESS = os.environ.get("TRAWLER_XHS_SUPPRESS_STDOUT", "1") != "0"
+
+
+@contextlib.contextmanager
+def _suppress_xhs_stdout() -> Any:
+    """临时吞掉 xhs 库内部的 print(data) 副作用。
+
+    抑制本身无条件(见模块 docstring);若同时开启了 dump,则把吞掉的内容
+    通过 dump_response(tag="xhs_selfinfo") 落盘,失败回退到原始行为(不抛)。
+
+    注意:不在此处用 ``except Exception`` 吞异常——xhs 库抛出的
+    DataFetchError / IPBlockError 等必须穿出本上下文,由 auth.py 的
+    ``_wrap_xhs_call`` 翻译到 trawler 异常体系。
+    """
+    if not _SUPPRESS:
+        yield None
+        return
+    sink = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(sink):
+            yield sink
+    finally:
+        out = sink.getvalue() if sink else ""
+        if out:
+            dump_response("xhs_selfinfo", {"stdout": out})
 
 
 def _sign_adapter(url: str, data: Any = None, *, a1: str = "", web_session: str = "") -> dict[str, str]:
@@ -68,24 +104,32 @@ class AsyncXhsClient:
         """生成 QR 二维码。返回 ``{qr_id, code, url, multi_flag}``。"""
         assert self._client is not None
         # xhs lib 运行时返回 dict, 但类型存根声明为 Response | Any (lib typing 不准).
-        return await asyncio.to_thread(self._client.get_qrcode)  # type: ignore[return-value]
+        with _suppress_xhs_stdout():
+            return await asyncio.to_thread(self._client.get_qrcode)  # type: ignore[return-value]
 
     async def check_qrcode(self, qr_id: str, code: str) -> dict[str, Any]:
         """轮询 QR 状态。返回含 ``code_status`` 字段(2=success)。"""
         assert self._client is not None
-        return await asyncio.to_thread(  # type: ignore[return-value]
-            self._client.check_qrcode, qr_id, code
-        )
+        with _suppress_xhs_stdout():
+            return await asyncio.to_thread(  # type: ignore[return-value]
+                self._client.check_qrcode, qr_id, code
+            )
 
     async def activate(self) -> dict[str, Any]:
         """激活 session,拿 web_session 写入 cookie jar。"""
         assert self._client is not None
-        return await asyncio.to_thread(self._client.activate)  # type: ignore[return-value]
+        with _suppress_xhs_stdout():
+            return await asyncio.to_thread(self._client.activate)  # type: ignore[return-value]
 
     async def get_self_info(self) -> dict[str, Any]:
         """获取当前登录用户信息(含 nickname)。"""
         assert self._client is not None
-        return await asyncio.to_thread(self._client.get_self_info)  # type: ignore[return-value]
+        with _suppress_xhs_stdout():
+            result: dict[str, Any] = await asyncio.to_thread(self._client.get_self_info)  # type: ignore[assignment]
+        # TEMP DEBUG DUMP: xhs 库 get_self_info 完整返回落盘
+        if DUMP_ENABLED:
+            dump_response("xhs_selfinfo", result)
+        return result
 
     @property
     def cookie(self) -> str:

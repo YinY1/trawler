@@ -38,6 +38,7 @@ from shared.auth.base import (
 from shared.auth.qr_display import display_qr_in_terminal
 from shared.config import Config
 from shared.cookie_utils import build_cookie_str, parse_cookie_str
+from shared.dump import DUMP_ENABLED, dump_response
 
 # NOTE: trawler 的 IpBlockError(小写 p) 与 xhs.exception 的 IPBlockError(大写 P)
 # 拼写不同,本模块顶部同时 import 两者:xhs 版在 line 22 的 xhs.exception import,
@@ -191,6 +192,10 @@ class XhsAuthenticator(BaseAuthenticator):
             logger.warning("🔑 轮询异常: %s", e)
             return AuthStatus(success=False, status=QRStatus.WAITING, message=f"轮询失败: {e}")
 
+        # TEMP DEBUG DUMP: check_qrcode 完整返回落盘
+        if DUMP_ENABLED:
+            dump_response("xhs_poll", result)
+
         code_status = result.get("code_status", 0)  # ← 关键修复: snake_case
         if code_status == 2:
             return AuthStatus(success=True, status=QRStatus.SUCCESS, message="登录成功")
@@ -211,6 +216,11 @@ class XhsAuthenticator(BaseAuthenticator):
 
         await self._client.activate()
         full_cookie_str = self._client.cookie
+
+        # TEMP DEBUG DUMP: activate() 后 cookie 字符串落盘
+        if DUMP_ENABLED:
+            dump_response("xhs_get_tokens", {"cookie": full_cookie_str})
+
         cookie_dict = parse_cookie_str(full_cookie_str)
         return PlatformTokens(
             platform="xhs",
