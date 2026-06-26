@@ -299,6 +299,47 @@ class TestGetNoteComments:
             assert result["cursor"] == "abc"
 
 
+class TestGetUserByKeyword:
+    """get_user_by_keyword: 搜索用户,返回 {users: [...]} dict。"""
+
+    async def test_delegates_keyword_and_page(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_by_keyword.return_value = {
+                "users": [{"user_id": "u1", "nickname": "alice"}]
+            }
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_user_by_keyword("alice", page=2)
+
+            mock_instance.get_user_by_keyword.assert_called_once_with("alice", 2)
+
+    async def test_default_page_is_one(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_by_keyword.return_value = {"users": []}
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_user_by_keyword("test")
+
+            mock_instance.get_user_by_keyword.assert_called_once_with("test", 1)
+
+    async def test_returns_users_dict_unchanged(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_by_keyword.return_value = {
+                "users": [{"user_id": "u1"}]
+            }
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            result = await client.get_user_by_keyword("test")
+
+            assert result["users"] == [{"user_id": "u1"}]
+
+
 class TestWrapXhsCallLivesInWrapper:
     """_wrap_xhs_call 现在住在 async_xhs_wrapper(spec §3.1.2 下沉)。"""
 

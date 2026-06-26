@@ -236,6 +236,28 @@ class AsyncXhsClient:
             )
         return result
 
+    @_wrap_xhs_call
+    async def get_user_by_keyword(self, keyword: str, page: int = 1) -> dict[str, Any]:
+        """搜索用户。
+
+        Args:
+            keyword: 搜索关键词(用户昵称)
+            page: 页码(从 1 开始)
+
+        Returns:
+            完整 data dict: ``{users: [...]}``。
+        """
+        assert self._client is not None
+        result = await asyncio.to_thread(
+            self._client.get_user_by_keyword, keyword, page
+        )
+        if DUMP_ENABLED:
+            dump_response(
+                "xhs_user_by_keyword",
+                {"keyword": keyword, "page": page, "result": result},
+            )
+        return result
+
     @property
     def cookie(self) -> str:
         """当前 cookie jar 字符串(``"k1=v1; k2=v2"``)。"""
