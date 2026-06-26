@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import requests
 
-from platforms.xiaohongshu.auth import XhsAuthenticator
+from platforms.xiaohongshu.auth import XhsAuthenticator, _extract_nickname
 from shared.auth.base import (
     AuthStatus,
     BaseAuthenticator,
@@ -44,6 +44,44 @@ def _make_tokens(cookies: dict[str, str] | None = None) -> PlatformTokens:
         obtained_at=time.time(),
         expires_at=time.time() + 7 * 86400,
     )
+
+
+# ── ──
+
+
+class TestExtractNickname:
+    """_extract_nickname: 双路径兜底提取 nickname。
+
+    v1 selfinfo 返回嵌套 {"basic_info": {"nickname": "..."}};
+    v2 /user/me 返回扁平 {"nickname": "..."}。
+    嵌套优先,fallback 到扁平,都拿不到返回 None。
+    """
+
+    def test_nested_v1_selfinfo(self):
+        info = {"basic_info": {"nickname": "小红薯6740CA2F"}}
+        assert _extract_nickname(info) == "小红薯6740CA2F"
+
+    def test_flat_v2_me(self):
+        info = {"nickname": "v2用户"}
+        assert _extract_nickname(info) == "v2用户"
+
+    def test_nested_takes_priority(self):
+        # basic_info 有 nickname 时优先用,即使顶层也有
+        info = {"nickname": "顶层", "basic_info": {"nickname": "嵌套"}}
+        assert _extract_nickname(info) == "嵌套"
+
+    def test_no_nickname_returns_none(self):
+        info = {"other": "value"}
+        assert _extract_nickname(info) is None
+
+    def test_empty_nickname_returns_none(self):
+        info = {"basic_info": {"nickname": ""}}
+        assert _extract_nickname(info) is None
+
+    def test_non_dict_input_returns_none(self):
+        # 边界:basic_info 不是 dict
+        info = {"basic_info": "not a dict"}
+        assert _extract_nickname(info) is None
 
 
 # ── ──
@@ -197,24 +235,41 @@ class TestPollQrStatus:
 
 
 class TestGetTokens:
-    """get_tokens: SUCCESS → activate() → read cookie str → parse into PlatformTokens."""
+    """get_tokens: SUCCESS → 直接读 cookie jar(check_qrcode 已写入真实 session)
+    → get_self_info best-effort 拿 nickname → 构造 PlatformTokens。
 
-    async def test_activate_then_returns_cookies_from_client_cookie_str(self):
+    activate() 已删除(真机证伪:它会 POST /login/activate 空 body,触发服务端
+    用设备指纹生成匿名 session 覆盖真实用户 session)。spec v2 §4a。
+    """
+
+    async def test_reads_cookies_from_client_cookie_str_without_activate(self):
+        """activate 已删除;直接读 self._client.cookie(check_qrcode 写入的)。"""
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.activate = AsyncMock(return_value={})
-        # cookie property returns "k=v; k=v" string
+        # activate 不再被调用,因此不需要 mock;但显式置 None 以验证"不被调用"
+        mock_client.activate = AsyncMock(return_value={"should_not_be_called": True})
+        # get_self_info best-effort 拿 nickname(成功路径)
+        # 模拟真实 selfinfo v1 响应(basic_info 嵌套结构,见真机铁证)
+        mock_client.get_self_info = AsyncMock(return_value={
+            "result": {"code": 0, "success": True},
+            "basic_info": {"nickname": "测试用户", "red_id": "123"},
+        })
+        # cookie property returns "k=v; k=v" string(check_qrcode 写入的真实 session)
         type(mock_client).cookie = property(lambda self: "a1=v1; web_session=ws123; gid=g1")
         auth._client = mock_client
 
         tokens = await auth.get_tokens("qr_abc")
 
-        mock_client.activate.assert_awaited_once()
+        # activate 绝不能被调用
+        mock_client.activate.assert_not_called()
         assert tokens.platform == "xhs"
         assert tokens.cookies["a1"] == "v1"
         assert tokens.cookies["web_session"] == "ws123"
         assert tokens.cookies["gid"] == "g1"
         assert tokens.expires_at > time.time()
+        # best-effort nickname 被填充
+        assert tokens.nickname == "测试用户"
+        mock_client.get_self_info.assert_awaited_once()
 
     async def test_returns_empty_cookies_when_no_client(self):
         auth = XhsAuthenticator()
@@ -223,17 +278,26 @@ class TestGetTokens:
         tokens = await auth.get_tokens("qr_abc")
         assert tokens.cookies == {}
         assert tokens.expires_at <= time.time() + 5
+        # 没有 client 时 nickname 也是 None
+        assert tokens.nickname is None
 
-    async def test_propagates_activate_error_as_data_error(self):
+    async def test_get_self_info_failure_does_not_block_login(self):
+        """get_self_info 抛异常时,nickname=None,登录主流程不阻断。"""
         from xhs.exception import DataFetchError
 
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.activate = AsyncMock(side_effect=DataFetchError("activate failed"))
+        mock_client.get_self_info = AsyncMock(side_effect=DataFetchError("denied"))
+        type(mock_client).cookie = property(lambda self: "a1=v1; web_session=ws123")
         auth._client = mock_client
 
-        with pytest.raises(DataError):
-            await auth.get_tokens("qr_abc")
+        tokens = await auth.get_tokens("qr_abc")
+
+        # cookies 仍正常返回
+        assert tokens.cookies["a1"] == "v1"
+        assert tokens.cookies["web_session"] == "ws123"
+        # nickname 降级为 None,不抛异常
+        assert tokens.nickname is None
 
 
 # ── ──
@@ -248,6 +312,10 @@ class TestExceptionTranslation:
       SignError       → RetryableError
       DataFetchError  → DataError
       RequestException→ RetryableError  (catch-all)
+
+    NOTE: 载体是 refresh_tokens(它 @_wrap_xhs_call 装饰 + 不吞 get_self_info 异常)。
+    get_tokens 也带 @_wrap_xhs_call,但其内部 get_self_info 是 best-effort(try/except
+    吞掉异常),不适合作为翻译测试载体。
     """
 
     @pytest.mark.parametrize(
@@ -260,70 +328,102 @@ class TestExceptionTranslation:
         ],
     )
     async def test_decorator_translates_each_xhs_exception(self, xhs_exc, trawler_exc):
-        """get_tokens wrapped → activate raises xhs_exc → caller sees trawler_exc."""
+        """refresh_tokens wrapped → get_self_info raises xhs_exc → caller sees trawler_exc."""
         import xhs.exception as xe
 
         auth = XhsAuthenticator()
         exc_class = getattr(xe, xhs_exc)
         mock_client = MagicMock()
-        mock_client.activate = AsyncMock(side_effect=exc_class("boom"))
-        auth._client = mock_client
+        mock_client.get_self_info = AsyncMock(side_effect=exc_class("boom"))
+        mock_client.close = AsyncMock()
 
-        with pytest.raises(trawler_exc):
-            await auth.get_tokens("q1")
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            with pytest.raises(trawler_exc):
+                await auth.refresh_tokens(_make_tokens())
 
     async def test_generic_requests_exception_becomes_retryable(self):
         """Any other requests.RequestException subclass → RetryableError."""
         auth = XhsAuthenticator()
         mock_client = MagicMock()
-        mock_client.activate = AsyncMock(
+        mock_client.get_self_info = AsyncMock(
             side_effect=requests.ConnectionError("network gone")
         )
-        auth._client = mock_client
+        mock_client.close = AsyncMock()
 
-        with pytest.raises(RetryableError):
-            await auth.get_tokens("q1")
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
+            with pytest.raises(RetryableError):
+                await auth.refresh_tokens(_make_tokens())
 
 
 # ── ──
 
 
 class TestGetUserNickname:
-    """get_user_nickname MUST NOT raise — failures return None."""
+    """get_user_nickname: 优先读 tokens.nickname,降级调 get_self_info API。
 
-    async def test_returns_nickname_from_get_self_info(self):
+    MUST NOT raise — 失败返回 None。spec v2 §4c。
+    """
+
+    async def test_returns_nickname_from_tokens(self):
+        """tokens.nickname 已存在 → 直接返回,不调 API。"""
         auth = XhsAuthenticator()
+        tokens = _make_tokens()
+        tokens.nickname = "测试用户"
+
+        with patch("platforms.xiaohongshu.auth.AsyncXhsClient") as mock_cls:
+            nick = await auth.get_user_nickname(tokens)
+
+        assert nick == "测试用户"
+        # API 不应该被调用(构造器都没调)
+        mock_cls.assert_not_called()
+
+    async def test_fallback_to_api_when_no_token_nickname(self):
+        """tokens.nickname=None → 降级调 get_self_info → 返回 nickname。"""
+        auth = XhsAuthenticator()
+        tokens = _make_tokens()
+        tokens.nickname = None
+
         mock_client = MagicMock()
-        mock_client.get_self_info = AsyncMock(return_value={"nickname": "alice"})
+        mock_client.get_self_info = AsyncMock(return_value={"nickname": "API用户"})
         mock_client.close = AsyncMock()
 
         with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
-            nick = await auth.get_user_nickname(_make_tokens())
+            nick = await auth.get_user_nickname(tokens)
 
-        assert nick == "alice"
+        assert nick == "API用户"
+        mock_client.get_self_info.assert_awaited_once()
         mock_client.close.assert_awaited_once()
 
-    async def test_returns_none_on_xhs_exception(self):
+    async def test_returns_none_on_api_error(self):
+        """tokens.nickname=None + API 抛异常 → 返回 None。"""
         from xhs.exception import DataFetchError
 
         auth = XhsAuthenticator()
+        tokens = _make_tokens()
+        tokens.nickname = None
+
         mock_client = MagicMock()
         mock_client.get_self_info = AsyncMock(side_effect=DataFetchError("denied"))
         mock_client.close = AsyncMock()
 
         with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
-            nick = await auth.get_user_nickname(_make_tokens())
+            nick = await auth.get_user_nickname(tokens)
 
         assert nick is None
+        mock_client.close.assert_awaited_once()
 
-    async def test_returns_none_when_nickname_missing(self):
+    async def test_returns_none_when_api_nickname_missing(self):
+        """tokens.nickname=None + API 返回但无 nickname 字段 → None。"""
         auth = XhsAuthenticator()
+        tokens = _make_tokens()
+        tokens.nickname = None
+
         mock_client = MagicMock()
         mock_client.get_self_info = AsyncMock(return_value={"user_id": "u1"})  # no nickname
         mock_client.close = AsyncMock()
 
         with patch("platforms.xiaohongshu.auth.AsyncXhsClient", return_value=mock_client):
-            nick = await auth.get_user_nickname(_make_tokens())
+            nick = await auth.get_user_nickname(tokens)
 
         assert nick is None
 

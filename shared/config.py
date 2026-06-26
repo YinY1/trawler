@@ -45,12 +45,14 @@ class BilibiliAuth:
 class XhsAuth:
     cookie: str = ""
     expires_at: float = 0.0
+    nickname: str = ""
 
 
 @dataclass
 class WeiboAuth:
     cookie: str = ""
     expires_at: float = 0.0
+    nickname: str = ""
 
 
 # ── 下载配置 ──────────────────────────────────────────────────

@@ -450,96 +450,72 @@ class TestValidateTokens:
 
 class TestGetUserNickname:
     @pytest.mark.asyncio
-    async def test_success_returns_screen_name(self):
+    async def test_returns_screen_name_from_html(self):
+        """主页 HTML 含 screen_name → regex 提取成功。"""
         auth = WeiboAuthenticator()
-        tokens = _sample_tokens()
-
+        tokens = _sample_tokens()  # 默认带 SUB cookie
         mock_resp = MagicMock()
         mock_resp.status = 200
-        mock_resp.headers = {"Content-Type": "application/json"}
-        mock_resp.json = AsyncMock(
-            return_value={"data": {"user": {"screen_name": "测试用户"}}}
+        mock_resp.text = AsyncMock(
+            return_value='<html>...{"uid":"5494676173","screen_name":"测试用户",...}...</html>'
         )
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
-
         with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
             mock_cls.return_value.__aenter__.return_value = mock_session
             nick = await auth.get_user_nickname(tokens)
-
         assert nick == "测试用户"
 
     @pytest.mark.asyncio
-    async def test_wind_control_html_returns_none(self):
-        """风控(6102) 返回 text/html 拦截页 → 返回 None，不抛异常。"""
+    async def test_returns_none_on_no_sub_cookie(self):
+        """tokens 无 SUB cookie → 直接返 None，不发请求。"""
         auth = WeiboAuthenticator()
         tokens = _sample_tokens()
+        tokens.cookies = {k: v for k, v in tokens.cookies.items() if k != "SUB"}
+        nick = await auth.get_user_nickname(tokens)
+        assert nick is None
 
+    @pytest.mark.asyncio
+    async def test_returns_none_on_404(self):
+        """status=404 → 返 None。"""
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
+        mock_resp = MagicMock()
+        mock_resp.status = 404
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            nick = await auth.get_user_nickname(tokens)
+        assert nick is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_no_match(self):
+        """HTML 不含 screen_name → 返 None。"""
+        auth = WeiboAuthenticator()
+        tokens = _sample_tokens()
         mock_resp = MagicMock()
         mock_resp.status = 200
-        mock_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
-        # 即使 json() 能解析也走不到——content-type 检查先拦截
-        mock_resp.json = AsyncMock(return_value={})
+        mock_resp.text = AsyncMock(return_value="<html>no screen name here</html>")
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
-
         with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
             mock_cls.return_value.__aenter__.return_value = mock_session
             nick = await auth.get_user_nickname(tokens)
-
         assert nick is None
 
     @pytest.mark.asyncio
-    async def test_missing_user_field_returns_none(self):
-        auth = WeiboAuthenticator()
-        tokens = _sample_tokens()
-
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.headers = {"Content-Type": "application/json"}
-        mock_resp.json = AsyncMock(return_value={"data": {"user": {}}})
-        mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
-
-        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
-            mock_cls.return_value.__aenter__.return_value = mock_session
-            nick = await auth.get_user_nickname(tokens)
-
-        assert nick is None
-
-    @pytest.mark.asyncio
-    async def test_bad_status_returns_none(self):
-        auth = WeiboAuthenticator()
-        tokens = _sample_tokens()
-
-        mock_resp = MagicMock()
-        mock_resp.status = 401
-        mock_resp.headers = {"Content-Type": "application/json"}
-        mock_resp.json = AsyncMock(return_value={})
-        mock_session = MagicMock()
-        mock_session.get = AsyncMock(return_value=mock_resp)
-
-        with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
-            mock_cls.return_value.__aenter__.return_value = mock_session
-            nick = await auth.get_user_nickname(tokens)
-
-        assert nick is None
-
-    @pytest.mark.asyncio
-    async def test_network_error_returns_none(self):
-        """aiohttp.ClientError 被捕获 → 返回 None，不向上抛。"""
+    async def test_returns_none_on_network_error(self):
+        """aiohttp.ClientError → 返 None，不抛。"""
         import aiohttp
 
         auth = WeiboAuthenticator()
         tokens = _sample_tokens()
-
         mock_session = MagicMock()
-        mock_session.get = AsyncMock(side_effect=aiohttp.ClientError("connection reset"))
-
+        mock_session.get = AsyncMock(side_effect=aiohttp.ClientError("reset"))
         with patch("platforms.weibo.auth.aiohttp.ClientSession") as mock_cls:
             mock_cls.return_value.__aenter__.return_value = mock_session
             nick = await auth.get_user_nickname(tokens)
-
         assert nick is None
 
 

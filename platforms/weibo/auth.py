@@ -5,6 +5,7 @@ from __future__ import annotations
 # pyright: basic
 import http.cookies
 import logging
+import re
 import time
 
 import aiohttp
@@ -19,6 +20,7 @@ from shared.auth.base import (
 )
 from shared.config import Config
 from shared.constants import WEIBO_POLL_TIMEOUT, WEIBO_REQUEST_TIMEOUT
+from shared.dump import DUMP_ENABLED, dump_response
 
 logger = logging.getLogger("trawler.weibo.auth")
 
@@ -30,11 +32,9 @@ QR_REFERER = "https://passport.weibo.com/"
 # Cookie keepalive — 访问微博首页
 KEEPALIVE_URL = "https://weibo.com"
 
-# 微博用户信息端点（取登录账号昵称）
-# PC 主站 ajax 接口，对应服务器这套 SUB/SUBP 域 cookie
-# 字段路径：data.user.screen_name（基于 weibo.com/ajax/profile/info 抓包假设，
-# 需 cookie 未风控时实测验证；被风控(6102) 会返回 text/html 拦截页，非 JSON）
-WEIBO_USER_INFO_URL = "https://weibo.com/ajax/profile/info"
+# 主页 HTML 内联 JSON 里的 screen_name 提取
+# 真机数据样本:{"uid":"5494676173","screen_name":"YinY1丶",...}
+_SCREEN_NAME_RE = re.compile(r'"screen_name"\s*:\s*"([^"]+)"')
 
 # 微博 QR 状态 retcode 映射
 # 50114001 = 未扫码, 50114002 = 已扫码待确认, 20000000 = 登录成功, 50114004 = 已过期
@@ -163,6 +163,10 @@ class WeiboAuthenticator(BaseAuthenticator):
             finally:
                 resp.close()
 
+        # TEMP DEBUG DUMP: 完整 poll 响应落盘到 /tmp 供 nickname 排查
+        if DUMP_ENABLED:
+            dump_response("weibo_poll", data)
+
         if not isinstance(data, dict):
             logger.warning("轮询二维码响应数据类型异常: %s", type(data).__name__)
             data = {}
@@ -246,6 +250,19 @@ class WeiboAuthenticator(BaseAuthenticator):
                 raise RefreshFailedError("未获取到 Cookie 响应头")
 
         cookies = _parse_weibo_cookies(set_cookie)
+
+        # TEMP DEBUG DUMP: get_tokens 抓到的 Set-Cookie / 解析后 cookies / login_url
+        if DUMP_ENABLED:
+            dump_response(
+                "weibo_get_tokens",
+                {
+                    "set_cookie": set_cookie,
+                    "parsed_cookies": cookies,
+                    "login_url": login_url,
+                    "last_check_data": self._last_check_data,
+                },
+            )
+
         if "SUB" not in cookies:
             raise RefreshFailedError("未获取到 SUB Cookie，登录可能失败")
 
@@ -326,38 +343,34 @@ class WeiboAuthenticator(BaseAuthenticator):
                 return False
 
     async def get_user_nickname(self, tokens: PlatformTokens) -> str | None:
-        """从 weibo.com/ajax/profile/info 拉取当前登录账号昵称。
+        """从 weibo.com 主页 HTML 内联 JSON 提取登录账号昵称。
 
-        字段路径: data.user.screen_name（基于 weibo.com/ajax/profile/info 抓包假设，
-        需 cookie 未风控时实测验证）。失败/被风控(6102/HTML) 返回 None。
+        主页会服务端渲染当前登录用户信息到 HTML（内联 JSON），
+        regex 抓 screen_name。仅需 SUB cookie，未触发 6102 风控。
+        失败返回 None，不抛异常。
         """
+        if not tokens.cookies.get("SUB"):
+            return None
         cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
         async with aiohttp.ClientSession(trust_env=False) as session:
             try:
                 resp = await session.get(
-                    WEIBO_USER_INFO_URL,
+                    "https://weibo.com/",
                     headers={
-                        "User-Agent": _get_user_agent(),
+                        "User-Agent": _get_user_agent(),  # 桌面 UA
                         "Cookie": cookie_str,
-                        "Referer": "https://weibo.com/",
-                        "Accept": "application/json",
                     },
                     timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
                     allow_redirects=False,
                 )
                 try:
-                    # 风控会返回 text/html（6102 拦截页），不是 JSON
-                    ctype = resp.headers.get("Content-Type", "")
                     if resp.status != 200:
                         return None
-                    if "json" not in ctype:
-                        return None
-                    data = await resp.json(content_type=None)
+                    html = await resp.text()
                 finally:
                     resp.close()
-                user = data.get("data", {}).get("user", {}) if isinstance(data, dict) else {}
-                nick = user.get("screen_name") if isinstance(user, dict) else None
-                return nick or None
+                match = _SCREEN_NAME_RE.search(html)
+                return match.group(1) if match else None
             except Exception as e:
                 logger.warning("微博 nickname 获取失败: %s", e)
                 return None
@@ -383,4 +396,5 @@ def build_tokens_from_config(config: Config) -> PlatformTokens | None:
         cookies=cookie_dict,
         obtained_at=time.time(),
         expires_at=auth.expires_at,
+        nickname=auth.nickname or None,
     )
