@@ -24,7 +24,7 @@
 2. 删除 `client.py` 整个文件
 3. 删除 `downloader.py` 第二层死代码(外部 API server)
 4. 修复 `downloader.py` 协调逻辑 bug(`success=False` 不降级)
-5. 删除跨平台死分支(`bilibili/handlers.py` 的 xhs elif)
+5. ~~删除跨平台死分支(`bilibili/handlers.py` 的 xhs elif)~~ **(已撤销:@oracle 审查发现该分支是 xhs 唯一 SUMMARIZED 处理路径,必须保留)**
 6. 补齐测试覆盖(downloader 当前 0%)
 
 ### 1.3 非目标(显式排除)
@@ -291,11 +291,11 @@ async def download_note(note: NoteInfo, config: Config) -> XhsDownloadResult:
 | `platforms/xiaohongshu/client.py` | **整个文件** | 371 | 4业务迁wrapper + 3auth死方法 + `_request`/辅助 全无caller |
 | `tests/test_xhs_client.py` | **整个文件** | 313 | 测被删的 client.py |
 | `platforms/xiaohongshu/downloader.py` | `_try_xhs_downloader_api` + 主入口调用 | ~75 | 死代码(env无默认/config无字段/docs无提及/0测试) |
-| `platforms/bilibili/handlers.py` | L196-205 `elif platform=="xhs"` | 10 | 跨平台死分支(bili handler 处理的 msg.platform 永远是 bili) |
+**@oracle 审查纠错(2026-06-26)**:原 spec 此处断言"bili handler 处理的 msg.platform 永远是 bili"**事实错误**。实际 `summarize_phase` 用 `register("*", Phase.SUMMARIZED)` 通配所有平台,`elif ctx.msg.platform == "xhs"` 分支是 xhs 唯一的 SUMMARIZED 处理路径(取评论亮点)。**此分支必须保留**,删除会导致 xhs 评论亮点功能彻底丢失。已从删除清单移除。
 | `README.md` | L204 `TRAWLER_XHS_DOWNLOADER_API` 行 | 1 | 死 API 的 env 文档 |
 | `README.zh.md` | 对应行 | 1 | 同上 |
 
-**总删除**: ~770 行
+**总删除**: ~760 行(bili 分支保留,从清单移除 10 行)
 
 ## 4. 关键决策与权衡
 
