@@ -14,19 +14,14 @@ from __future__ import annotations
 # pyright: basic
 import asyncio
 import binascii
-import functools
 import hashlib
 import logging
 import os
 import random
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
 
-import requests
-from xhs.exception import DataFetchError, IPBlockError, NeedVerifyError, SignError
-
-from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
+from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient, _wrap_xhs_call
 from shared.auth.base import (
     AuthStatus,
     BaseAuthenticator,
@@ -39,18 +34,11 @@ from shared.auth.qr_display import display_qr_in_terminal
 from shared.config import Config
 from shared.cookie_utils import build_cookie_str, parse_cookie_str
 from shared.dump import DUMP_ENABLED, dump_response
-
-# NOTE: trawler 的 IpBlockError(小写 p) 与 xhs.exception 的 IPBlockError(大写 P)
-# 拼写不同,本模块顶部同时 import 两者:xhs 版在 line 22 的 xhs.exception import,
-# trawler 版在此处。_wrap_xhs_call 里 except 块按名字区分(IPBlockError=捕获,
-# IpBlockError=raise)。
-from shared.exceptions import CaptchaError, DataError, IpBlockError, RetryableError
+from shared.exceptions import DataError
 
 logger = logging.getLogger("trawler.xiaohongshu.auth")
 
 _A1_CHARSET = "abcdefghijklmnopqrstuvwxyz1234567890"
-
-_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -113,47 +101,8 @@ def _extract_nickname(info: dict) -> str | None:
 
 
 # ═══════════════════════════════════════════════════════════
-# Exception translation decorator (spec §5)
+# Exception translation: import _wrap_xhs_call from async_xhs_wrapper (spec §3.1.2)
 # ═══════════════════════════════════════════════════════════
-
-def _wrap_xhs_call(func: _F) -> _F:
-    """Translate xhs library exceptions to trawler's exception hierarchy.
-
-    Mapping (spec §5.2) — except 顺序不可调,具体在前,RequestException 兜底最后:
-      NeedVerifyError → CaptchaError
-      IPBlockError    → IpBlockError
-      SignError       → RetryableError
-      DataFetchError  → DataError
-      RequestException→ RetryableError  (catch-all, ordered LAST)
-
-    签名说明(最终版,不要再让 fixer 改):
-    - 用 `_F = TypeVar("_F", bound=Callable[..., Any])` + `def _wrap_xhs_call(func: _F) -> _F`
-      保证被装饰函数签名透传,pyright strict 通过。
-    - `return wrapper  # type: ignore[return-value]` 是必须的:wrapper 是新 async 函数,
-      与 _F 不同型,这是异步装饰器的标准 pyright 兜底,无需绕开。
-    - 不用 ParamSpec(P.args/P.kwargs 在 pyright strict 下对 async 装饰器报错更多)。
-    """
-    @functools.wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return await func(*args, **kwargs)
-        except NeedVerifyError as e:
-            raise CaptchaError(f"XHS captcha challenge: {e}") from e
-        except IPBlockError as e:
-            # NOTE: 这里 raise 的是 trawler 的 IpBlockError(shared.exceptions),
-            # 不是 xhs 库的 IPBlockError(xhs.exception)。两者拼法不同
-            # (trawler: Ip / xhs: IP)。顶部已 `from shared.exceptions import
-            # IpBlockError`,本 except 块捕获的 IPBlockError 来自 xhs.exception
-            # 的顶部 import,无需 lazy import。
-            raise IpBlockError(f"XHS IP blocked: {e}") from e
-        except SignError as e:
-            raise RetryableError(f"XHS sign error: {e}") from e
-        except DataFetchError as e:
-            raise DataError(f"XHS data fetch error: {e}") from e
-        except requests.RequestException as e:
-            raise RetryableError(f"XHS network error: {e}") from e
-
-    return wrapper  # type: ignore[return-value]
 
 
 # ═══════════════════════════════════════════════════════════

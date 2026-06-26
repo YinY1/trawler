@@ -165,3 +165,29 @@ class TestSuppressXhsStdout:
         with pytest.raises(CustomError, match="should propagate"):
             with _suppress_xhs_stdout():
                 raise CustomError("should propagate")
+
+
+class TestWrapXhsCallLivesInWrapper:
+    """_wrap_xhs_call 现在住在 async_xhs_wrapper(spec §3.1.2 下沉)。"""
+
+    def test_decorator_is_importable_from_wrapper(self) -> None:
+        from platforms.xiaohongshu.async_xhs_wrapper import _wrap_xhs_call
+
+        assert callable(_wrap_xhs_call)
+
+    async def test_decorator_translates_ipblock_error_case_sensitive(self) -> None:
+        """xhs.exception.IPBlockError(大写 P) → shared.exceptions.IpBlockError(小写 p)。
+
+        这是 spec §3.1.2 强调的大小写差异回归点。
+        """
+        from xhs.exception import IPBlockError
+
+        from platforms.xiaohongshu.async_xhs_wrapper import _wrap_xhs_call
+        from shared.exceptions import IpBlockError
+
+        @_wrap_xhs_call
+        async def boom() -> None:
+            raise IPBlockError("blocked")
+
+        with pytest.raises(IpBlockError, match="blocked"):
+            await boom()

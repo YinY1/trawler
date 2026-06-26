@@ -15,17 +15,52 @@ from __future__ import annotations
 # pyright: basic
 import asyncio
 import contextlib
+import functools
 import io
 import logging
 import os
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
+import requests
 from xhs.core import XhsClient
+from xhs.exception import DataFetchError, IPBlockError, NeedVerifyError, SignError
 
 from platforms.xiaohongshu.signer import get_xhs_sign
 from shared.dump import DUMP_ENABLED, dump_response
+from shared.exceptions import CaptchaError, DataError, IpBlockError, RetryableError
 
 logger = logging.getLogger("trawler.xiaohongshu.async_wrapper")
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _wrap_xhs_call(func: _F) -> _F:
+    """Translate xhs library exceptions to trawler's exception hierarchy.
+
+    Mapping (spec §3.1.2) — except 顺序不可调,具体在前,RequestException 兜底最后:
+      NeedVerifyError → CaptchaError
+      IPBlockError    → IpBlockError   (库大写 P,项目小写 p)
+      SignError       → RetryableError
+      DataFetchError  → DataError
+      RequestException→ RetryableError  (catch-all, ordered LAST)
+    """
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await func(*args, **kwargs)
+        except NeedVerifyError as e:
+            raise CaptchaError(f"XHS captcha challenge: {e}") from e
+        except IPBlockError as e:
+            raise IpBlockError(f"XHS IP blocked: {e}") from e
+        except SignError as e:
+            raise RetryableError(f"XHS sign error: {e}") from e
+        except DataFetchError as e:
+            raise DataError(f"XHS data fetch error: {e}") from e
+        except requests.RequestException as e:
+            raise RetryableError(f"XHS network error: {e}") from e
+
+    return wrapper  # type: ignore[return-value]
 
 
 # TEMP DEBUG: xhs 库内部 print(data) 副作用会污染 stdout。
