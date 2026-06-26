@@ -166,6 +166,25 @@ class AsyncXhsClient:
             dump_response("xhs_selfinfo", result)
         return result
 
+    @_wrap_xhs_call
+    async def get_user_notes(self, user_id: str, cursor: str = "") -> dict[str, Any]:
+        """取用户笔记列表(单页, xhs 库写死 num=30)。
+
+        Returns:
+            完整 data dict: ``{notes, cursor, has_more}``。**不解包**,
+            让调用方显式处理层级。
+        """
+        assert self._client is not None
+        result: dict[str, Any] = await asyncio.to_thread(  # type: ignore[assignment]
+            self._client.get_user_notes, user_id, cursor
+        )
+        if DUMP_ENABLED:
+            dump_response(
+                "xhs_user_notes",
+                {"user_id": user_id, "cursor": cursor, "result": result},
+            )
+        return result
+
     @property
     def cookie(self) -> str:
         """当前 cookie jar 字符串(``"k1=v1; k2=v2"``)。"""

@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
+from shared.exceptions import DataError
 
 # ── ──
 
@@ -165,6 +166,51 @@ class TestSuppressXhsStdout:
         with pytest.raises(CustomError, match="should propagate"):
             with _suppress_xhs_stdout():
                 raise CustomError("should propagate")
+
+
+class TestGetUserNotes:
+    """get_user_notes: 单页取用户笔记列表,返回完整 data dict(不解包)。"""
+
+    async def test_delegates_positional_user_id_and_cursor(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_notes.return_value = {
+                "notes": [{"note_id": "n1"}],
+                "cursor": "next",
+                "has_more": True,
+            }
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            result = await client.get_user_notes("u1", cursor="c1")
+
+            mock_instance.get_user_notes.assert_called_once_with("u1", "c1")
+            assert result["notes"] == [{"note_id": "n1"}]
+            assert result["has_more"] is True
+
+    async def test_default_cursor_is_empty_string(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_notes.return_value = {"notes": []}
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_user_notes("u1")
+
+            mock_instance.get_user_notes.assert_called_once_with("u1", "")
+
+    async def test_translates_data_fetch_error_to_data_error(self) -> None:
+        """wrapper 方法现在自带 _wrap_xhs_call 翻译(spec §3.1.2 下沉后)。"""
+        from xhs.exception import DataFetchError
+
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_notes.side_effect = DataFetchError("denied")
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            with pytest.raises(DataError, match="denied"):
+                await client.get_user_notes("u1")
 
 
 class TestWrapXhsCallLivesInWrapper:
