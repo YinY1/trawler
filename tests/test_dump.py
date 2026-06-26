@@ -41,9 +41,26 @@ def test_targets_filter(monkeypatch, tmp_path):
 
 
 def test_dump_failure_silent(monkeypatch, tmp_path):
-    """写文件失败 → 静默吞,不抛异常。"""
+    """写文件失败 → 静默吞,不抛异常。
+
+    旧版本用 ``DUMP_DIR=Path("/nonexistent/...")`` 期望触发 mkdir 失败,
+    但在 root 下 mkdir 任意路径都成功,根本没走到 ``except Exception: pass``,
+    属于假绿。这里改为 monkeypatch ``Path.open`` 抛 OSError,精确命中
+    dump_response 内层的 ``with path.open(...)`` 写盘失败路径。
+    """
     monkeypatch.setattr(dump_mod, "DUMP_ENABLED", True)
-    # DUMP_DIR 指向不存在的不可写路径
-    monkeypatch.setattr(dump_mod, "DUMP_DIR", Path("/nonexistent/path/that/cannot/be/created"))
-    # 不应抛异常
+    monkeypatch.setattr(dump_mod, "DUMP_DIR", tmp_path)
+    original_open = Path.open
+
+    def raising_open(self: Path, *args: object, **kwargs: object) -> object:
+        # 只对 tmp_path 下的目标文件抛错,避免误伤 pytest / 测试框架的
+        # 其他 Path.open 调用(如写自己的临时配置文件)。
+        if self.parent == tmp_path:
+            raise OSError("simulated write failure")
+        return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", raising_open)
+    # 不应抛异常 — dump 失败必须静默
     dump_response("test_tag", {"k": "v"})
+    # 验证文件确实没写成
+    assert not (tmp_path / "test_tag_dump.jsonl").exists()

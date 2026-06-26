@@ -127,3 +127,41 @@ class TestExceptionPassthrough:
             client = AsyncXhsClient(cookie="")
             with pytest.raises(DataFetchError, match="boom"):
                 await client.get_self_info()
+
+
+class TestSuppressXhsStdout:
+    """Cover the ``_suppress_xhs_stdout`` contextmanager (zero coverage before)."""
+
+    def test_captures_print_without_polluting_stdout(self) -> None:
+        """被包装函数的 print → 被 sink 捕获,不污染真实 stdout。
+
+        验证两点:
+        1. with 块内执行不抛异常;
+        2. 退出后 ``sys.stdout`` 已恢复(被 ``redirect_stdout`` 的 ``__exit__``
+           还原为原对象)。
+        """
+        import sys
+
+        from platforms.xiaohongshu.async_xhs_wrapper import _suppress_xhs_stdout
+
+        old_stdout = sys.stdout
+        with _suppress_xhs_stdout():
+            print("this should not reach real stdout")  # noqa: T201
+        # 真实 stdout 没被污染(restored by redirect_stdout __exit__)
+        assert sys.stdout is old_stdout
+
+    def test_exception_propagates(self) -> None:
+        """被包装函数抛异常 → 异常正常穿出,不被吞。
+
+        这是 contextmanager 的硬性契约:xhs 库的 DataFetchError / IPBlockError
+        必须穿出本上下文交由 auth.py 翻译。
+        """
+
+        from platforms.xiaohongshu.async_xhs_wrapper import _suppress_xhs_stdout
+
+        class CustomError(Exception):
+            pass
+
+        with pytest.raises(CustomError, match="should propagate"):
+            with _suppress_xhs_stdout():
+                raise CustomError("should propagate")
