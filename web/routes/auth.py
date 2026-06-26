@@ -274,7 +274,11 @@ def _tokens_to_auth_dict(platform_key: str, tokens: PlatformTokens, auth: BaseAu
         return d
     # xhs / weibo share the cookie-string shape
     cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
-    return {"cookie": cookie_str, "expires_at": tokens.expires_at}
+    return {
+        "cookie": cookie_str,
+        "expires_at": tokens.expires_at,
+        "nickname": tokens.nickname or "",
+    }
 
 
 @router.get("/auth/qr/{platform_key}")
@@ -368,7 +372,11 @@ async def auth_poll(platform_key: str) -> dict[str, Any]:
         # Build auth_dict
         if platform_key in ("weibo", "xhs"):
             cookie_str = "; ".join(f"{k}={v}" for k, v in tokens.cookies.items())
-            auth_dict: dict[str, Any] = {"cookie": cookie_str, "expires_at": tokens.expires_at}
+            auth_dict: dict[str, Any] = {
+                "cookie": cookie_str,
+                "expires_at": tokens.expires_at,
+                "nickname": tokens.nickname or "",
+            }
         else:
             auth_dict = {**tokens.cookies, "expires_at": tokens.expires_at}
         rt_val = getattr(auth, "refresh_token", None)

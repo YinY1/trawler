@@ -54,6 +54,7 @@ class PlatformTokens:
     cookies: dict[str, str]
     obtained_at: float
     expires_at: float
+    nickname: str | None = None
 
 
 class BaseAuthenticator(ABC):

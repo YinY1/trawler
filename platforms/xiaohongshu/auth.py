@@ -95,6 +95,23 @@ def generate_web_id(a1: str) -> str:
     return hashlib.md5(a1.encode()).hexdigest()
 
 
+def _extract_nickname(info: dict) -> str | None:
+    """从 xhs selfinfo 响应提取 nickname。
+
+    xhs 库 /api/sns/web/v1/user/selfinfo 返回嵌套结构:
+        {"basic_info": {"nickname": "..."}}
+    v2 /api/sns/web/v2/user/me 返回扁平结构:
+        {"nickname": "..."}
+    双路径兜底。
+    """
+    basic = info.get("basic_info")
+    if isinstance(basic, dict):
+        nick = basic.get("nickname")
+        if nick:
+            return nick
+    return info.get("nickname") or None
+
+
 # ═══════════════════════════════════════════════════════════
 # Exception translation decorator (spec §5)
 # ═══════════════════════════════════════════════════════════
@@ -208,18 +225,39 @@ class XhsAuthenticator(BaseAuthenticator):
 
     @_wrap_xhs_call
     async def get_tokens(self, qr_key: str) -> PlatformTokens:
-        """SUCCESS 后提取登录后 cookies (spec §4.3)."""
+        """SUCCESS 后提取登录后 cookies (spec §4.3).
+
+        activate() 已删除:真机证伪它会用设备指纹生成匿名 session,
+        覆盖 check_qrcode 写入的真实用户 session(spec v2 §4a)。
+        check_qrcode SUCCESS 的 Set-Cookie 已把真实 web_session 写入 jar,
+        此处直接读 self._client.cookie 即可。
+
+        best-effort 调 get_self_info 填 tokens.nickname:失败不阻断登录主流程
+        (降级为 None,后续可走 get_user_nickname 实时获取)。
+        """
         logger.info("🔑 XhsAuthenticator 获取凭证...")
         now = time.time()
         if self._client is None:
-            return PlatformTokens(platform="xhs", cookies={}, obtained_at=now, expires_at=now)
+            return PlatformTokens(
+                platform="xhs", cookies={}, obtained_at=now, expires_at=now,
+                nickname=None,
+            )
 
-        await self._client.activate()
+        # check_qrcode 已把真实 session 写入 cookie jar,直接读
         full_cookie_str = self._client.cookie
 
-        # TEMP DEBUG DUMP: activate() 后 cookie 字符串落盘
+        # 尝试拿 nickname(失败不阻断登录主流程)
+        nickname: str | None = None
+        try:
+            info = await self._client.get_self_info()
+            if isinstance(info, dict):
+                nickname = _extract_nickname(info)
+        except Exception as e:
+            logger.warning("XHS get_self_info 拿 nickname 失败: %s", e)
+
+        # TEMP DEBUG DUMP: cookie 字符串 + 拿到的 nickname 落盘
         if DUMP_ENABLED:
-            dump_response("xhs_get_tokens", {"cookie": full_cookie_str})
+            dump_response("xhs_get_tokens", {"cookie": full_cookie_str, "nickname": nickname})
 
         cookie_dict = parse_cookie_str(full_cookie_str)
         return PlatformTokens(
@@ -227,6 +265,7 @@ class XhsAuthenticator(BaseAuthenticator):
             cookies={k: v for k, v in cookie_dict.items() if v},
             obtained_at=now,
             expires_at=now + 7 * 86400,
+            nickname=nickname,
         )
 
     async def qr_login(
@@ -264,7 +303,7 @@ class XhsAuthenticator(BaseAuthenticator):
         client = AsyncXhsClient(cookie=build_cookie_str(tokens.cookies))
         try:
             info = await client.get_self_info()
-            if not info.get("nickname"):
+            if not _extract_nickname(info):
                 raise DataError("cookie 无效: get_self_info 返回空 nickname")
         finally:
             await client.close()
@@ -284,7 +323,7 @@ class XhsAuthenticator(BaseAuthenticator):
         try:
             try:
                 info = await client.get_self_info()
-                return bool(info.get("nickname"))
+                return bool(_extract_nickname(info))
             except Exception as e:
                 logger.debug("validate_tokens probe failed: %s", e)
                 return False
@@ -292,18 +331,26 @@ class XhsAuthenticator(BaseAuthenticator):
             await client.close()
 
     async def get_user_nickname(self, tokens: PlatformTokens) -> str | None:
-        """获取当前用户昵称. MUST NOT raise — 失败返回 None (spec §4.4)."""
-        client = AsyncXhsClient(cookie=build_cookie_str(tokens.cookies))
+        """获取当前用户昵称. MUST NOT raise — 失败返回 None (spec §4.4 / spec v2 §4c).
+
+        优先读 ``tokens.nickname``(登录时或从 config 加载时填入):
+        - 命中 → 直接返回,不调 API
+        - 缺失(从 config 加载的旧 token) → 降级调 get_self_info
+        """
+        if tokens.nickname:
+            return tokens.nickname
         try:
+            # 降级:tokens 里没有(从 config 加载的旧 token),再尝试 API
+            client = AsyncXhsClient(cookie=build_cookie_str(tokens.cookies))
             try:
                 info = await client.get_self_info()
-                nick = info.get("nickname") if isinstance(info, dict) else None
+                nick = _extract_nickname(info) if isinstance(info, dict) else None
                 return nick or None
-            except Exception as e:
-                logger.warning("XHS nickname 获取失败: %s", e)
-                return None
-        finally:
-            await client.close()
+            finally:
+                await client.close()
+        except Exception as e:
+            logger.warning("XHS nickname 获取失败: %s", e)
+            return None
 
     def supports_refresh(self) -> bool:
         return True
@@ -335,4 +382,5 @@ def build_tokens_from_config(config: Config) -> PlatformTokens | None:
         cookies=cookie_dict,
         obtained_at=time.time(),
         expires_at=auth.expires_at,
+        nickname=auth.nickname or None,
     )

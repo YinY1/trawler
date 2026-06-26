@@ -24,6 +24,8 @@ expires_at = 0
 [xiaohongshu.auth]
 # 小红书登录 Cookie（从浏览器中提取）
 cookie = ""
+# 账号昵称（登录成功后自动填充）
+nickname = ""
 # Cookie 过期时间（Unix 时间戳，0 表示未知）
 expires_at = 0
 
@@ -32,5 +34,7 @@ expires_at = 0
 [weibo.auth]
 # 微博登录 Cookie（从浏览器中提取）
 cookie = ""
+# 账号昵称（登录成功后自动填充，微博实际由 get_user_nickname 实时获取）
+nickname = ""
 # Cookie 过期时间（Unix 时间戳，0 表示未知）
 expires_at = 0
