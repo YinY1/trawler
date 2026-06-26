@@ -252,6 +252,53 @@ class TestGetNoteById:
             assert result == {"note_id": "n1", "desc": "x"}
 
 
+class TestGetNoteComments:
+    """get_note_comments: 单页评论,cursor 在 xsec_token 前(对齐库签名)。"""
+
+    async def test_delegates_with_note_id_cursor_xsec_token_order(self) -> None:
+        """库签名是 (note_id, cursor, xsec_token),cursor 必须在前。"""
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_comments.return_value = {
+                "comments": [{"id": "c1"}],
+                "cursor": "next",
+                "has_more": False,
+            }
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_note_comments("n1", cursor="cur", xsec_token="t1")
+
+            mock_instance.get_note_comments.assert_called_once_with("n1", "cur", "t1")
+
+    async def test_defaults_cursor_and_token_empty(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_comments.return_value = {"comments": []}
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_note_comments("n1")
+
+            mock_instance.get_note_comments.assert_called_once_with("n1", "", "")
+
+    async def test_returns_full_dict_with_has_more(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_comments.return_value = {
+                "comments": [],
+                "has_more": True,
+                "cursor": "abc",
+            }
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            result = await client.get_note_comments("n1")
+
+            assert result["has_more"] is True
+            assert result["cursor"] == "abc"
+
+
 class TestWrapXhsCallLivesInWrapper:
     """_wrap_xhs_call 现在住在 async_xhs_wrapper(spec §3.1.2 下沉)。"""
 

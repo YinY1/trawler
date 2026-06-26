@@ -211,6 +211,31 @@ class AsyncXhsClient:
             )
         return result
 
+    @_wrap_xhs_call
+    async def get_note_comments(
+        self, note_id: str, cursor: str = "", xsec_token: str = ""
+    ) -> dict[str, Any]:
+        """取笔记评论(单页)。
+
+        Args:
+            note_id: 笔记 ID
+            cursor: 分页游标(首页传空串)
+            xsec_token: 笔记 token
+
+        Returns:
+            完整 data dict: ``{comments, cursor, has_more}``。
+        """
+        assert self._client is not None
+        result = await asyncio.to_thread(
+            self._client.get_note_comments, note_id, cursor, xsec_token
+        )
+        if DUMP_ENABLED:
+            dump_response(
+                "xhs_note_comments",
+                {"note_id": note_id, "cursor": cursor, "result": result},
+            )
+        return result
+
     @property
     def cookie(self) -> str:
         """当前 cookie jar 字符串(``"k1=v1; k2=v2"``)。"""
