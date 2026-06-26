@@ -213,6 +213,45 @@ class TestGetUserNotes:
                 await client.get_user_notes("u1")
 
 
+class TestGetNoteById:
+    """get_note_by_id: 取笔记详情,第三参数 xsec_source 控制 feed 链路。"""
+
+    async def test_default_xsec_source_is_pc_feed(self) -> None:
+        """默认 pc_feed(库默认),downloader 第一层走这条。"""
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_by_id.return_value = {"note_id": "n1", "desc": "d"}
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_note_by_id("n1")
+
+            mock_instance.get_note_by_id.assert_called_once_with("n1", "", "pc_feed")
+
+    async def test_explicit_pc_share_for_share_link_token(self) -> None:
+        """第二层显式传 pc_share,匹配分享链路 token(spec §3.2.4)。"""
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_by_id.return_value = {"note_id": "n1"}
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            await client.get_note_by_id("n1", xsec_token="t1", xsec_source="pc_share")
+
+            mock_instance.get_note_by_id.assert_called_once_with("n1", "t1", "pc_share")
+
+    async def test_returns_note_card_dict_unchanged(self) -> None:
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_by_id.return_value = {"note_id": "n1", "desc": "x"}
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            result = await client.get_note_by_id("n1")
+
+            assert result == {"note_id": "n1", "desc": "x"}
+
+
 class TestWrapXhsCallLivesInWrapper:
     """_wrap_xhs_call 现在住在 async_xhs_wrapper(spec §3.1.2 下沉)。"""
 

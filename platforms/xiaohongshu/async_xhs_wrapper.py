@@ -185,6 +185,32 @@ class AsyncXhsClient:
             )
         return result
 
+    @_wrap_xhs_call
+    async def get_note_by_id(
+        self, note_id: str, xsec_token: str = "", xsec_source: str = "pc_feed"
+    ) -> dict[str, Any]:
+        """取笔记详情。
+
+        Args:
+            note_id: 笔记 ID
+            xsec_token: 从笔记列表拿到的 token(分享链路必需)
+            xsec_source: feed 链路。默认 ``pc_feed``(downloader 第一层);
+                downloader 第二层(分享链路)显式传 ``pc_share``。
+
+        Returns:
+            note_card dict(xhs 库已解包 items[0].note_card)。
+        """
+        assert self._client is not None
+        result = await asyncio.to_thread(
+            self._client.get_note_by_id, note_id, xsec_token, xsec_source
+        )
+        if DUMP_ENABLED:
+            dump_response(
+                "xhs_note_by_id",
+                {"note_id": note_id, "xsec_source": xsec_source, "result": result},
+            )
+        return result
+
     @property
     def cookie(self) -> str:
         """当前 cookie jar 字符串(``"k1=v1; k2=v2"``)。"""
