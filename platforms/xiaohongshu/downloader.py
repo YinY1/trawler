@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 
 import aiohttp
 
+from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from platforms.xiaohongshu.auth import (
     get_xhs_cookie,
 )
@@ -53,13 +54,12 @@ async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> XhsDownload
     Returns:
         下载结果或 None
     """
+    client: AsyncXhsClient | None = None
     try:
-        from xhs import XhsClient  # type: ignore[import-untyped]
-
         cookie = get_xhs_cookie(config)
-        client = XhsClient(cookie=cookie)
+        client = AsyncXhsClient(cookie=cookie)
 
-        note_detail = client.get_note_by_id(note.note_id)
+        note_detail = await client.get_note_by_id(note.note_id)
         if not note_detail:
             return None
 
@@ -122,12 +122,15 @@ async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> XhsDownload
                 content_text=content_text,
             )
 
-    except ImportError:
-        logger.debug("XHS-Downloader 库未安装，跳过第一层")
-        return None
     except Exception as e:
-        logger.debug(f"XHS-Downloader 库下载失败: {e}")
+        logger.debug(f"第一层下载失败: {e}")
         return None
+    finally:
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
 
 
 # ── 第二层：XHS-Downloader API Server ─────────────────────
