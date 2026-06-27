@@ -201,7 +201,6 @@ Config
 | `TRAWLER_BILI_SESSDATA` | Bilibili session cookie |
 | `TRAWLER_BILI_REFRESH_TOKEN` | Bilibili refresh token |
 | `TRAWLER_XHS_COOKIE` | Xiaohongshu cookie |
-| `TRAWLER_XHS_DOWNLOADER_API` | Xiaohongshu download API endpoint |
 | `TRAWLER_WEIBO_COOKIE` | Weibo cookie |
 | `TRAWLER_LLM_API_KEY` | LLM API key |
 | `TRAWLER_LLM_API_BASE` | LLM API base URL |
