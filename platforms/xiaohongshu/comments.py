@@ -6,8 +6,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from platforms.xiaohongshu.auth import get_xhs_cookie
-from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
 from shared.constants import MAX_COMMENT_HIGHLIGHTS
 from shared.protocols import CommentHighlight
@@ -84,9 +84,9 @@ async def fetch_xhs_comment_highlights(
         logger.debug(f"[评论] 缺少 Cookie，跳过评论抓取: {note_id}")
         return []
 
-    client = XhsClient(cookie=cookie)
+    client = AsyncXhsClient(cookie=cookie)
     try:
-        data = await client.get_comments(note_id, xsec_token=xsec_token)
+        data = await client.get_note_comments(note_id, xsec_token=xsec_token)
     except Exception as e:
         logger.debug(f"[评论] 请求失败: {e}, note_id: {note_id}")
         return []
@@ -109,7 +109,7 @@ async def fetch_xhs_comment_highlights(
     cursor = data.get("cursor", "")
     if has_more and cursor and len(all_comments) < max_count:
         try:
-            data2 = await client.get_comments(note_id, cursor=cursor, xsec_token=xsec_token)
+            data2 = await client.get_note_comments(note_id, cursor=cursor, xsec_token=xsec_token)
             for raw in data2.get("comments", []):
                 comment = _parse_comment(raw, author_user_id)
                 if comment is None or comment.is_author:
