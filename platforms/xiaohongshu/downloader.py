@@ -212,7 +212,7 @@ async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> XhsDownload
 
 
 async def _fetch_note_detail(note: NoteInfo, cookie: str) -> dict[str, Any] | None:
-    """直接请求笔记详情 API (via XhsClient)。
+    """请求笔记详情 (via AsyncXhsClient, pc_share 链路)。
 
     Args:
         note: 笔记信息
@@ -221,9 +221,13 @@ async def _fetch_note_detail(note: NoteInfo, cookie: str) -> dict[str, Any] | No
     Returns:
         笔记详情数据或 None
     """
-    client = XhsClient(cookie=cookie)
+    client = AsyncXhsClient(cookie=cookie)
     try:
-        return await client.get_note_detail(note.note_id, note.xsec_token)
+        return await client.get_note_by_id(
+            note.note_id,
+            xsec_token=note.xsec_token,
+            xsec_source="pc_share",
+        )
     except Exception as e:
         logger.debug(f"获取笔记详情失败: {e}")
         return None

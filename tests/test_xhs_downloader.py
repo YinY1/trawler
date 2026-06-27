@@ -81,3 +81,39 @@ class TestTryXhsDownloaderLibDelegates:
             )
 
         assert result is None
+
+
+class TestFetchNoteDetailPcShare:
+    """第二层(原第三层)_fetch_note_detail 切 wrapper,显式 pc_share。"""
+
+    async def test_delegates_to_wrapper_with_pc_share(self) -> None:
+        """get_note_by_id(note_id, xsec_token=t, xsec_source='pc_share')。"""
+        from platforms.xiaohongshu.downloader import _fetch_note_detail
+
+        mock_client = MagicMock()
+        mock_client.get_note_by_id = AsyncMock(return_value={"note_id": "n1"})
+        mock_client.close = AsyncMock()
+
+        with patch(
+            "platforms.xiaohongshu.downloader.AsyncXhsClient", return_value=mock_client
+        ):
+            result = await _fetch_note_detail(_video_note(), "cookie")
+
+        mock_client.get_note_by_id.assert_awaited_once_with(
+            "n1", xsec_token="", xsec_source="pc_share"
+        )
+        assert result == {"note_id": "n1"}
+
+    async def test_returns_none_on_exception(self) -> None:
+        from platforms.xiaohongshu.downloader import _fetch_note_detail
+
+        mock_client = MagicMock()
+        mock_client.get_note_by_id = AsyncMock(side_effect=RuntimeError("net"))
+        mock_client.close = AsyncMock()
+
+        with patch(
+            "platforms.xiaohongshu.downloader.AsyncXhsClient", return_value=mock_client
+        ):
+            result = await _fetch_note_detail(_video_note(), "cookie")
+
+        assert result is None
