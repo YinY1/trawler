@@ -87,42 +87,43 @@ async def fetch_xhs_comment_highlights(
     client = AsyncXhsClient(cookie=cookie)
     try:
         data = await client.get_note_comments(note_id, xsec_token=xsec_token)
+
+        comments_raw = data.get("comments", [])
+        if not isinstance(comments_raw, list):
+            return []
+
+        all_comments: list[CommentHighlight] = []
+        for raw in comments_raw:
+            comment = _parse_comment(raw, author_user_id)
+            if comment is None or comment.is_author:
+                continue
+            all_comments.append(comment)
+
+        # 尝试获取第二页（如果需要）
+        has_more = data.get("has_more", False)
+        cursor = data.get("cursor", "")
+        if has_more and cursor and len(all_comments) < max_count:
+            try:
+                data2 = await client.get_note_comments(note_id, cursor=cursor, xsec_token=xsec_token)
+                for raw in data2.get("comments", []):
+                    comment = _parse_comment(raw, author_user_id)
+                    if comment is None or comment.is_author:
+                        continue
+                    all_comments.append(comment)
+            except Exception as e:
+                logger.debug(f"[评论] 第二页请求失败: {e}, note_id: {note_id}")
+                # 第二页失败不影响结果，降级返回第一页
+
+        # 按点赞数降序排列
+        all_comments.sort(key=lambda c: c.like_count, reverse=True)
+
+        # 限制数量
+        result = all_comments[:max_count]
+
+        logger.info(f"[评论] 获取到 {len(result)} 条热门评论, note_id: {note_id}")
+        return result
     except Exception as e:
         logger.debug(f"[评论] 请求失败: {e}, note_id: {note_id}")
         return []
     finally:
         await client.close()
-
-    comments_raw = data.get("comments", [])
-    if not isinstance(comments_raw, list):
-        return []
-
-    all_comments: list[CommentHighlight] = []
-    for raw in comments_raw:
-        comment = _parse_comment(raw, author_user_id)
-        if comment is None or comment.is_author:
-            continue
-        all_comments.append(comment)
-
-    # 尝试获取第二页（如果需要）
-    has_more = data.get("has_more", False)
-    cursor = data.get("cursor", "")
-    if has_more and cursor and len(all_comments) < max_count:
-        try:
-            data2 = await client.get_note_comments(note_id, cursor=cursor, xsec_token=xsec_token)
-            for raw in data2.get("comments", []):
-                comment = _parse_comment(raw, author_user_id)
-                if comment is None or comment.is_author:
-                    continue
-                all_comments.append(comment)
-        except Exception:
-            pass  # 第二页获取失败不影响结果
-
-    # 按点赞数降序排列
-    all_comments.sort(key=lambda c: c.like_count, reverse=True)
-
-    # 限制数量
-    result = all_comments[:max_count]
-
-    logger.info(f"[评论] 获取到 {len(result)} 条热门评论, note_id: {note_id}")
-    return result
