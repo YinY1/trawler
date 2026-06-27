@@ -6,15 +6,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from platforms.xiaohongshu.auth import get_xhs_cookie
-from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
 from shared.protocols import NoteInfo
 
 logger = logging.getLogger("trawler.xiaohongshu.monitor")
-
-# 默认每页笔记数
-DEFAULT_PAGE_SIZE = 20
 
 
 def _parse_note_from_api(note_data: dict[str, Any], author_name: str, user_id: str) -> NoteInfo | None:
@@ -103,22 +100,22 @@ async def _fetch_notes_via_api(
     user_id: str,
     cookie: str,
     cursor: str = "",
-    num: int = DEFAULT_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
-    """通过小红书 API 获取用户笔记列表 (via XhsClient)。
+    """通过小红书 API 获取用户笔记列表 (via AsyncXhsClient)。
 
     Args:
         user_id: 小红书用户 ID
         cookie: Cookie 字符串
         cursor: 分页游标
-        num: 每页数量
 
     Returns:
         笔记数据列表
     """
-    client = XhsClient(cookie=cookie)
+    client = AsyncXhsClient(cookie=cookie)
     try:
-        return await client.get_user_notes(user_id, cursor=cursor, num=num)
+        data = await client.get_user_notes(user_id, cursor=cursor)
+        notes = data.get("notes", [])
+        return notes if isinstance(notes, list) else []
     except Exception as e:
         logger.warning(f"小红书笔记列表 API 请求异常: {e}")
         return []

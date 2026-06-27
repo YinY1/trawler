@@ -1,4 +1,4 @@
-"""小红书用户搜索模块 — 通过昵称搜索用户 (via XhsClient)."""
+"""小红书用户搜索模块 — 通过昵称搜索用户 (via AsyncXhsClient)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from platforms.xiaohongshu.client import XhsClient
+from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from shared.cookie_utils import extract_cookie_value
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ async def search_xhs_user_by_name(
     query: str,
     page: int = 1,
 ) -> list[dict[str, Any]]:
-    """通过昵称搜索小红书用户 (via XhsClient).
+    """通过昵称搜索小红书用户 (via AsyncXhsClient).
 
     Args:
         cookie: Cookie 字符串（需含 a1）
@@ -32,9 +32,25 @@ async def search_xhs_user_by_name(
         logger.warning("小红书搜索缺少 a1 cookie")
         return []
 
-    client = XhsClient(cookie=cookie)
+    client = AsyncXhsClient(cookie=cookie)
     try:
-        return await client.search_users(query, page=page)
+        data = await client.get_user_by_keyword(query, page=page)
+        users = data.get("users", [])
+        if not isinstance(users, list):
+            return []
+        # xhs 库返回 API 原始字段名(id/name/image)，
+        # 下游 subscription_cli 期望 user_id/nickname/avatar。
+        # 老 client 也从不翻译，此处补上。
+        return [
+            {
+                "user_id": u.get("id", ""),
+                "nickname": u.get("name", ""),
+                "avatar": u.get("image", ""),
+                "red_id": u.get("red_id", ""),
+                "xsec_token": u.get("xsec_token", ""),
+            }
+            for u in users
+        ]
     except Exception:
         logger.exception("小红书搜索请求异常")
         return []

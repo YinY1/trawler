@@ -17,6 +17,7 @@ class QRStatus(enum.StrEnum):
     CONFIRMED = "confirmed"
     EXPIRED = "expired"
     SUCCESS = "success"
+    CAPTCHA = "captcha"
 
 
 class AuthError(Exception): ...
