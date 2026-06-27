@@ -251,6 +251,19 @@ class TestGetNoteById:
 
             assert result == {"note_id": "n1", "desc": "x"}
 
+    async def test_translates_data_fetch_error_to_data_error(self) -> None:
+        """wrapper 方法现在自带 _wrap_xhs_call 翻译(spec §3.1.2 下沉后)。"""
+        from xhs.exception import DataFetchError
+
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_by_id.side_effect = DataFetchError("denied")
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            with pytest.raises(DataError, match="denied"):
+                await client.get_note_by_id("n1")
+
 
 class TestGetNoteComments:
     """get_note_comments: 单页评论,cursor 在 xsec_token 前(对齐库签名)。"""
@@ -298,6 +311,19 @@ class TestGetNoteComments:
             assert result["has_more"] is True
             assert result["cursor"] == "abc"
 
+    async def test_translates_data_fetch_error_to_data_error(self) -> None:
+        """wrapper 方法现在自带 _wrap_xhs_call 翻译(spec §3.1.2 下沉后)。"""
+        from xhs.exception import DataFetchError
+
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_note_comments.side_effect = DataFetchError("denied")
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            with pytest.raises(DataError, match="denied"):
+                await client.get_note_comments("n1")
+
 
 class TestGetUserByKeyword:
     """get_user_by_keyword: 搜索用户,返回 {users: [...]} dict。"""
@@ -338,6 +364,19 @@ class TestGetUserByKeyword:
             result = await client.get_user_by_keyword("test")
 
             assert result["users"] == [{"user_id": "u1"}]
+
+    async def test_translates_data_fetch_error_to_data_error(self) -> None:
+        """wrapper 方法现在自带 _wrap_xhs_call 翻译(spec §3.1.2 下沉后)。"""
+        from xhs.exception import DataFetchError
+
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get_user_by_keyword.side_effect = DataFetchError("denied")
+            mock_cls.return_value = mock_instance
+
+            client = AsyncXhsClient(cookie="")
+            with pytest.raises(DataError, match="denied"):
+                await client.get_user_by_keyword("test")
 
 
 class TestWrapXhsCallLivesInWrapper:

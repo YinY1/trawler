@@ -201,8 +201,8 @@ class AsyncXhsClient:
             note_card dict(xhs 库已解包 items[0].note_card)。
         """
         assert self._client is not None
-        result = await asyncio.to_thread(
-            self._client.get_note_by_id, note_id, xsec_token, xsec_source
+        result: dict[str, Any] = await asyncio.to_thread(  # type: ignore[assignment]
+            self._client.get_note_by_id, note_id, xsec_token, xsec_source  # pyright: ignore[reportCallIssue]
         )
         if DUMP_ENABLED:
             dump_response(
@@ -226,8 +226,8 @@ class AsyncXhsClient:
             完整 data dict: ``{comments, cursor, has_more}``。
         """
         assert self._client is not None
-        result = await asyncio.to_thread(
-            self._client.get_note_comments, note_id, cursor, xsec_token
+        result: dict[str, Any] = await asyncio.to_thread(  # type: ignore[assignment]
+            self._client.get_note_comments, note_id, cursor, xsec_token  # pyright: ignore[reportCallIssue]
         )
         if DUMP_ENABLED:
             dump_response(
@@ -248,7 +248,7 @@ class AsyncXhsClient:
             完整 data dict: ``{users: [...]}``。
         """
         assert self._client is not None
-        result = await asyncio.to_thread(
+        result: dict[str, Any] = await asyncio.to_thread(  # type: ignore[assignment]
             self._client.get_user_by_keyword, keyword, page
         )
         if DUMP_ENABLED:
