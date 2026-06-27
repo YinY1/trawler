@@ -10,7 +10,7 @@ uv pip install -e ".[dev]"                        # 安装依赖（含 dev，不
 uv pip install -e ".[transcribe]"                 # 额外安装语音转写依赖（可选）
 uv run ruff check .                              # lint
 uv run ruff format .                             # format
-uv run pyright .                                 # type check
+uv run pyright                                     # type check（无参数！见全局 AGENTS.md）
 uv run pytest -x                                 # test (fail fast)
 uv run trawler check --platform all              # run locally
 ```
