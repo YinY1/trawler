@@ -8,8 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from platforms.xiaohongshu.downloader import _try_xhs_downloader_lib
 from shared.protocols import NoteInfo, XhsDownloadResult
 
@@ -197,3 +195,106 @@ class TestDownloadNoteCoordination:
         mock_first.assert_awaited_once()
         mock_second.assert_awaited_once()
         assert result.success is True
+
+
+class TestTryDirectDownloadFieldExtraction:
+    """第二层 _try_direct_download 字段提取:视频 master_url / 图文 image_list。"""
+
+    async def test_video_extracts_master_url_from_h264(self) -> None:
+        """视频详情 video.media.stream.h264[0].master_url → 下载。"""
+        from platforms.xiaohongshu.downloader import _try_direct_download
+
+        detail = {
+            "desc": "视频描述",
+            "video": {
+                "media": {
+                    "stream": {
+                        "h264": [{"master_url": "https://cdn/video.mp4"}],
+                    }
+                }
+            },
+        }
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._fetch_note_detail",
+                new=AsyncMock(return_value=detail),
+            ),
+            patch(
+                "platforms.xiaohongshu.downloader._download_file",
+                new=AsyncMock(return_value=True),
+            ) as mock_dl,
+            patch("platforms.xiaohongshu.downloader.get_xhs_cookie", return_value="c"),
+        ):
+            result = await _try_direct_download(_video_note(), _make_config(Path("/tmp")))
+
+        assert result.success is True
+        assert result.filepath is not None
+        assert str(result.filepath).endswith("n1.mp4")
+        mock_dl.assert_awaited_once()
+
+    async def test_video_returns_failure_when_no_stream(self) -> None:
+        """视频详情无 stream → success=False + error。"""
+        from platforms.xiaohongshu.downloader import _try_direct_download
+
+        detail = {"desc": "d", "video": {"media": {}}}
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._fetch_note_detail",
+                new=AsyncMock(return_value=detail),
+            ),
+            patch("platforms.xiaohongshu.downloader.get_xhs_cookie", return_value="c"),
+        ):
+            result = await _try_direct_download(_video_note(), _make_config(Path("/tmp")))
+
+        assert result.success is False
+        assert "无法获取视频下载地址" in (result.error or "")
+
+    async def test_image_extracts_image_list_urls(self) -> None:
+        """图文详情 image_list[].url_default → 逐张下载。"""
+        from platforms.xiaohongshu.downloader import _try_direct_download
+
+        detail = {
+            "desc": "图文描述",
+            "image_list": [
+                {"url_default": "https://cdn/1.jpg"},
+                {"url_default": "https://cdn/2.jpg"},
+            ],
+        }
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._fetch_note_detail",
+                new=AsyncMock(return_value=detail),
+            ),
+            patch(
+                "platforms.xiaohongshu.downloader._download_file",
+                new=AsyncMock(return_value=True),
+            ) as mock_dl,
+            patch("platforms.xiaohongshu.downloader.get_xhs_cookie", return_value="c"),
+        ):
+            result = await _try_direct_download(_image_note(), _make_config(Path("/tmp")))
+
+        assert result.success is True
+        assert len(result.image_paths) == 2
+        assert mock_dl.await_count == 2
+        assert result.content_text == "图文描述"
+
+    async def test_uses_note_desc_when_detail_none(self) -> None:
+        """detail=None → content_text fallback 到 note.desc。"""
+        from platforms.xiaohongshu.downloader import _try_direct_download
+
+        note = _image_note()
+        note.desc = "fallback desc"
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._fetch_note_detail",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("platforms.xiaohongshu.downloader.get_xhs_cookie", return_value="c"),
+        ):
+            result = await _try_direct_download(note, _make_config(Path("/tmp")))
+
+        assert result.content_text == "fallback desc"
