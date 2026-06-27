@@ -112,6 +112,12 @@ def _sign_adapter(url: str, data: Any = None, *, a1: str = "", web_session: str 
     method = "GET" if is_get else "POST"
     # get_xhs_sign 期望 api 是纯 path(不含 query),GET 时它内部会从 data 取 params
     api = url.split("?", 1)[0] if "?" in url else url
+    if is_get:
+        from urllib.parse import parse_qs
+
+        query = url.split("?", 1)[1]
+        params = {k: v[0] for k, v in parse_qs(query, keep_blank_values=True).items()}
+        return get_xhs_sign(api, params, a1, method)
     return get_xhs_sign(api, data if isinstance(data, dict) else "", a1, method)
 
 

@@ -379,6 +379,41 @@ class TestGetUserByKeyword:
                 await client.get_user_by_keyword("test")
 
 
+class TestSignAdapterGetIncludesQuery:
+    """GET 请求签名必须包含 query params（否则服务端返回 406）。"""
+
+    def test_get_request_passes_parsed_params_to_signer(self) -> None:
+        """GET URL 的 query params 必须传给签名函数，不能传空字符串。"""
+        from platforms.xiaohongshu.async_xhs_wrapper import _sign_adapter
+
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.get_xhs_sign") as mock_sign:
+            mock_sign.return_value = {"x-s": "test", "x-t": "123"}
+            url = "/api/sns/web/v1/user_posted?num=30&cursor=&user_id=u1&image_scenes=FD_WM_WEBP"
+            _sign_adapter(url, data=None, a1="test_a1")
+
+        mock_sign.assert_called_once()
+        call_args = mock_sign.call_args
+        # 第二个参数应该是解析后的 params dict，不是空字符串
+        params = call_args.args[1]
+        assert isinstance(params, dict)
+        assert params["num"] == "30"
+        assert params["user_id"] == "u1"
+        assert params["cursor"] == ""  # keep_blank_values=True 保留空值
+        assert params["image_scenes"] == "FD_WM_WEBP"
+
+    def test_post_request_passes_data_dict_unchanged(self) -> None:
+        """POST 请求传 data dict，不变。"""
+        from platforms.xiaohongshu.async_xhs_wrapper import _sign_adapter
+
+        with patch("platforms.xiaohongshu.async_xhs_wrapper.get_xhs_sign") as mock_sign:
+            mock_sign.return_value = {"x-s": "test", "x-t": "123"}
+            _sign_adapter("/api/sns/web/v1/feed", data={"source_note_id": "n1"}, a1="test_a1")
+
+        mock_sign.assert_called_once()
+        call_args = mock_sign.call_args
+        assert call_args.args[1] == {"source_note_id": "n1"}
+
+
 class TestWrapXhsCallLivesInWrapper:
     """_wrap_xhs_call 现在住在 async_xhs_wrapper(spec §3.1.2 下沉)。"""
 
