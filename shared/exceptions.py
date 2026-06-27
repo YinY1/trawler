@@ -64,6 +64,11 @@ class IpBlockError(TrawlerError):
 class CaptchaError(TrawlerError):
     """触发了平台验证码（HTTP 461/471 等）"""
 
+    def __init__(self, message: str, verify_type: str | None = None, verify_uuid: str | None = None) -> None:
+        self.verify_type = verify_type
+        self.verify_uuid = verify_uuid
+        super().__init__(message)
+
 
 class RetryableError(TrawlerError):
     """可重试的临时错误（HTTP 403/429/5xx、网络抖动的基类）"""

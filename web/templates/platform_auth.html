@@ -167,6 +167,18 @@
       // Still waiting — no change
       return;
     }
+    if (status === 'captcha') {
+      var qrUrl = data.qr_url;
+      if (qrUrl && qrUrl !== '') {
+        document.getElementById('qr-status').textContent = '需要二次验证，请用小红书APP扫描下方二维码';
+        document.getElementById('qr-img').src = '/auth/captcha_qr/' + qrPlatform + '?t=' + Date.now();
+        setStep(2, 'done');
+        setStep(3, 'current');
+      } else {
+        document.getElementById('qr-status').textContent = '等待二次验证扫码…';
+      }
+      return;
+    }
     if (status === 'scanned') {
       document.getElementById('qr-status').textContent = '已扫码，请在手机上确认';
       setStep(2, 'done');

@@ -356,6 +356,10 @@ async def auth_poll(platform_key: str) -> dict[str, Any]:
             logger.warning("🔑 %s 轮询异常: %s", platform_key, exc)
             return {"status": "error", "message": f"轮询失败: {exc}"}
 
+        if status.status == QRStatus.CAPTCHA:
+            # Cache captcha QR URL so the captcha_qr endpoint can render it as an image
+            session["captcha_url"] = status.message
+            return {"status": "captcha", "qr_url": status.message}
         if status.status != QRStatus.SUCCESS:
             return {"status": status.status.value}
 
@@ -412,3 +416,23 @@ async def _cleanup_session_async(platform_key: str) -> None:
         await auth.close()
     except Exception as exc:
         logger.warning("🔑 %s 关闭 authenticator 失败: %s", platform_key, exc)
+
+
+@router.get("/auth/captcha_qr/{platform_key}")
+async def auth_captcha_qr(platform_key: str) -> Response:
+    """Render the cached captcha verification URL as a PNG QR image.
+
+    The captcha URL (``https://www.xiaohongshu.com/web-login/qrcode-transfer?...``)
+    is an HTML deep-link page, not an image — browsers cannot render it via
+    ``<img src>``. This endpoint re-encodes it as a QR code PNG image using
+    the same ``qrcode.make()`` pattern as ``/auth/qr/{platform}``.
+    """
+    session = _qr_sessions.get(platform_key)
+    captcha_url = session.get("captcha_url") if session else None
+    if not captcha_url:
+        return Response(status_code=404)
+    img = qrcode.make(captcha_url)
+    buf = io.BytesIO()
+    cast(Any, img.save)(buf, format="PNG")
+    buf.seek(0)
+    return Response(content=buf.getvalue(), media_type="image/png")

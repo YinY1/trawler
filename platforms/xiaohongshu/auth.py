@@ -21,6 +21,8 @@ import random
 import time
 from collections.abc import Callable
 
+from xhs.exception import NeedVerifyError
+
 from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient, _wrap_xhs_call
 from shared.auth.base import (
     AuthStatus,
@@ -120,6 +122,7 @@ class XhsAuthenticator(BaseAuthenticator):
         self._client: AsyncXhsClient | None = None
         self._qr_id: str = ""
         self._code: str = ""
+        self._captcha_state: dict[str, str] | None = None
 
     @_wrap_xhs_call
     async def generate_qr_code(self) -> QRCodeResult:
@@ -148,12 +151,26 @@ class XhsAuthenticator(BaseAuthenticator):
         )
 
     async def poll_qr_status(self, qr_key: str) -> AuthStatus:
-        """轮询 QR 状态 (spec §4.2). 字段名 code_status (snake_case!)."""
+        """轮询 QR 状态 (spec §4.2). 字段名 code_status (snake_case!).
+
+        当 check_qrcode 触发 NeedVerifyError 时进入二次验证流程:
+        1. 首次调 captcha_init 拿 rid, 构造第二 QR URL 返回 CAPTCHA
+        2. 后续调 captcha_query_status 等确认(4=已确认)
+        3. 确认后清状态, 重试 check_qrcode
+        """
         logger.info("🔑 XhsAuthenticator 轮询扫码状态...")
         if self._client is None:
             return AuthStatus(success=False, status=QRStatus.WAITING, message="无 client")
+
+        # ── 当前轮已在二次验证中 ──
+        if self._captcha_state is not None:
+            return await self._poll_captcha_status()
+
+        # ── 正常轮询 ──
         try:
             result = await self._client.check_qrcode(self._qr_id, self._code)
+        except NeedVerifyError as e:
+            return await self._handle_captcha(e)
         except Exception as e:
             logger.warning("🔑 轮询异常: %s", e)
             return AuthStatus(success=False, status=QRStatus.WAITING, message=f"轮询失败: {e}")
@@ -162,7 +179,7 @@ class XhsAuthenticator(BaseAuthenticator):
         if DUMP_ENABLED:
             dump_response("xhs_poll", result)
 
-        code_status = result.get("code_status", 0)  # ← 关键修复: snake_case
+        code_status = result.get("code_status", 0)
         if code_status == 2:
             return AuthStatus(success=True, status=QRStatus.SUCCESS, message="登录成功")
         elif code_status == 1:
@@ -171,6 +188,95 @@ class XhsAuthenticator(BaseAuthenticator):
             return AuthStatus(success=False, status=QRStatus.EXPIRED, message="二维码已过期")
         else:
             return AuthStatus(success=False, status=QRStatus.WAITING, message="等待扫描")
+
+    async def _handle_captcha(self, e: NeedVerifyError) -> AuthStatus:
+        """首次触达二次验证码: 调 captcha_init 拿 rid, 构造第二 QR URL。
+
+        即使初始化失败也返回 CAPTCHA 状态(空 qr_url),
+        避免前端陷入无重试的死循环。
+        """
+        assert self._client is not None  # caller 已 guard
+        try:
+            data = await self._client.captcha_init(
+                str(e.verify_type) if e.verify_type else "",
+                str(e.verify_uuid) if e.verify_uuid else "",
+            )
+            rid = ""
+            if isinstance(data, dict):
+                inner = data.get("data")
+                if isinstance(inner, dict):
+                    rid = inner.get("rid", "")
+                if not rid and isinstance(data, dict):
+                    rid = data.get("rid", "")
+            self._captcha_state = {
+                "verify_type": str(e.verify_type) if e.verify_type else "",
+                "verify_uuid": str(e.verify_uuid) if e.verify_uuid else "",
+                "rid": rid,
+            }
+            web_id = self._get_web_id()
+            qr_url = (
+                f"https://www.xiaohongshu.com/web-login/qrcode-transfer"
+                f"?rid={rid}&verifyUuid={e.verify_uuid}"
+                f"&verifyBiz=471&verifyType={e.verify_type}&webid={web_id}"
+            )
+            return AuthStatus(success=False, status=QRStatus.CAPTCHA, message=qr_url)
+        except Exception:
+            logger.warning("🔑 二次验证初始化失败", exc_info=True)
+            return AuthStatus(success=False, status=QRStatus.CAPTCHA, message="")
+
+    async def _poll_captcha_status(self) -> AuthStatus:
+        """二次验证轮询: 查 captcha_query_status, 4=已确认→回正常轮询。"""
+        assert self._client is not None  # caller 已 guard
+        try:
+            s = self._captcha_state
+            assert s is not None
+            result = await self._client.captcha_query_status(
+                s["verify_type"], s["verify_uuid"], s["rid"]
+            )
+            status_code = 0
+            if isinstance(result, dict):
+                inner = result.get("data")
+                if isinstance(inner, dict):
+                    status_code = inner.get("status", 0)
+                if not status_code:
+                    status_code = result.get("status", 0)
+
+            if status_code == 4:
+                # 二次验证已确认 — 清状态, 重试 check_qrcode
+                self._captcha_state = None
+                logger.info("🔑 二次验证已确认, 重试 check_qrcode")
+                try:
+                    retry = await self._client.check_qrcode(self._qr_id, self._code)
+                except Exception as e:
+                    logger.warning("🔑 重试 check_qrcode 异常: %s", e)
+                    return AuthStatus(success=False, status=QRStatus.WAITING, message=f"轮询失败: {e}")
+                else:
+                    return self._code_status_to_auth_status(retry)
+            return AuthStatus(success=False, status=QRStatus.CAPTCHA, message="")
+        except Exception:
+            logger.warning("🔑 二次验证轮询异常", exc_info=True)
+            return AuthStatus(success=False, status=QRStatus.CAPTCHA, message="")
+
+    def _code_status_to_auth_status(self, result: dict) -> AuthStatus:
+        """将 check_qrcode 的 code_status 翻译成 AuthStatus。"""
+        code_status = result.get("code_status", 0)
+        if code_status == 2:
+            return AuthStatus(success=True, status=QRStatus.SUCCESS, message="登录成功")
+        elif code_status == 1:
+            return AuthStatus(success=False, status=QRStatus.SCANNED, message="已扫描,请确认")
+        elif code_status == 3:
+            return AuthStatus(success=False, status=QRStatus.EXPIRED, message="二维码已过期")
+        else:
+            return AuthStatus(success=False, status=QRStatus.WAITING, message="等待扫描")
+
+    def _get_web_id(self) -> str:
+        """从 cookie 提取 webId 值。"""
+        cookie = self._client.cookie if self._client else ""
+        for part in cookie.split(";"):
+            part_stripped = part.strip()
+            if part_stripped.lower().startswith("webid="):
+                return part_stripped.split("=", 1)[1]
+        return ""
 
     @_wrap_xhs_call
     async def get_tokens(self, qr_key: str) -> PlatformTokens:

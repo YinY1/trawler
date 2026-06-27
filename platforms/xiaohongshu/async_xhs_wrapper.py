@@ -44,13 +44,18 @@ def _wrap_xhs_call(func: _F) -> _F:
       SignError       → RetryableError
       DataFetchError  → DataError
       RequestException→ RetryableError  (catch-all, ordered LAST)
+      KeyError        → CaptchaError    (471/461 missing Verifytype header)
     """
     @functools.wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return await func(*args, **kwargs)
         except NeedVerifyError as e:
-            raise CaptchaError(f"XHS captcha challenge: {e}") from e
+            raise CaptchaError(
+                f"XHS captcha challenge: {e}",
+                verify_type=e.verify_type,
+                verify_uuid=e.verify_uuid,
+            ) from e
         except IPBlockError as e:
             raise IpBlockError(f"XHS IP blocked: {e}") from e
         except SignError as e:
@@ -59,6 +64,8 @@ def _wrap_xhs_call(func: _F) -> _F:
             raise DataError(f"XHS data fetch error: {e}") from e
         except requests.RequestException as e:
             raise RetryableError(f"XHS network error: {e}") from e
+        except KeyError as e:
+            raise CaptchaError(f"XHS captcha challenge (missing header): {e}") from e
 
     return wrapper  # type: ignore[return-value]
 
@@ -139,7 +146,10 @@ class AsyncXhsClient:
         # external_sign 必须是 callable: xhs 库 _pre_headers 对主 API 端点
         # (is_creator=False) 会调用 external_sign(url, data, a1=, web_session=)。
         # 用 xhs.help.sign 包一个适配器,算法是 xhs 库原生(canvas 指纹 + md5)。
-        self._client: XhsClient | None = XhsClient(cookie=cookie or None, sign=_sign_adapter)
+        self._client: XhsClient | None = XhsClient(
+            cookie=cookie or None,
+            sign=_sign_adapter,
+        )
 
     async def get_qrcode(self) -> dict[str, Any]:
         """生成 QR 二维码。返回 ``{qr_id, code, url, multi_flag}``。"""
@@ -197,6 +207,9 @@ class AsyncXhsClient:
     ) -> dict[str, Any]:
         """取笔记详情。
 
+        xhs 库的 ``get_note_by_id`` 只接受 note_id(不传 xsec_token),
+        这里直接用 ``post`` 调 feed 接口以携带 token。
+
         Args:
             note_id: 笔记 ID
             xsec_token: 从笔记列表拿到的 token(分享链路必需)
@@ -207,14 +220,27 @@ class AsyncXhsClient:
             note_card dict(xhs 库已解包 items[0].note_card)。
         """
         assert self._client is not None
+        body: dict[str, Any] = {
+            "source_note_id": note_id,
+            "image_scenes": ["CRD_WM_WEBP"],
+        }
+        if xsec_token:
+            body["xsec_token"] = xsec_token
+        if xsec_source:
+            body["xsec_source"] = xsec_source
         result: dict[str, Any] = await asyncio.to_thread(  # type: ignore[assignment]
-            self._client.get_note_by_id, note_id, xsec_token, xsec_source  # pyright: ignore[reportCallIssue]
+            self._client.post, "/api/sns/web/v1/feed", body
         )
         if DUMP_ENABLED:
             dump_response(
                 "xhs_note_by_id",
                 {"note_id": note_id, "xsec_source": xsec_source, "result": result},
             )
+        # xhs 库 get_note_by_id 会解包 items[0].note_card; 保持兼容
+        if isinstance(result, dict) and "items" in result:
+            items = result.get("items", [])
+            if items:
+                return items[0].get("note_card", result)
         return result
 
     @_wrap_xhs_call
@@ -263,6 +289,52 @@ class AsyncXhsClient:
                 {"keyword": keyword, "page": page, "result": result},
             )
         return result
+
+    async def captcha_init(self, verify_type: str, verify_uuid: str) -> dict[str, Any]:
+        """初始化二次验证码(风控扫码),返回完整响应 dict(含 ``data.rid``)。
+
+        xhs 库 ``request()`` 的返回值陷阱:
+        - ``{"success": true, "data": null}`` → 返回 ``None`` (dict.get 有 key 但值 null)
+        - 响应无 ``"success": true`` 字段 → 抛 ``DataFetchError``
+        这里统一归一化成 dict。
+
+        POST /api/redcaptcha/v2/qr/init
+        """
+        assert self._client is not None
+        uri = "/api/redcaptcha/v2/qr/init"
+        body = {
+            "verifyType": verify_type,
+            "verifyUuid": verify_uuid,
+            "verifyBiz": "471",
+            "sourceSite": "",
+        }
+        try:
+            with _suppress_xhs_stdout():
+                result = await asyncio.to_thread(self._client.post, uri, body)  # type: ignore[assignment]
+                return result if isinstance(result, dict) else {}
+        except (DataFetchError, NeedVerifyError, SignError, IPBlockError):
+            return {}
+
+    async def captcha_query_status(self, verify_type: str, verify_uuid: str, rid: str) -> dict[str, Any]:
+        """查询二次验证码扫码状态(4=已确认)。
+
+        POST /api/redcaptcha/v2/qr/status/query
+        """
+        assert self._client is not None
+        uri = "/api/redcaptcha/v2/qr/status/query"
+        body = {
+            "verifyType": verify_type,
+            "verifyUuid": verify_uuid,
+            "verifyBiz": "471",
+            "sourceSite": "",
+            "rid": rid,
+        }
+        try:
+            with _suppress_xhs_stdout():
+                result = await asyncio.to_thread(self._client.post, uri, body)  # type: ignore[assignment]
+                return result if isinstance(result, dict) else {}
+        except (DataFetchError, NeedVerifyError, SignError, IPBlockError):
+            return {}
 
     @property
     def cookie(self) -> str:

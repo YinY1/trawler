@@ -23,8 +23,8 @@ class TestQRStatus:
     def test_is_str_enum(self) -> None:
         assert issubclass(QRStatus, enum.StrEnum)
 
-    def test_has_five_members(self) -> None:
-        assert len(QRStatus) == 5
+    def test_has_six_members(self) -> None:
+        assert len(QRStatus) == 6
 
     def test_waiting_value(self) -> None:
         assert QRStatus.WAITING == "waiting"
