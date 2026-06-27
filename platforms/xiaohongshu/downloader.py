@@ -4,7 +4,6 @@ from __future__ import annotations
 
 # pyright: basic
 import logging
-import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -15,7 +14,6 @@ from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from platforms.xiaohongshu.auth import (
     get_xhs_cookie,
 )
-from platforms.xiaohongshu.client import XhsClient
 from shared.config import Config
 from shared.constants import XHS_DOWNLOAD_TIMEOUT
 from shared.protocols import NoteInfo, XhsDownloadResult
@@ -133,82 +131,7 @@ async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> XhsDownload
                 pass
 
 
-# ── 第二层：XHS-Downloader API Server ─────────────────────
-
-
-async def _try_xhs_downloader_api(note: NoteInfo, config: Config) -> XhsDownloadResult | None:
-    """尝试通过 XHS-Downloader API Server 下载。
-
-    需要在配置中指定 API Server 地址。
-
-    Args:
-        note: 笔记信息
-        config: 全局配置
-
-    Returns:
-        下载结果或 None
-    """
-    # 从环境变量或配置获取 API 地址
-    api_url = os.environ.get("TRAWLER_XHS_DOWNLOADER_API", "")
-    if not api_url:
-        return None
-
-    try:
-        note_url = f"https://www.xiaohongshu.com/explore/{note.note_id}"
-
-        async with aiohttp.ClientSession(trust_env=False) as session:
-            # 提交下载任务
-            payload = {"url": note_url}
-            async with session.post(
-                f"{api_url.rstrip('/')}/api/download",
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-
-                result = await resp.json(content_type=None)
-
-        if not result.get("success", False):
-            return None
-
-        # API 通常返回下载后的文件路径
-        data = result.get("data", {})
-        file_path = data.get("filepath", "") or data.get("file_path", "")
-
-        if not file_path:
-            return None
-
-        note_dir = _get_note_dir(config, note.note_id)
-
-        if note.note_type == "video":
-            src = Path(file_path)
-            if src.exists():
-                dest = note_dir / f"{note.note_id}{src.suffix or '.mp4'}"
-                # 移动文件到目标目录
-                import shutil
-
-                shutil.move(str(src), str(dest))
-                return XhsDownloadResult(
-                    success=True,
-                    source_id=note.note_id,
-                    title=note.title,
-                    filepath=dest,
-                )
-
-        return XhsDownloadResult(
-            success=True,
-            source_id=note.note_id,
-            title=note.title,
-            content_text=data.get("desc", ""),
-        )
-
-    except Exception as e:
-        logger.debug(f"XHS-Downloader API 下载失败: {e}")
-        return None
-
-
-# ── 第三层：直接 HTTP 下载（兜底） ─────────────────────────
+# ── 第二层：直接 HTTP 下载（兜底） ─────────────────────────
 
 
 async def _fetch_note_detail(note: NoteInfo, cookie: str) -> dict[str, Any] | None:
@@ -377,11 +300,10 @@ async def _try_direct_download(note: NoteInfo, config: Config) -> XhsDownloadRes
 
 
 async def download_note(note: NoteInfo, config: Config) -> XhsDownloadResult:
-    """下载小红书笔记内容，三层降级策略。
+    """下载小红书笔记内容，两层降级策略。
 
-    1. XHS-Downloader Python 库（如果安装）
-    2. XHS-Downloader API Server（如果配置）
-    3. 直接 HTTP 下载（兜底）
+    1. AsyncXhsClient.get_note_by_id(pc_feed, 快速路径)
+    2. AsyncXhsClient.get_note_by_id(pc_share, 完整路径,带 token)
 
     Args:
         note: 笔记信息
@@ -392,20 +314,14 @@ async def download_note(note: NoteInfo, config: Config) -> XhsDownloadResult:
     """
     logger.info(f"开始下载笔记: [{note.title}] (类型: {note.note_type})")
 
-    # 第一层：XHS-Downloader 库
+    # 第一层：快速路径(无 token, 默认 pc_feed)
     result = await _try_xhs_downloader_lib(note, config)
-    if result is not None:
-        logger.info(f"[第一层] XHS-Downloader 库下载{'成功' if result.success else '失败'}")
+    if result is not None and result.success:
+        logger.info(f"[第一层] xhs 库下载成功: {note.title}")
         return result
 
-    # 第二层：XHS-Downloader API Server
-    result = await _try_xhs_downloader_api(note, config)
-    if result is not None:
-        logger.info(f"[第二层] XHS-Downloader API 下载{'成功' if result.success else '失败'}")
-        return result
-
-    # 第三层：直接 HTTP 下载
-    logger.info("[第三层] 使用直接 HTTP 下载（兜底）")
+    # 第二层(原第三层)：完整路径(带 token + pc_share)
+    logger.info("[第二层] 使用直接下载")
     result = await _try_direct_download(note, config)
     logger.info(f"下载{'成功' if result.success else '失败'}: {note.title}")
     return result

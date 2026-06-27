@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from platforms.xiaohongshu.downloader import _try_xhs_downloader_lib
-from shared.protocols import NoteInfo
+from shared.protocols import NoteInfo, XhsDownloadResult
 
 
 def _video_note() -> NoteInfo:
@@ -117,3 +117,83 @@ class TestFetchNoteDetailPcShare:
             result = await _fetch_note_detail(_video_note(), "cookie")
 
         assert result is None
+
+
+class TestDownloadNoteCoordination:
+    """主入口 download_note 协调逻辑:第一层 success=False 必须降级(修的 bug)。"""
+
+    async def test_first_layer_success_no_fallback(self) -> None:
+        """第一层 success=True → 直接返回,不调第二层。"""
+        from platforms.xiaohongshu.downloader import download_note
+
+        first_result = XhsDownloadResult(
+            success=True, source_id="n1", title="t", content_text="ok"
+        )
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._try_xhs_downloader_lib",
+                new=AsyncMock(return_value=first_result),
+            ) as mock_first,
+            patch(
+                "platforms.xiaohongshu.downloader._try_direct_download",
+                new=AsyncMock(),
+            ) as mock_second,
+        ):
+            result = await download_note(_image_note(), _make_config(Path("/tmp")))
+
+        assert result.success is True
+        mock_first.assert_awaited_once()
+        mock_second.assert_not_called()
+
+    async def test_first_layer_failure_falls_back(self) -> None:
+        """第一层 success=False → 降级到第二层(修的 bug,spec §3.3)。"""
+        from platforms.xiaohongshu.downloader import download_note
+
+        first_result = XhsDownloadResult(
+            success=False, source_id="n1", title="t", error="视频 URL 提取失败"
+        )
+        second_result = XhsDownloadResult(
+            success=True, source_id="n1", title="t", content_text="recovered"
+        )
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._try_xhs_downloader_lib",
+                new=AsyncMock(return_value=first_result),
+            ) as mock_first,
+            patch(
+                "platforms.xiaohongshu.downloader._try_direct_download",
+                new=AsyncMock(return_value=second_result),
+            ) as mock_second,
+        ):
+            result = await download_note(_image_note(), _make_config(Path("/tmp")))
+
+        mock_first.assert_awaited_once()
+        mock_second.assert_awaited_once()
+        assert result.success is True
+        assert result.content_text == "recovered"
+
+    async def test_first_layer_none_falls_back(self) -> None:
+        """第一层 None(cookie 缺失等)→ 降级到第二层。"""
+        from platforms.xiaohongshu.downloader import download_note
+
+        second_result = XhsDownloadResult(
+            success=True, source_id="n1", title="t", content_text="ok"
+        )
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader._try_xhs_downloader_lib",
+                new=AsyncMock(return_value=None),
+            ) as mock_first,
+            patch(
+                "platforms.xiaohongshu.downloader._try_direct_download",
+                new=AsyncMock(return_value=second_result),
+            ) as mock_second,
+        ):
+            result = await download_note(_image_note(), _make_config(Path("/tmp")))
+
+        mock_first.assert_awaited_once()
+        mock_second.assert_awaited_once()
+        assert result.success is True
