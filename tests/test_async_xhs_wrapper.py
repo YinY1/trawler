@@ -269,7 +269,7 @@ class TestGetNoteComments:
     """get_note_comments: 单页评论,cursor 在 xsec_token 前(对齐库签名)。"""
 
     async def test_delegates_with_note_id_cursor_xsec_token_order(self) -> None:
-        """库签名是 (note_id, cursor, xsec_token),cursor 必须在前。"""
+        """库签名是 (note_id, cursor),xsec_token 不传(库内部处理)。"""
         with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
             mock_instance = MagicMock()
             mock_instance.get_note_comments.return_value = {
@@ -282,7 +282,7 @@ class TestGetNoteComments:
             client = AsyncXhsClient(cookie="")
             await client.get_note_comments("n1", cursor="cur", xsec_token="t1")
 
-            mock_instance.get_note_comments.assert_called_once_with("n1", "cur", "t1")
+            mock_instance.get_note_comments.assert_called_once_with("n1", "cur")
 
     async def test_defaults_cursor_and_token_empty(self) -> None:
         with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:
@@ -293,7 +293,7 @@ class TestGetNoteComments:
             client = AsyncXhsClient(cookie="")
             await client.get_note_comments("n1")
 
-            mock_instance.get_note_comments.assert_called_once_with("n1", "", "")
+            mock_instance.get_note_comments.assert_called_once_with("n1", "")
 
     async def test_returns_full_dict_with_has_more(self) -> None:
         with patch("platforms.xiaohongshu.async_xhs_wrapper.XhsClient") as mock_cls:

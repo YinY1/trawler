@@ -36,7 +36,21 @@ async def search_xhs_user_by_name(
     try:
         data = await client.get_user_by_keyword(query, page=page)
         users = data.get("users", [])
-        return users if isinstance(users, list) else []
+        if not isinstance(users, list):
+            return []
+        # xhs 库返回 API 原始字段名(id/name/image)，
+        # 下游 subscription_cli 期望 user_id/nickname/avatar。
+        # 老 client 也从不翻译，此处补上。
+        return [
+            {
+                "user_id": u.get("id", ""),
+                "nickname": u.get("name", ""),
+                "avatar": u.get("image", ""),
+                "red_id": u.get("red_id", ""),
+                "xsec_token": u.get("xsec_token", ""),
+            }
+            for u in users
+        ]
     except Exception:
         logger.exception("小红书搜索请求异常")
         return []

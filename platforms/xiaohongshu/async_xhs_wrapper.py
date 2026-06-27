@@ -227,7 +227,7 @@ class AsyncXhsClient:
         """
         assert self._client is not None
         result: dict[str, Any] = await asyncio.to_thread(  # type: ignore[assignment]
-            self._client.get_note_comments, note_id, cursor, xsec_token  # pyright: ignore[reportCallIssue]
+            self._client.get_note_comments, note_id, cursor
         )
         if DUMP_ENABLED:
             dump_response(

@@ -25,9 +25,9 @@ class TestSearchXhsUserByName:
             return_value={
                 "users": [
                     {
-                        "user_id": "5a7d3ed311be106d0306e7d6",
-                        "nickname": "Angelababy",
-                        "avatar": "https://avatar.com/1.jpg",
+                        "id": "5a7d3ed311be106d0306e7d6",
+                        "name": "Angelababy",
+                        "image": "https://avatar.com/1.jpg",
                     }
                 ]
             }
@@ -42,6 +42,7 @@ class TestSearchXhsUserByName:
         assert len(users) == 1
         assert users[0]["user_id"] == "5a7d3ed311be106d0306e7d6"
         assert users[0]["nickname"] == "Angelababy"
+        assert users[0]["avatar"] == "https://avatar.com/1.jpg"
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_no_match(self):
