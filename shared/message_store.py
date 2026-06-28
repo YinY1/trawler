@@ -168,6 +168,45 @@ class MessageStore:
             results.append(self._msg_from_dict(msg_id, data))
         return results
 
+    def query_messages(
+        self,
+        *,
+        since: int | None = None,
+        title: str | None = None,
+        author: str | None = None,
+        platform: str | None = None,
+        phase: Phase | None = None,
+    ) -> list[MessageRecord]:
+        """多维度筛选消息（手动检查专用，plan 2026-06-28）。
+
+        所有过滤条件 AND 组合，None 表示不限制。
+
+        Args:
+            since: Unix 时间戳，只返回 pubdate >= since 的消息（绝对时间戳，不是 hours）
+            title: 大小写不敏感 substring 匹配
+            author: 大小写不敏感 substring 匹配
+            platform: 精确匹配平台标识
+            phase: 精确匹配阶段
+
+        与 ``get_messages_in_window`` 区别：本方法不做 cleanup，支持超过 24h 的历史消息查询。
+        """
+        title_lower = title.lower() if title else None
+        author_lower = author.lower() if author else None
+        results: list[MessageRecord] = []
+        for msg_id, data in self._messages.items():
+            if since is not None and data.get("pubdate", 0) < since:
+                continue
+            if platform is not None and data.get("platform") != platform:
+                continue
+            if phase is not None and data.get("phase") != phase.value:
+                continue
+            if title_lower is not None and title_lower not in data.get("title", "").lower():
+                continue
+            if author_lower is not None and author_lower not in data.get("author", "").lower():
+                continue
+            results.append(self._msg_from_dict(msg_id, data))
+        return results
+
     # ── 写入 ─────────────────────────────────────────────────
 
     def add_new(

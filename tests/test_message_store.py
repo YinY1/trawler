@@ -415,3 +415,84 @@ def test_reset_to_phase_clears_retry_state(store: MessageStore) -> None:
     assert msg.phase == Phase.DOWNLOADED
     assert msg.retry_count == 0
     assert msg.last_error == ""
+
+
+# ── query_messages (plan 2026-06-28-manual-content-check) ────────
+
+
+def test_query_messages_by_platform(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    store.add_new("xhs:N1", "xhs", ContentType.TEXT, int(time.time()), "T2", "A")
+    result = store.query_messages(platform="bili")
+    assert len(result) == 1
+    assert result[0].msg_id == "bili:BV1"
+
+
+def test_query_messages_by_phase(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    store.add_new("bili:BV2", "bili", ContentType.VIDEO, int(time.time()), "T2", "A")
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    result = store.query_messages(phase=Phase.SUMMARIZED)
+    assert len(result) == 1
+    assert result[0].msg_id == "bili:BV1"
+
+
+def test_query_messages_by_title_substring_case_insensitive(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "Python Tutorial", "A")
+    store.add_new("bili:BV2", "bili", ContentType.VIDEO, int(time.time()), "Java Guide", "A")
+    result = store.query_messages(title="python")
+    assert len(result) == 1
+    assert result[0].msg_id == "bili:BV1"
+
+
+def test_query_messages_by_author_substring_case_insensitive(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "Alice")
+    store.add_new("bili:BV2", "bili", ContentType.VIDEO, int(time.time()), "T2", "Bob")
+    result = store.query_messages(author="ali")
+    assert len(result) == 1
+    assert result[0].msg_id == "bili:BV1"
+
+
+def test_query_messages_by_since(store: MessageStore) -> None:
+    now = int(time.time())
+    # bypass add_new window check to inject old message
+    store._messages["bili:old"] = {
+        "platform": "bili", "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value, "pubdate": now - 48 * 3600,
+        "title": "Old", "author": "A", "created_at": 0.0, "updated_at": 0.0, "error": "",
+    }
+    store._messages["bili:new"] = {
+        "platform": "bili", "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value, "pubdate": now - 3600,
+        "title": "New", "author": "A", "created_at": 0.0, "updated_at": 0.0, "error": "",
+    }
+    store._dirty = True
+    # since = 24h ago → only "new"
+    since_ts = now - 24 * 3600
+    result = store.query_messages(since=since_ts)
+    assert len(result) == 1
+    assert result[0].msg_id == "bili:new"
+
+
+def test_query_messages_combined_filters(store: MessageStore) -> None:
+    """AND 组合：platform + title + phase 同时过滤。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "Python Guide", "A")
+    store.add_new("bili:BV2", "bili", ContentType.VIDEO, int(time.time()), "Python Tips", "A")
+    store.add_new("xhs:N1", "xhs", ContentType.TEXT, int(time.time()), "Python Notes", "A")
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    result = store.query_messages(platform="bili", title="python", phase=Phase.SUMMARIZED)
+    assert len(result) == 1
+    assert result[0].msg_id == "bili:BV1"
+
+
+def test_query_messages_no_filters_returns_all(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    store.add_new("xhs:N1", "xhs", ContentType.TEXT, int(time.time()), "T2", "A")
+    result = store.query_messages()
+    assert len(result) == 2
+
+
+def test_query_messages_empty_result(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    result = store.query_messages(title="nonexistent")
+    assert result == []
