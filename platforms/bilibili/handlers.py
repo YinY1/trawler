@@ -220,12 +220,20 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
             text=text_to_summarize,
             config=ctx.config,
         )
+        if analysis.failed:
+            # fallback 链全部失败：标记 ctx.error 让 engine 处理 retry
+            # （engine 会读 retry_count 决定是 mark_retry_failure 还是 mark_error）
+            ctx.error = "AI 摘要失败：所有 provider 不可用"
+            logger.warning("⚠️  %s — 消息将卡在 SUMMARIZED 阶段等待重试", ctx.error)
+            return False
         ctx.summary_text = analysis.summary
         ctx.keywords = analysis.keywords
     except Exception as exc:
-        # analyze_content 内部已吞异常并返回空结果；这里兜底防极端情况
-        logger.error("✗ 摘要/关键词生成失败: %s", exc)
+        # analyze_content 内部已吞异常；这里兜底防极端情况
+        ctx.error = f"摘要/关键词生成异常: {exc}"
+        logger.error("✗ %s", ctx.error)
         logger.exception("Analysis failed for %s", source_id)
+        return False
 
     return True
 

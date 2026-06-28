@@ -424,3 +424,76 @@ async def test_process_message_flush_truncates_long_body(config: Config, store: 
     updated = store.get_message("xhs:note2")
     assert updated is not None
     assert len(updated.body) == 5001  # 5000 字 + "…"
+
+
+# ── summarize_phase failure semantics (plan 2026-06-28) ─────────
+
+
+@pytest.mark.asyncio
+async def test_summarize_phase_returns_false_on_analysis_failed(
+    config: Config, store: MessageStore
+) -> None:
+    """AI 摘要 fallback 全失败时 summarize_phase 必须 return False。"""
+    import sys
+    from unittest.mock import AsyncMock, patch
+
+    from core.summarizer import AnalysisResult
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    try:
+        import platforms.bilibili.handlers  # noqa: F401
+
+        # mock analyze_content 返回 failed=True
+        with patch(
+            "platforms.bilibili.handlers.analyze_content",
+            new=AsyncMock(return_value=AnalysisResult(source="none", failed=True)),
+        ):
+            handler = PipelineEngine._handlers.get(("*", Phase.SUMMARIZED))
+            assert handler is not None
+
+            msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+            assert msg is not None
+            ctx = PhaseContext(msg=msg, config=config)
+            ctx.transcript_text = "transcript 内容"  # 提供正文让 analyze_content 被调
+
+            result = await handler(ctx)
+
+        assert result is False
+        assert "AI 摘要失败" in ctx.error or "摘要" in ctx.error
+    finally:
+        sys.modules.pop("platforms.bilibili.handlers", None)
+
+
+@pytest.mark.asyncio
+async def test_summarize_phase_returns_true_when_analysis_succeeds(
+    config: Config, store: MessageStore
+) -> None:
+    """analyze_content 成功（failed=False）时 summarize_phase 返回 True。
+
+    覆盖：LLM 配置 disabled → analyze_content 返回 source='none' failed=False。
+    """
+    import sys
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    try:
+        import platforms.bilibili.handlers  # noqa: F401
+
+        config.analysis.enabled = False  # analyze_content 返回 source='none', failed=False
+
+        handler = PipelineEngine._handlers.get(("*", Phase.SUMMARIZED))
+        assert handler is not None
+
+        msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+        assert msg is not None
+        ctx = PhaseContext(msg=msg, config=config)
+
+        result = await handler(ctx)
+
+        assert result is True  # 关键：分析成功（非 failed）就推进
+        assert ctx.error == ""
+    finally:
+        sys.modules.pop("platforms.bilibili.handlers", None)
