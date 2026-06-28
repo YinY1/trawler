@@ -13,13 +13,14 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      # 配置（cookies / subscriptions / config.toml）
-      - /opt/trawler/config:/app/config:ro
-      # 持久化数据
-      - trawler_data:/app/data
-      - trawler_downloads:/app/downloads
-      - trawler_transcripts:/app/transcripts
-      - trawler_hf_cache:/app/hf_cache
+      # 配置（cookies / subscriptions / config.toml / auth.toml）
+      # 不加 :ro，因为容器要写 auth.toml
+      - /root/app/trawler/config:/app/config
+      # 持久化数据（external volumes，沿用主 compose 的 app_trawler_*）
+      - app_trawler_data:/app/data
+      - app_trawler_downloads:/app/downloads
+      - app_trawler_transcripts:/app/transcripts
+      - app_trawler_hf_cache:/app/hf_cache
     environment:
       PYTHONUNBUFFERED: "1"
       HF_HOME: /app/hf_cache
@@ -37,7 +38,11 @@ services:
         max-file: "3"
 
 volumes:
-  trawler_data:
-  trawler_downloads:
-  trawler_transcripts:
-  trawler_hf_cache:
+  app_trawler_data:
+    external: true
+  app_trawler_downloads:
+    external: true
+  app_trawler_transcripts:
+    external: true
+  app_trawler_hf_cache:
+    external: true
