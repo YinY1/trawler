@@ -346,6 +346,39 @@ class MessageStore:
                 data["updated_at"] = time.time()
                 self._dirty = True
 
+    def reset_specific(self, msg_ids: list[str], target: Phase) -> int:
+        """将指定 ID 的消息回退到 target 阶段，清除 error（手动检查专用）。
+
+        与 ``reset_to_phase`` 区别：按 msg_id 列表精准 reset，而不是按 platform 批量。
+        与 ``reset_to_phase`` 不同，本方法内部立即 ``save()``，因为手动模式的调用方
+        （CLI ``_run_manual_check``）不经过 ``run_platform`` 末尾的 save()。
+
+        Args:
+            msg_ids: 要 reset 的消息 ID 列表
+            target: 目标阶段
+
+        Returns:
+            实际被 reset 的消息数量（跳过未知 ID 和 phase < target 的消息）
+        """
+        count = 0
+        target_value = target.value
+        for msg_id in msg_ids:
+            data = self._messages.get(msg_id)
+            if data is None:
+                continue
+            current_phase = data.get("phase", Phase.DISCOVERED.value)
+            if current_phase < target_value:
+                continue
+            data["phase"] = target_value
+            data["error"] = ""
+            data["retry_count"] = 0
+            data["last_error"] = ""
+            data["updated_at"] = time.time()
+            self._dirty = True
+            count += 1
+        self.save()
+        return count
+
     # ── 清理 ─────────────────────────────────────────────────
 
     def cleanup(self, window_hours: int = DEFAULT_WINDOW_HOURS) -> None:

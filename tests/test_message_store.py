@@ -496,3 +496,64 @@ def test_query_messages_empty_result(store: MessageStore) -> None:
     store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
     result = store.query_messages(title="nonexistent")
     assert result == []
+
+
+# ── reset_specific (plan 2026-06-28-manual-content-check) ────────
+
+
+def test_reset_specific_resets_target_ids(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    store.add_new("bili:BV2", "bili", ContentType.VIDEO, int(time.time()), "T2", "A")
+    store.add_new("bili:BV3", "bili", ContentType.VIDEO, int(time.time()), "T3", "A")
+    store.mark_phase("bili:BV1", Phase.PUSHED)
+    store.mark_phase("bili:BV2", Phase.PUSHED)
+    store.mark_phase("bili:BV3", Phase.PUSHED)
+
+    count = store.reset_specific(["bili:BV1", "bili:BV3"], Phase.SUMMARIZED)
+    assert count == 2
+    assert store.get_message("bili:BV1").phase == Phase.SUMMARIZED
+    assert store.get_message("bili:BV2").phase == Phase.PUSHED  # 未被 reset
+    assert store.get_message("bili:BV3").phase == Phase.SUMMARIZED
+
+
+def test_reset_specific_clears_error(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    store.mark_error("bili:BV1", "summary failed")
+    store.reset_specific(["bili:BV1"], Phase.SUMMARIZED)
+    assert store.get_message("bili:BV1").error == ""
+
+
+def test_reset_specific_skips_lower_phase_messages(store: MessageStore) -> None:
+    """目标阶段 >= current phase 的消息才 reset，低于的不动。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    store.mark_phase("bili:BV1", Phase.DISCOVERED)  # 比 SUMMARIZED 低
+    count = store.reset_specific(["bili:BV1"], Phase.SUMMARIZED)
+    assert count == 0
+    assert store.get_message("bili:BV1").phase == Phase.DISCOVERED
+
+
+def test_reset_specific_empty_list(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    count = store.reset_specific([], Phase.SUMMARIZED)
+    assert count == 0
+
+
+def test_reset_specific_unknown_id(store: MessageStore) -> None:
+    """未知 msg_id 静默跳过，不抛异常。"""
+    count = store.reset_specific(["bili:nonexistent"], Phase.SUMMARIZED)
+    assert count == 0
+
+
+def test_reset_specific_persists_immediately(tmp_path: Path) -> None:
+    """reset_specific 内部必须 save()，确保崩溃不丢数据（D5）。"""
+    s1 = MessageStore(tmp_path)
+    s1.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A")
+    s1.mark_phase("bili:BV1", Phase.PUSHED)
+
+    s1.reset_specific(["bili:BV1"], Phase.SUMMARIZED)
+    # 不显式 save()，直接 reload
+    s2 = MessageStore(tmp_path)
+    msg = s2.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.phase == Phase.SUMMARIZED
