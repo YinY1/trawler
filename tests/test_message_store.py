@@ -342,3 +342,76 @@ def test_subscription_ref_persists(tmp_path: Path) -> None:
     msg = s2.get_message("bili:BVref")
     assert msg is not None
     assert msg.subscription_ref == "42", f"落盘丢失! got {msg.subscription_ref!r}"
+
+
+# ── retry_count / last_error (plan 2026-06-28) ──────────────────
+
+
+def test_msg_from_dict_loads_retry_and_last_error(store: MessageStore) -> None:
+    store._messages["bili:BV1"] = {
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+        "retry_count": 3,
+        "last_error": "API timeout",
+    }
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.retry_count == 3
+    assert msg.last_error == "API timeout"
+
+
+def test_msg_from_dict_defaults_retry_when_missing(store: MessageStore) -> None:
+    """旧 messages.json 兼容：缺字段时取默认。"""
+    store._messages["bili:BV1"] = {
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+    }
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.retry_count == 0
+    assert msg.last_error == ""
+
+
+def test_mark_retry_failure_increments_count(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_retry_failure("bili:BV1", "first fail")
+    store.mark_retry_failure("bili:BV1", "second fail")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.retry_count == 2
+    assert msg.last_error == "second fail"
+    assert msg.error == ""  # 关键：不写 error，cron 不跳过
+
+
+def test_mark_retry_reset_clears_count(store: MessageStore) -> None:
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_retry_failure("bili:BV1", "fail")
+    store.mark_retry_reset("bili:BV1")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.retry_count == 0
+    assert msg.last_error == ""
+
+
+def test_reset_to_phase_clears_retry_state(store: MessageStore) -> None:
+    """reset_to_phase 必须同步重置 retry_count / last_error（用户手动 reset 清状态）。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_retry_failure("bili:BV1", "fail")
+    store.mark_retry_failure("bili:BV1", "fail")
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+
+    store.reset_to_phase(Phase.DOWNLOADED)
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.phase == Phase.DOWNLOADED
+    assert msg.retry_count == 0
+    assert msg.last_error == ""

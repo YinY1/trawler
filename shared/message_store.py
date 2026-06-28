@@ -87,6 +87,8 @@ class MessageStore:
             subscription_ref=data.get("subscription_ref", ""),
             body=data.get("body", ""),
             summary=data.get("summary", ""),
+            retry_count=data.get("retry_count", 0),
+            last_error=data.get("last_error", ""),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -261,6 +263,31 @@ class MessageStore:
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
+    def mark_retry_failure(self, msg_id: str, error: str) -> None:
+        """记录一次可重试失败：retry_count += 1，写 last_error（不写 error）。
+
+        与 ``mark_error`` 的区别：
+        - ``mark_error`` 写 ``error`` 字段 → cron ``run_platform`` 跳过此消息（永久失败语义）
+        - ``mark_retry_failure`` 写 ``last_error`` 字段 → cron 仍会重试此消息
+
+        engine 层根据 ``retry_count`` 是否达到 ``MAX_SUMMARY_RETRIES`` 决定调哪个。
+        """
+        if msg_id not in self._messages:
+            return
+        self._messages[msg_id]["retry_count"] = self._messages[msg_id].get("retry_count", 0) + 1
+        self._messages[msg_id]["last_error"] = error
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
+    def mark_retry_reset(self, msg_id: str) -> None:
+        """handler 成功后重置 retry_count 和 last_error。"""
+        if msg_id not in self._messages:
+            return
+        self._messages[msg_id]["retry_count"] = 0
+        self._messages[msg_id]["last_error"] = ""
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
     def reset_to_phase(self, target: Phase, platform: str | None = None) -> None:
         """将所有阶段 >= target 的消息回退到 target 阶段，清除 error。
 
@@ -275,6 +302,8 @@ class MessageStore:
             if current_phase >= target.value:
                 data["phase"] = target.value
                 data["error"] = ""
+                data["retry_count"] = 0
+                data["last_error"] = ""
                 data["updated_at"] = time.time()
                 self._dirty = True
 
