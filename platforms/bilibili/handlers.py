@@ -146,6 +146,9 @@ async def transcribe_phase(ctx: PhaseContext) -> bool:
     filepath = ctx.downloaded_filepath
     if filepath is None or not filepath.exists():
         ctx.error = "downloaded_filepath missing"
+        # 永久失败：filepath 缺失重试也不会变（Bug 3 兜底；正常路径 engine rewind 已先一步重试）。
+        # 标记 permanent_error 让 engine 直接 mark_error 跳过 retry，避免 5 次无意义刷日志。
+        ctx.permanent_error = True
         logger.warning("⚠️  %s — 转写阶段无可用媒体文件", ctx.error)
         return False
 

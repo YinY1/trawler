@@ -123,7 +123,13 @@ async def test_process_message_text_skips_transcribe_summarize(config: Config, s
 
 @pytest.mark.asyncio
 async def test_process_message_handler_failure_stops_flow(config: Config, store: MessageStore) -> None:
-    """If a handler returns False, flow should stop and error should be recorded."""
+    """If a handler returns False, flow should stop and error should be recorded.
+
+    Engine 改造后失败走 retry_count 机制（< MAX 不写 error）。本测试预置
+    retry_count = MAX-1，让单次失败就触发 mark_error，保持「失败 stops flow」的原
+    断言语义（updated.error == "download failed"）。"""
+    from shared.constants import MAX_SUMMARY_RETRIES
+
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
@@ -137,6 +143,11 @@ async def test_process_message_handler_failure_stops_flow(config: Config, store:
         pytest.fail("should not be called")
 
     msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "Test", "Author")
+    assert msg is not None
+    # 预置 retry_count = MAX - 1，下一次失败即触发 mark_error
+    for _ in range(MAX_SUMMARY_RETRIES - 1):
+        store.mark_retry_failure("bili:BV1", "prev fail")
+    msg = store.get_message("bili:BV1")
     assert msg is not None
     await PipelineEngine.process_message(msg, config, store)
 
@@ -560,3 +571,144 @@ async def test_weibo_download_returns_false_on_summary_failed(
         assert "摘要" in ctx.error or "summary" in ctx.error.lower()
     finally:
         sys.modules.pop("platforms.weibo.handlers", None)
+
+
+# ── engine retry_count handling (plan 2026-06-28) ───────────────
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_increments_retry_count(
+    config: Config, store: MessageStore
+) -> None:
+    """handler 返回 False 且 retry_count < MAX 时：retry_count += 1，不写 error，cron 仍重试。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.SUMMARIZED)
+    async def sm(ctx: PhaseContext) -> bool:
+        ctx.error = "AI 摘要失败"
+        return False
+
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        pytest.fail("PUSHED 不应被调用")
+
+    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili:BV1")
+    assert updated is not None
+    # DYNAMIC flow=[DISCOVERED, SUMMARIZED, PUSHED]：handler 失败时 next_phase=SUMMARIZED 未推进
+    assert updated.phase == Phase.DISCOVERED
+    assert updated.retry_count == 1
+    assert updated.last_error == "AI 摘要失败"
+    assert updated.error == ""  # 关键：未达上限，不写 error
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_after_max_retries_marks_error(
+    config: Config, store: MessageStore
+) -> None:
+    """retry_count 达到 MAX_SUMMARY_RETRIES 后：写 error，cron 永久跳过。"""
+    from shared.constants import MAX_SUMMARY_RETRIES
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.SUMMARIZED)
+    async def sm(ctx: PhaseContext) -> bool:
+        ctx.error = "AI 摘要失败"
+        return False
+
+    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    assert msg is not None
+    # 预置 retry_count = MAX - 1，下一次失败应触发 mark_error
+    for _ in range(MAX_SUMMARY_RETRIES - 1):
+        store.mark_retry_failure("bili:BV1", "prev fail")
+    pre = store.get_message("bili:BV1")
+    assert pre is not None
+    assert pre.retry_count == MAX_SUMMARY_RETRIES - 1
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili:BV1")
+    assert updated is not None
+    assert updated.phase == Phase.DISCOVERED  # DYNAMIC flow 中 SUMMARIZED 未推进
+    assert updated.error != ""  # 关键：达到上限，写 error
+    assert "AI 摘要失败" in updated.error
+    # 注：mark_error 不增加 retry_count（mark_error 只写 error 字段）。
+    # engine 的「达到上限」检查用 current_count+1 >= MAX，触发后直接 mark_error，
+    # 所以 retry_count 仍为预置的 MAX-1（最后一次失败的计数未写入）。
+    assert updated.retry_count == MAX_SUMMARY_RETRIES - 1
+
+
+@pytest.mark.asyncio
+async def test_handler_permanent_error_marks_error_immediately(
+    config: Config, store: MessageStore
+) -> None:
+    """Issue 6: handler 标记 ctx.permanent_error=True 时直接 mark_error，跳过 retry。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.downloaded_filepath = Path("/tmp/fake.mp4")
+        return True
+
+    @PipelineEngine.register("bili", Phase.TRANSCRIBED)
+    async def tc(ctx: PhaseContext) -> bool:
+        ctx.error = "transcribe 文件路径缺失"
+        ctx.permanent_error = True  # 关键：标记永久失败
+        return False
+
+    msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+    assert msg is not None
+    # 即便 retry_count = 0（远未达上限），permanent_error 也立即触发 mark_error
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili:BV1")
+    assert updated is not None
+    # DOWNLOADED 推进成功，TRANSCRIBED handler 失败 → 停在 DOWNLOADED（next=TRANSCRIBED 未推进）
+    assert updated.phase == Phase.DOWNLOADED
+    assert updated.error != ""  # 关键：直接 mark_error，不等 retry
+    assert "transcribe 文件路径缺失" in updated.error
+    assert updated.retry_count == 0  # 关键：未走 retry 路径，retry_count 不增
+
+
+@pytest.mark.asyncio
+async def test_handler_success_resets_retry_count(
+    config: Config, store: MessageStore
+) -> None:
+    """handler 成功后 retry_count 必须重置为 0（之前失败过的消息恢复后清状态）。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.SUMMARIZED)
+    async def sm(ctx: PhaseContext) -> bool:
+        ctx.summary_text = "成功摘要"
+        return True
+
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    assert msg is not None
+    store.mark_retry_failure("bili:BV1", "prev fail")
+    store.mark_retry_failure("bili:BV1", "prev fail")
+    pre = store.get_message("bili:BV1")
+    assert pre is not None
+    assert pre.retry_count == 2
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili:BV1")
+    assert updated is not None
+    assert updated.phase == Phase.PUSHED
+    assert updated.retry_count == 0  # 重置
+    assert updated.last_error == ""

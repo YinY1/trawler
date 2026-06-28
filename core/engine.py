@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from shared.config import Config
+from shared.constants import MAX_SUMMARY_RETRIES
 from shared.message_store import MessageStore
 from shared.protocols import PHASE_FLOW, ContentType, MessageRecord, Phase, PhaseContext
 
@@ -156,13 +157,50 @@ class PipelineEngine:
 
             success = await handler(ctx)
             if not success:
-                store.mark_error(msg.msg_id, ctx.error)
+                # 失败处理：三档策略
+                # 1. ctx.permanent_error=True（handler 主动标记永久失败）：
+                #    直接 mark_error 跳过 retry，cron 永久跳过。
+                #    用于 fail-fast 场景：transcribe 文件路径缺失、access_limited 等
+                #    重试无意义的失败（Issue 6 / R10）。
+                # 2. retry_count < MAX：写 last_error，cron 仍会重试此消息
+                # 3. retry_count >= MAX：写 error，cron 永久跳过（避免无限重试）
+                current = store.get_message(msg.msg_id)
+                current_count = current.retry_count if current else 0
+                if ctx.permanent_error:
+                    store.mark_error(msg.msg_id, ctx.error)
+                    logger.warning(
+                        "⛔ %s:%s 永久失败（handler 标记 permanent_error）: %s（cron 将跳过）",
+                        msg.platform,
+                        msg.msg_id,
+                        ctx.error,
+                    )
+                elif current_count + 1 >= MAX_SUMMARY_RETRIES:
+                    store.mark_error(msg.msg_id, ctx.error)
+                    logger.warning(
+                        "⛔ %s:%s 连续失败 %d 次达到上限，标记永久错误（cron 将跳过）",
+                        msg.platform,
+                        msg.msg_id,
+                        current_count + 1,
+                    )
+                else:
+                    store.mark_retry_failure(msg.msg_id, ctx.error)
+                    logger.info(
+                        "↻ %s:%s 失败（第 %d/%d 次），将在下次 cron 重试",
+                        msg.platform,
+                        msg.msg_id,
+                        current_count + 1,
+                        MAX_SUMMARY_RETRIES,
+                    )
                 store.save()
                 break
 
             msg.phase = next_phase
             store.mark_phase(msg.msg_id, next_phase)
             _flush_ctx_to_store(msg.msg_id, ctx, store, next_phase)
+            # 成功推进：重置 retry_count（之前失败过的消息恢复后清状态）
+            updated = store.get_message(msg.msg_id)
+            if updated and updated.retry_count > 0:
+                store.mark_retry_reset(msg.msg_id)
             logger.info("%s:%s → %s ✓", msg.platform, msg.msg_id, next_phase.name)
             store.save()
 
