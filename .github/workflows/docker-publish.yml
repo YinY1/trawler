@@ -1,13 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────
 # 构建 Docker 镜像并推送到 GHCR
-# 触发：push 到 main 分支（含 tags）
+# 触发：push 到 master 分支（含 tags）
 # ─────────────────────────────────────────────────────────────────────
 
 name: Build & Push to GHCR
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*"]
 
 env:
