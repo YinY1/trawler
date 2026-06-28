@@ -528,3 +528,98 @@ class TestEndpointConfig:
         cfg = _parse_config(raw)
         assert len(cfg.endpoints) == 1
         assert cfg.endpoints[0].name == "ep1"
+
+
+# ── 10. Multi-provider fallback chain (plan 2026-06-28) ────────
+
+
+class TestMultiProviderConfig:
+    """LLMProviderConfig + AnalysisConfig.providers_chain + 向上兼容解析。"""
+
+    def test_parse_config_legacy_single_provider_still_works(self) -> None:
+        """旧 config.toml（无 extra_providers）必须 100% 向上兼容。"""
+        from shared.config import _parse_config
+
+        raw = {
+            "analysis": {
+                "enabled": True,
+                "provider": "openai",
+                "api_base": "https://x",
+                "api_key": "k",
+            }
+        }
+        cfg = _parse_config(raw)
+        assert cfg.analysis.enabled is True
+        assert cfg.analysis.provider == "openai"
+        assert cfg.analysis.api_base == "https://x"
+        assert cfg.analysis.api_key == "k"
+        assert cfg.analysis.extra_providers == []
+
+    def test_parse_config_extra_providers_list_parsed(self) -> None:
+        from shared.config import LLMProviderConfig, _parse_config
+
+        raw = {
+            "analysis": {
+                "provider": "openai",
+                "api_base": "https://primary",
+                "api_key": "k1",
+                "model_name": "gpt-4o-mini",
+                "extra_providers": [
+                    {
+                        "provider": "openai",
+                        "api_base": "https://secondary",
+                        "api_key": "k2",
+                        "model_name": "gpt-4o",
+                    },
+                    {
+                        "provider": "ollama",
+                        "api_base": "http://local:11434/v1",
+                        "model_name": "qwen2.5:7b",
+                    },
+                ],
+            }
+        }
+        cfg = _parse_config(raw)
+        assert len(cfg.analysis.extra_providers) == 2
+        assert isinstance(cfg.analysis.extra_providers[0], LLMProviderConfig)
+        assert cfg.analysis.extra_providers[0].api_base == "https://secondary"
+        assert cfg.analysis.extra_providers[1].provider == "ollama"
+
+    def test_analysis_providers_chain_property_returns_main_plus_extras(self) -> None:
+        """AnalysisConfig.providers_chain 是统一访问入口（主 + 备用 list）。"""
+        from shared.config import AnalysisConfig, LLMProviderConfig
+
+        cfg = AnalysisConfig(provider="openai", api_base="https://x", api_key="k")
+        cfg.extra_providers = [LLMProviderConfig(provider="ollama", api_base="http://l:11434/v1")]
+        chain = cfg.providers_chain
+        assert len(chain) == 2
+        assert chain[0].api_base == "https://x"  # 主 provider 在前
+        assert chain[1].provider == "ollama"
+
+    def test_analysis_providers_chain_empty_when_main_unconfigured(self) -> None:
+        """主 provider 未配置 api_base 时返回空链（disabled 语义）。
+
+        覆盖两类「未配置」：
+        - enabled=False → 空（disabled）
+        - enabled=True 但主 provider api_base='' → 空（残留默认值场景，避免退化）
+        """
+        from shared.config import AnalysisConfig
+
+        cfg = AnalysisConfig(enabled=False)
+        assert cfg.providers_chain == []
+        cfg2 = AnalysisConfig(enabled=True)  # api_base 默认 ""
+        assert cfg2.providers_chain == []
+
+    def test_analysis_providers_chain_skips_unconfigured_main_but_keeps_extras(self) -> None:
+        """主 provider api_base 为空但 extra_providers 配了 → 链里跳过主，只用 extras。"""
+        from shared.config import AnalysisConfig, LLMProviderConfig
+
+        cfg = AnalysisConfig(enabled=True)  # 主 provider api_base 默认空
+        cfg.extra_providers = [
+            LLMProviderConfig(provider="ollama", api_base="http://l:11434/v1"),
+            LLMProviderConfig(provider="openai", api_base="https://x", api_key="k"),
+        ]
+        chain = cfg.providers_chain
+        assert len(chain) == 2
+        assert chain[0].provider == "ollama"
+        assert chain[1].api_base == "https://x"
