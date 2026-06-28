@@ -7,30 +7,35 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from core.summarizer import (
+    AnalysisResult,
     OpenAIProvider,
     analyze_content,
     create_provider,
     parse_markdown_analysis,
 )
-from shared.config import AnalysisConfig, Config
+from shared.config import AnalysisConfig, Config, LLMProviderConfig
 from shared.protocols import MessageRecord
 
 
 class TestCreateProvider:
-    """Tests for the create_provider factory function."""
+    """Tests for create_provider — now returns FallbackChainProvider."""
 
-    def test_create_provider_openai(self) -> None:
+    def test_create_provider_openai_returns_chain_with_openai_inside(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
         config = AnalysisConfig(
             provider="openai",
             api_base="https://api.openai.com/v1",
             api_key="sk-x",
             model_name="gpt-4o-mini",
         )
-        provider = create_provider(config)
-        assert isinstance(provider, OpenAIProvider)
-        assert provider.api_base == "https://api.openai.com/v1"
-        assert provider.api_key == "sk-x"
-        assert provider.model_name == "gpt-4o-mini"
+        chain = create_provider(config)
+        assert isinstance(chain, FallbackChainProvider)
+        assert len(chain._providers) == 1
+        assert isinstance(chain._providers[0], OpenAIProvider)
+        assert chain._providers[0].api_base == "https://api.openai.com/v1"
+        assert chain._providers[0].api_key == "sk-x"
+        assert chain._providers[0].model_name == "gpt-4o-mini"
 
     def test_create_provider_openai_missing_api_base_raises(self) -> None:
         config = AnalysisConfig(
@@ -42,46 +47,142 @@ class TestCreateProvider:
             create_provider(config)
 
     def test_create_provider_ollama_default_api_base(self) -> None:
-        config = AnalysisConfig(provider="ollama", api_base="")
-        provider = create_provider(config)
+        """ollama 默认 api_base 注入：providers_chain 跳过 api_base='' 的主 provider
+        （plan Issue 4 退化修复），所以测试 ollama 默认 URL 注入必须显式指定 api_base
+        让主 provider 进入链，再由 _build_single_provider 处理默认 ollama URL。
+        这里直接测 _build_single_provider 的默认 URL 注入逻辑。"""
+        from core.summarizer import _build_single_provider
+
+        provider = _build_single_provider(LLMProviderConfig(provider="ollama", api_base=""))
         assert isinstance(provider, OpenAIProvider)
         assert provider.api_base == "http://localhost:11434/v1"
 
     def test_create_provider_ollama_custom_api_base(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
         config = AnalysisConfig(
             provider="ollama",
             api_base="http://my-host:11434/v1",
         )
-        provider = create_provider(config)
-        assert isinstance(provider, OpenAIProvider)
-        assert provider.api_base == "http://my-host:11434/v1"
+        chain = create_provider(config)
+        assert isinstance(chain, FallbackChainProvider)
+        assert chain._providers[0].api_base == "http://my-host:11434/v1"
 
     def test_create_provider_unknown_raises(self) -> None:
-        config = AnalysisConfig(provider="foobar")
+        # api_base 必须非空才能进入 _build_single_provider 的 provider 类型检查
+        config = AnalysisConfig(provider="foobar", api_base="https://x")
         with pytest.raises(ValueError, match="不支持的 provider"):
             create_provider(config)
 
     def test_create_provider_codebuddy_removed(self) -> None:
-        config = AnalysisConfig(provider="codebuddy")
+        config = AnalysisConfig(provider="codebuddy", api_base="https://x")
         with pytest.raises(ValueError):
             create_provider(config)
 
     def test_create_provider_case_insensitive(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
         config = AnalysisConfig(
             provider="OpenAI",
             api_base="https://api.openai.com/v1",
             api_key="sk-x",
         )
-        provider = create_provider(config)
-        assert isinstance(provider, OpenAIProvider)
+        chain = create_provider(config)
+        assert isinstance(chain, FallbackChainProvider)
+
+
+class TestFallbackChainProvider:
+    """Tests for FallbackChainProvider — 按序尝试，前一个失败才 fallback。"""
+
+    @pytest.mark.asyncio
+    async def test_first_provider_success_no_fallback(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
+        primary = AsyncMock()
+        primary.generate = AsyncMock(return_value="primary response")
+        secondary = AsyncMock()
+        secondary.generate = AsyncMock(return_value="secondary response")
+
+        chain = FallbackChainProvider(providers=[primary, secondary])
+        result = await chain.generate("ping")
+        assert result == "primary response"
+        primary.generate.assert_awaited_once()
+        secondary.generate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_first_fail_second_success(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
+        primary = AsyncMock()
+        primary.generate = AsyncMock(side_effect=RuntimeError("401 unauthorized"))
+        secondary = AsyncMock()
+        secondary.generate = AsyncMock(return_value="secondary response")
+
+        chain = FallbackChainProvider(providers=[primary, secondary])
+        result = await chain.generate("ping")
+        assert result == "secondary response"
+        primary.generate.assert_awaited_once()
+        secondary.generate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_all_fail_raises_runtime_error(self, caplog: pytest.LogCaptureFixture) -> None:
+        from core.summarizer import FallbackChainProvider
+
+        p1 = AsyncMock()
+        p1.generate = AsyncMock(side_effect=RuntimeError("401"))
+        p2 = AsyncMock()
+        p2.generate = AsyncMock(side_effect=RuntimeError("timeout"))
+        p3 = AsyncMock()
+        p3.generate = AsyncMock(side_effect=RuntimeError("connect refused"))
+
+        chain = FallbackChainProvider(providers=[p1, p2, p3])
+        with caplog.at_level("WARNING", logger="core.summarizer"):
+            with pytest.raises(RuntimeError, match="所有 provider 失败"):
+                await chain.generate("ping")
+        # 每个 provider 的失败都要被记录。断言用 r.getMessage()（issue N7），
+        # 因为 r.message 是格式化前的模板字符串。
+        fail_logs = [
+            r
+            for r in caplog.records
+            if "provider #" in r.getMessage() or "provider 失败" in r.getMessage()
+        ]
+        assert len(fail_logs) >= 3
+
+    def test_empty_chain_raises_value_error(self) -> None:
+        """空 providers 列表在构造时抛 ValueError（修正 N3：构造时检查，非 generate 时）。"""
+        from core.summarizer import FallbackChainProvider
+
+        with pytest.raises(ValueError, match="providers 列表不能为空"):
+            FallbackChainProvider(providers=[])
+
+
+class TestCreateProviderChain:
+    """Tests for create_provider — 现在返回 FallbackChainProvider。"""
+
+    def test_create_provider_single_returns_chain_with_one(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
+        config = AnalysisConfig(provider="openai", api_base="https://x", api_key="k")
+        chain = create_provider(config)
+        assert isinstance(chain, FallbackChainProvider)
+        assert len(chain._providers) == 1
+
+    def test_create_provider_multiple_returns_chain_with_all(self) -> None:
+        from core.summarizer import FallbackChainProvider
+
+        config = AnalysisConfig(provider="openai", api_base="https://x", api_key="k")
+        config.extra_providers = [
+            LLMProviderConfig(provider="ollama", api_base="http://l:11434/v1"),
+        ]
+        chain = create_provider(config)
+        assert isinstance(chain, FallbackChainProvider)
+        assert len(chain._providers) == 2
 
 
 class TestDataModelDefaults:
     """新加字段的默认值测试。"""
 
     def test_analysis_result_has_failed_default_false(self) -> None:
-        from core.summarizer import AnalysisResult
-
         r = AnalysisResult()
         assert r.failed is False
 
