@@ -19,3 +19,6 @@ GOTIFY_MAX_RETRIES = 3  # Gotify 最大重试次数
 
 # 评论
 MAX_COMMENT_HIGHLIGHTS = 5  # 最大评论亮点数量
+
+# AI 摘要重试上限（连续失败 N 次后 mark_error 让 cron 永久跳过）
+MAX_SUMMARY_RETRIES = 5

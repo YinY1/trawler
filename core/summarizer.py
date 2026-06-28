@@ -77,6 +77,7 @@ class AnalysisResult:
     tags: list[str] = field(default_factory=lambda: [])
     is_ai: bool = False
     source: str = "none"  # provider name | "none" | "empty"
+    failed: bool = False  # True 表示 fallback 链全部失败（与 source="empty" 区分）
 
 
 def _strip_code_fence(text: str) -> str:

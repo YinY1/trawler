@@ -298,6 +298,10 @@ class MessageRecord:
     body: str = ""
     # AI 摘要：summarize 阶段或 download 内联摘要（weibo 路径）经 engine flush 回写
     summary: str = ""
+    # 摘要失败重试计数（engine 层使用，handler 不直接读写）
+    retry_count: int = 0
+    # 最近一次可重试失败的错误信息（与 error 字段区分：error 表示永久失败，cron 跳过）
+    last_error: str = ""
 
 
 @dataclass
@@ -314,6 +318,10 @@ class PhaseContext:
     keywords: list[str] = field(default_factory=list)
     comment_highlights: str = ""
     error: str = ""
+    # handler 标记本次失败为「永久失败」：engine 跳过 retry 直接 mark_error（cron 永久跳过）。
+    # 用于 fail-fast 场景：transcribe 文件路径缺失、download access_limited 等重试无意义的失败。
+    # 默认 False（保持现有 retry 行为）。handler 在 return False 前置 True 即可。
+    permanent_error: bool = False
 
 
 # ═══════════════════════════════════════════════════════════

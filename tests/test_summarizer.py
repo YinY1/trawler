@@ -13,6 +13,7 @@ from core.summarizer import (
     parse_markdown_analysis,
 )
 from shared.config import AnalysisConfig, Config
+from shared.protocols import MessageRecord
 
 
 class TestCreateProvider:
@@ -73,6 +74,34 @@ class TestCreateProvider:
         )
         provider = create_provider(config)
         assert isinstance(provider, OpenAIProvider)
+
+
+class TestDataModelDefaults:
+    """新加字段的默认值测试。"""
+
+    def test_analysis_result_has_failed_default_false(self) -> None:
+        from core.summarizer import AnalysisResult
+
+        r = AnalysisResult()
+        assert r.failed is False
+
+    def test_phase_context_has_permanent_error_default_false(self) -> None:
+        """Issue 6: PhaseContext.permanent_error 默认 False（保持现有 retry 行为）。"""
+        from shared.protocols import PhaseContext
+
+        ctx = PhaseContext(
+            msg=MessageRecord(
+                msg_id="x",
+                platform="bili",
+                content_type="video",
+                phase="discovered",
+                pubdate=0,
+                title="t",
+                author="a",
+            ),
+            config=Config(),
+        )
+        assert ctx.permanent_error is False
 
 
 class TestParseMarkdownAnalysis:

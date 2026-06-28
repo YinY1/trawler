@@ -305,6 +305,23 @@ def test_mark_summary_sets_summary(store: MessageStore) -> None:
 # ── subscription_ref round-trip ─────────────────────────────────
 
 
+def test_record_has_retry_and_last_error_defaults() -> None:
+    """MessageRecord 新字段 retry_count / last_error 默认值（向后兼容）。"""
+    from shared.protocols import MessageRecord
+
+    r = MessageRecord(
+        msg_id="x",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        phase=Phase.DISCOVERED,
+        pubdate=0,
+        title="t",
+        author="a",
+    )
+    assert r.retry_count == 0
+    assert r.last_error == ""
+
+
 def test_subscription_ref_persists(tmp_path: Path) -> None:
     """subscription_ref 写入后 reload 不丢失（落盘回归测试）。"""
     from shared.message_store import MessageStore
