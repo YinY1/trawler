@@ -247,3 +247,241 @@ class TestFetchNicknameTimeout:
         assert nick is None  # 内部 timeout=3 触发 → 返回 None
         # wall time 应在 [2.9, 3.5]：略大于 3s（timeout 触发 + close AsyncMock 开销）
         assert 2.9 <= elapsed <= 3.5, f"timeout 未在预期区间触发，实际 {elapsed:.2f}s"
+
+
+# ── /auth/nicknames 批量并行接口（plan Task 2）────────────────────
+
+
+class TestAuthNicknamesEndpoint:
+    """验证 GET /auth/nicknames 批量并行返回 nickname。"""
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_nicknames_endpoint_returns_dict_for_all_platforms(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,
+    ) -> None:
+        from web.routes.auth import _nickname_cache
+
+        _nickname_cache.clear()
+        # 三个平台都登录
+        for attr in ["bilibili", "xiaohongshu", "weibo"]:
+            cfg_section = getattr(mock_load.return_value, attr)
+            cfg_section.auth.expires_at = 9999999999.0
+            cfg_section.auth.sessdata = "fake"
+            cfg_section.auth.dedeuserid = "1"  # bili 需要
+            cfg_section.auth.cookie = "SUB=fake"  # weibo 需要
+
+        mock_auth = MagicMock()
+        mock_auth.get_user_nickname = AsyncMock(
+            side_effect=lambda _t: {"bilibili": "B站UP", "xhs": "小红书博主", "weibo": "微博用户"}[_t.platform]
+        )
+        mock_auth.close = AsyncMock()
+        mock_get_auth.return_value = mock_auth
+
+        resp = await client.get("/auth/nicknames")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data.keys()) == {"bili", "xhs", "weibo"}
+        assert data["bili"] == "B站UP"
+        assert data["xhs"] == "小红书博主"
+        assert data["weibo"] == "微博用户"
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_nicknames_endpoint_parallel_not_sequential(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,
+    ) -> None:
+        """三个平台每个 sleep 0.3s，并行应在 <0.7s 完成（串行需 0.9s+）。"""
+        import asyncio as _asyncio
+        import time as _time
+
+        from web.routes.auth import _nickname_cache
+
+        _nickname_cache.clear()
+        for attr in ["bilibili", "xiaohongshu", "weibo"]:
+            cfg_section = getattr(mock_load.return_value, attr)
+            cfg_section.auth.expires_at = 9999999999.0
+            cfg_section.auth.sessdata = "fake"
+            cfg_section.auth.dedeuserid = "1"
+            cfg_section.auth.cookie = "SUB=fake"
+
+        async def slow_nick(_t):  # noqa: ANN001
+            await _asyncio.sleep(0.3)
+            return "name"
+
+        mock_auth = MagicMock()
+        mock_auth.get_user_nickname = slow_nick
+        mock_auth.close = AsyncMock()
+        mock_get_auth.return_value = mock_auth
+
+        start = _time.monotonic()
+        resp = await client.get("/auth/nicknames")
+        elapsed = _time.monotonic() - start
+
+        assert resp.status_code == 200
+        # 并行：~0.3s + overhead；串行会 0.9s+。给 0.7s 上限留 buffer。
+        assert elapsed < 0.7, f"并行未生效，耗时 {elapsed:.2f}s"
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_nicknames_endpoint_unconfigured_platform_returns_none(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,
+    ) -> None:
+        """全部未配置时走 _fetch_all_nicknames 早返回路径（无 gather）。
+
+        与并行/timeout 测试分工：本测试不覆盖 gather 分支。
+        """
+        from web.routes.auth import _nickname_cache
+
+        _nickname_cache.clear()
+        # 全部未配置
+        mock_load.return_value.bilibili.auth.expires_at = 0.0
+        mock_load.return_value.xiaohongshu.auth.expires_at = 0.0
+        mock_load.return_value.weibo.auth.expires_at = 0.0
+        mock_get_auth.return_value = MagicMock()
+
+        resp = await client.get("/auth/nicknames")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"bili": None, "xhs": None, "weibo": None}
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_nicknames_endpoint_slow_platform_does_not_block_others(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,
+    ) -> None:
+        """AC4：bili 卡 10s 时 /auth/nicknames 仍能在可接受时间内返回。
+
+        bili 走 _fetch_nickname 内部 3s nickname timeout + 2s close timeout 降级 None；
+        xhs/weibo 立即返回真实 nickname。
+
+        elapsed 上限 < 6.0s：覆盖 3s(nickname timeout) + 2s(close timeout) + 1s overhead。
+        （真实环境 close 也可能卡，故取 6s 而非 plan 原描述的 5s 最坏情况。）
+        """
+        import asyncio as _asyncio
+        import time as _time
+
+        from web.routes.auth import _nickname_cache
+
+        _nickname_cache.clear()
+        for attr in ["bilibili", "xiaohongshu", "weibo"]:
+            cfg_section = getattr(mock_load.return_value, attr)
+            cfg_section.auth.expires_at = 9999999999.0
+            cfg_section.auth.sessdata = "fake"
+            cfg_section.auth.dedeuserid = "1"
+            cfg_section.auth.cookie = "SUB=fake"
+
+        # 每个平台返回不同 nickname，便于断言哪个被降级。
+        # bili sleep 10s → 必然触发 3s timeout；xhs/weibo 立即返回。
+        # 注意 PlatformTokens.platform 值：bili→"bilibili", xhs→"xhs", weibo→"weibo"
+        async def nickname_dispatch(_t):  # noqa: ANN001
+            if _t.platform == "bilibili":
+                await _asyncio.sleep(10.0)
+                return "should_not_reach"
+            return {"xhs": "小红书博主", "weibo": "微博用户"}[_t.platform]
+
+        mock_auth = MagicMock()
+        mock_auth.get_user_nickname = nickname_dispatch
+        mock_auth.close = AsyncMock()
+        mock_get_auth.return_value = mock_auth
+
+        start = _time.monotonic()
+        resp = await client.get("/auth/nicknames")
+        elapsed = _time.monotonic() - start
+
+        assert resp.status_code == 200
+        # AC4：bili 卡 10s 时整体 < 6s（3s nickname timeout + 2s close timeout + buffer）
+        assert elapsed < 6.0, f"慢平台未隔离，耗时 {elapsed:.2f}s"
+        data = resp.json()
+        # bili 被 wait_for 3s timeout 降级 None；其他正常
+        assert data == {"bili": None, "xhs": "小红书博主", "weibo": "微博用户"}
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_nicknames_endpoint_returns_none_on_runtime_error(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,
+    ) -> None:
+        """覆盖原 test_auth_page_nickname_failure_falls_back_gracefully 契约：
+        authenticator.get_user_nickname 抛 RuntimeError 时，/auth/nicknames
+        对该平台返回 None（不影响其他平台）。
+        """
+        from web.routes.auth import _nickname_cache
+
+        _nickname_cache.clear()
+        for attr in ["bilibili", "xiaohongshu", "weibo"]:
+            cfg_section = getattr(mock_load.return_value, attr)
+            cfg_section.auth.expires_at = 9999999999.0
+            cfg_section.auth.sessdata = "fake"
+            cfg_section.auth.dedeuserid = "1"
+            cfg_section.auth.cookie = "SUB=fake"
+
+        async def nickname_dispatch(_t):  # noqa: ANN001
+            if _t.platform == "bilibili":
+                raise RuntimeError("bili authenticator exploded")
+            return {"xhs": "小红书博主", "weibo": "微博用户"}[_t.platform]
+
+        mock_auth = MagicMock()
+        mock_auth.get_user_nickname = nickname_dispatch
+        mock_auth.close = AsyncMock()
+        mock_get_auth.return_value = mock_auth
+
+        resp = await client.get("/auth/nicknames")
+        assert resp.status_code == 200
+        data = resp.json()
+        # bili 异常被 _fetch_nickname 吞掉降级 None；其他正常
+        assert data == {"bili": None, "xhs": "小红书博主", "weibo": "微博用户"}
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_nicknames_endpoint_caches_within_ttl(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,
+    ) -> None:
+        """覆盖原 test_auth_page_nickname_cached_within_ttl 契约：
+        TTL 窗口内二次调用 /auth/nicknames 时，get_user_nickname 只调一次（缓存命中）。
+        """
+        from web.routes.auth import _nickname_cache
+
+        _nickname_cache.clear()
+        for attr in ["bilibili", "xiaohongshu", "weibo"]:
+            cfg_section = getattr(mock_load.return_value, attr)
+            cfg_section.auth.expires_at = 9999999999.0
+            cfg_section.auth.sessdata = "fake"
+            cfg_section.auth.dedeuserid = "1"
+            cfg_section.auth.cookie = "SUB=fake"
+
+        mock_auth = MagicMock()
+        mock_auth.get_user_nickname = AsyncMock(return_value="缓存测试")
+        mock_auth.close = AsyncMock()
+        mock_get_auth.return_value = mock_auth
+
+        # 第一次：拉取并写缓存
+        resp1 = await client.get("/auth/nicknames")
+        assert resp1.status_code == 200
+        assert resp1.json() == {"bili": "缓存测试", "xhs": "缓存测试", "weibo": "缓存测试"}
+
+        first_call_count = mock_auth.get_user_nickname.await_count
+        assert first_call_count == 3  # 三平台各拉一次（并行）
+
+        # 第二次：TTL 窗口内，应命中缓存，不再调 authenticator
+        resp2 = await client.get("/auth/nicknames")
+        assert resp2.status_code == 200
+        assert resp2.json() == {"bili": "缓存测试", "xhs": "缓存测试", "weibo": "缓存测试"}
+        assert mock_auth.get_user_nickname.await_count == first_call_count  # 无新增调用

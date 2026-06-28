@@ -124,6 +124,49 @@ async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
             logger.warning("🔑 %s 关闭 authenticator 失败: %s", platform_key, exc)
 
 
+async def _fetch_all_nicknames(config: Config) -> dict[str, str | None]:
+    """并行拉取所有已配置平台的 nickname。
+
+    未配置或拉取失败/超时的平台值为 None。
+    用 asyncio.gather(return_exceptions=True) 保证单平台异常不影响其他平台。
+    """
+    keys: list[str] = []
+    for p in PLATFORM_INFO:
+        section, _ = CONFIG_AUTH_KEYS[p["key"]]
+        has_auth = getattr(config, section).auth.expires_at > 0
+        if has_auth:
+            keys.append(p["key"])
+        # 未配置的不进 tasks（_fetch_nickname 内部也会缓存 None，但跳过更干净）
+
+    # Build coroutine list AFTER deciding keys, so task/key order stays in sync.
+    tasks = [_fetch_nickname(config, k) for k in keys]
+
+    if not tasks:
+        return {p["key"]: None for p in PLATFORM_INFO}
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    out: dict[str, str | None] = {p["key"]: None for p in PLATFORM_INFO}
+    for key, result in zip(keys, raw_results, strict=False):
+        if isinstance(result, Exception):
+            logger.warning("🔑 %s nickname gather 异常: %s", key, result)
+            out[key] = None
+        else:
+            # gather(return_exceptions=True) broadens type; safe because we
+            # filtered Exceptions above. Cast to satisfy type checker.
+            out[key] = cast(str | None, result)
+    return out
+
+
+@router.get("/auth/nicknames")
+async def auth_nicknames(request: Request) -> dict[str, str | None]:  # noqa: ARG001
+    """批量返回所有平台 nickname，供前端骨架填充。
+
+    并行拉取，单平台 3s timeout。返回格式：{"bili": "UP名" | None, "xhs": ..., "weibo": ...}
+    """
+    config = await load_config()
+    return await _fetch_all_nicknames(config)
+
+
 @router.get("/auth", response_class=HTMLResponse)
 async def auth_page(request: Request) -> HTMLResponse:
     """Login management page."""
