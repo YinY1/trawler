@@ -19,7 +19,8 @@ services:
       - "127.0.0.1:9120:9120"
     environment:
       TZ: Asia/Shanghai
-      GIT_ACCESS_TOKEN: ${GIT_ACCESS_TOKEN}  # 从 .env 文件读，避免硬编码
+      # 公开仓库不需要 GIT_ACCESS_TOKEN；私有仓库才填
+      # GIT_ACCESS_TOKEN: ${GIT_ACCESS_TOKEN}
       POLL_CONFIG: |
         - url: https://github.com/YinY1/trawler.git
           reference: master
