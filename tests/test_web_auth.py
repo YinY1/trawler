@@ -195,9 +195,7 @@ class TestFetchNicknameTimeout:
         # 内部 _fetch_nickname: nickname 3s timeout 触发 → 返回 None，
         # close 是快速 AsyncMock 立即返回。总耗时约 3.0s，外层 4s 给 1s 余量。
         t0 = _time.monotonic()
-        nick = await _asyncio.wait_for(
-            _fetch_nickname(mock_load.return_value, "bili"), timeout=4.0
-        )
+        nick = await _asyncio.wait_for(_fetch_nickname(mock_load.return_value, "bili"), timeout=4.0)
         elapsed = _time.monotonic() - t0
         assert nick is None  # 内部 timeout=3 触发 → 返回 None
         # wall time 应在 [2.9, 3.5]：略大于 3s（timeout 触发 + close AsyncMock 开销）
