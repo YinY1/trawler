@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────
+# Trawler Docker Compose（部署版本）
+# 用于 Doco-CD 自动部署，从 GHCR 拉取预构建镜像
+#
+# 本地开发请参考 docker-compose.example.yml
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  trawler:
+    image: ghcr.io/yiny1/trawler:latest
+    container_name: trawler
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # 配置（cookies / subscriptions / config.toml）
+      - /opt/trawler/config:/app/config:ro
+      # 持久化数据
+      - trawler_data:/app/data
+      - trawler_downloads:/app/downloads
+      - trawler_transcripts:/app/transcripts
+      - trawler_hf_cache:/app/hf_cache
+    environment:
+      PYTHONUNBUFFERED: "1"
+      HF_HOME: /app/hf_cache
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  trawler_data:
+  trawler_downloads:
+  trawler_transcripts:
+  trawler_hf_cache:
