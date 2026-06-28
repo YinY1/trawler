@@ -247,6 +247,14 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
 @PipelineEngine.register("bili", Phase.PUSHED)
 async def bili_push(ctx: PhaseContext) -> bool:
     """推送 B站通知（视频 / 动态），fan-out 到订阅声明的所有 endpoints。"""
+    # 手动重跑模式（plan 2026-06-28 D4/D7）：skip_push=True 时跳过 send_to_subscription，
+    # 但 phase 仍推进到 PUSHED（dashboard 状态正确）。
+    # 注意：skip_push 提前 return 同时跳过 media cleanup（这是有意为之，
+    # 保留本地视频文件以便后续手动重跑时不需重新下载）。
+    if ctx.skip_push:
+        logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
+        return True
+
     is_dynamic = ctx.msg.content_type == ContentType.DYNAMIC
     source_id = ctx.msg.msg_id.replace("bili_dyn:" if is_dynamic else "bili:", "")
 

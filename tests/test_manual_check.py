@@ -177,3 +177,67 @@ async def test_run_specific_messages_skips_incompatible_content_type(
         # 应被跳过（process_message 未被调用）
         assert not mock_proc.called
 
+
+# ── 任务 5: 三平台 push handler skip_push 检查 ─────────────────────
+
+
+async def test_bili_push_skips_when_skip_push_true(tmp_path: Path) -> None:
+    """ctx.skip_push=True 时 bili_push 应跳过 send_to_subscription。"""
+    from platforms.bilibili.handlers import bili_push
+
+    store = MessageStore(tmp_path)
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T1", "A", subscription_ref="42")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+
+    config = MagicMock()
+    config.bilibili.subscriptions = [MagicMock(uid=42, notify_endpoints=["gotify"])]
+
+    ctx = PhaseContext(msg=msg, config=config, skip_push=True)
+
+    with patch("platforms.bilibili.handlers.send_to_subscription", new=AsyncMock()) as mock_send:
+        result = await bili_push(ctx)
+        assert result is True
+        assert not mock_send.called
+
+
+async def test_xhs_push_skips_when_skip_push_true(tmp_path: Path) -> None:
+    """ctx.skip_push=True 时 xhs_push 应跳过 send_to_subscription。"""
+    from platforms.xiaohongshu.handlers import xhs_push
+
+    store = MessageStore(tmp_path)
+    store.add_new("xhs:N1", "xhs", ContentType.TEXT, int(time.time()), "T1", "A", subscription_ref="u1")
+    msg = store.get_message("xhs:N1")
+    assert msg is not None
+
+    config = MagicMock()
+    config.xiaohongshu.subscriptions = [MagicMock(user_id="u1", notify_endpoints=["gotify"])]
+
+    ctx = PhaseContext(msg=msg, config=config, skip_push=True)
+
+    with patch("platforms.xiaohongshu.handlers.send_to_subscription", new=AsyncMock()) as mock_send:
+        result = await xhs_push(ctx)
+        assert result is True
+        assert not mock_send.called
+
+
+async def test_weibo_push_skips_when_skip_push_true(tmp_path: Path) -> None:
+    """ctx.skip_push=True 时 weibo_push 应跳过 send_to_subscription。"""
+    from platforms.weibo.handlers import weibo_push
+
+    store = MessageStore(tmp_path)
+    store.add_new("weibo:W1", "weibo", ContentType.TEXT, int(time.time()), "T1", "A", subscription_ref="u1")
+    msg = store.get_message("weibo:W1")
+    assert msg is not None
+
+    config = MagicMock()
+    config.weibo.subscriptions = [MagicMock(user_id="u1", notify_endpoints=["gotify"])]
+
+    ctx = PhaseContext(msg=msg, config=config, skip_push=True)
+
+    with patch("platforms.weibo.handlers.send_to_subscription", new=AsyncMock()) as mock_send:
+        result = await weibo_push(ctx)
+        assert result is True
+        assert not mock_send.called
+
+

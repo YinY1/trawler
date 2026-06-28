@@ -148,6 +148,12 @@ async def weibo_download(ctx: PhaseContext) -> bool:
 @PipelineEngine.register("weibo", Phase.PUSHED)
 async def weibo_push(ctx: PhaseContext) -> bool:
     """推送微博通知。"""
+    # 手动重跑模式（plan 2026-06-28 D4/D7）：skip_push=True 时跳过 send_to_subscription，
+    # 但 phase 仍推进到 PUSHED。
+    if ctx.skip_push:
+        logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
+        return True
+
     post_id = ctx.msg.msg_id.replace("weibo:", "")
 
     matched = None
