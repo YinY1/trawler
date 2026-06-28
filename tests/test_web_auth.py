@@ -197,3 +197,53 @@ class TestAuthNickname:
 
         # 缓存命中：get_user_nickname 只应被调用一次
         assert mock_auth.get_user_nickname.await_count == 1
+
+
+# ── _fetch_nickname timeout 保护（plan Task 1）────────────────────
+
+
+class TestFetchNicknameTimeout:
+    """验证 _fetch_nickname 有 timeout 保护，慢 authenticator 不会阻塞调用方。"""
+
+    @patch("web.routes.auth.get_authenticator")
+    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
+    async def test_fetch_nickname_returns_none_on_slow_authenticator(
+        self,
+        mock_load: AsyncMock,
+        mock_get_auth: MagicMock,
+        client: AsyncClient,  # noqa: ARG002
+    ) -> None:
+        import asyncio as _asyncio
+        import time as _time
+
+        from web.routes.auth import _fetch_nickname, _nickname_cache
+
+        _nickname_cache.clear()
+        # bili 登录有效
+        mock_load.return_value.bilibili.auth.expires_at = 9999999999.0
+        mock_load.return_value.bilibili.auth.sessdata = "fake"
+        mock_load.return_value.bilibili.auth.bili_jct = "fake"
+        mock_load.return_value.bilibili.auth.dedeuserid = "12345"
+        mock_load.return_value.xiaohongshu.auth.expires_at = 0.0
+        mock_load.return_value.weibo.auth.expires_at = 0.0
+
+        async def slow_nickname(_tokens):  # noqa: ANN001
+            await _asyncio.sleep(10.0)
+            return "should_not_reach"
+
+        mock_auth = MagicMock()
+        mock_auth.get_user_nickname = slow_nickname
+        mock_auth.close = AsyncMock()
+        mock_get_auth.return_value = mock_auth
+
+        # 外层 wait_for 4s 保护测试本身不挂 10s。
+        # 内部 _fetch_nickname: nickname 3s timeout 触发 → 返回 None，
+        # close 是快速 AsyncMock 立即返回。总耗时约 3.0s，外层 4s 给 1s 余量。
+        t0 = _time.monotonic()
+        nick = await _asyncio.wait_for(
+            _fetch_nickname(mock_load.return_value, "bili"), timeout=4.0
+        )
+        elapsed = _time.monotonic() - t0
+        assert nick is None  # 内部 timeout=3 触发 → 返回 None
+        # wall time 应在 [2.9, 3.5]：略大于 3s（timeout 触发 + close AsyncMock 开销）
+        assert 2.9 <= elapsed <= 3.5, f"timeout 未在预期区间触发，实际 {elapsed:.2f}s"

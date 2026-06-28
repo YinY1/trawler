@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import time
@@ -63,13 +64,21 @@ def _get_auth_status(config: Config, platform_key: str) -> tuple[str, str, bool]
 # key: platform_key, value: (nickname: str | None, fetched_at: float)
 # TTL 10 分钟——nickname 几乎不变，长 TTL 可接受。None 也缓存，避免已知失败反复重试。
 _NICKNAME_TTL_SECONDS = 600
+# 单次远程 nickname 调用最长等待时间。超时则取消并降级 None，
+# 防止任一平台慢响应阻塞整个 /auth 或 /auth/nicknames 渲染。
+_NICKNAME_FETCH_TIMEOUT_SECONDS = 3.0
+# close 本身也可能阻塞（cancel 时底层 socket 正在 read/write，weibo aiohttp 尤甚），
+# 用 2s 超时兜底。最坏情况单平台总耗时 = 3s + 2s = 5s。
+_AUTH_CLOSE_TIMEOUT_SECONDS = 2.0
 _nickname_cache: dict[str, tuple[str | None, float]] = {}
 
 
 async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
-    """获取带 TTL 缓存的账号昵称；失败/未登录返回 None。
+    """获取带 TTL 缓存的账号昵称；失败/未登录/超时返回 None。
 
     不会抛异常——调用方用 None 表示"显示 —"，不影响 status 渲染。
+    单次远程调用超过 _NICKNAME_FETCH_TIMEOUT_SECONDS 自动取消并降级 None，
+    防止慢响应/网络抖动阻塞整个页面渲染。
     """
     cached = _nickname_cache.get(platform_key)
     if cached is not None and (time.time() - cached[1]) < _NICKNAME_TTL_SECONDS:
@@ -81,11 +90,21 @@ async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
         _nickname_cache[platform_key] = (None, time.time())
         return None
 
-    # 通过 authenticator probe；异常降级 None
+    # 通过 authenticator probe；超时/异常均降级 None
     auth = get_authenticator(platform_key)
     try:
         try:
-            nick = await auth.get_user_nickname(tokens)
+            nick = await asyncio.wait_for(
+                auth.get_user_nickname(tokens),
+                timeout=_NICKNAME_FETCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "🔑 %s nickname 获取超时 (%.0fs)",
+                platform_key,
+                _NICKNAME_FETCH_TIMEOUT_SECONDS,
+            )
+            nick = None
         except Exception as exc:
             logger.warning("🔑 %s nickname 获取异常: %s", platform_key, exc)
             nick = None
@@ -95,8 +114,12 @@ async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
         # bili/weibo authenticators 无状态——每次 close 安全。
         # xhs 持有内部 _client；get_user_nickname 内部已通过 _ensure_client 重建，
         # close 这里会强制下次重连，10min TTL 下可接受。
+        # close 本身也可能阻塞（cancel 时底层 socket 正在 read/write，
+        # 尤其 weibo 的 aiohttp session），再包一层 2s 超时兜底。
         try:
-            await auth.close()
+            await asyncio.wait_for(auth.close(), timeout=_AUTH_CLOSE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("🔑 %s 关闭 authenticator 超时 (%.0fs)", platform_key, _AUTH_CLOSE_TIMEOUT_SECONDS)
         except Exception as exc:
             logger.warning("🔑 %s 关闭 authenticator 失败: %s", platform_key, exc)
 
