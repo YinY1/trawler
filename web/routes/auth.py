@@ -169,21 +169,28 @@ async def auth_nicknames(request: Request) -> dict[str, str | None]:  # noqa: AR
 
 @router.get("/auth", response_class=HTMLResponse)
 async def auth_page(request: Request) -> HTMLResponse:
-    """Login management page."""
+    """Login management page.
+
+    返回骨架：仅渲染 token 状态卡片，不在此处拉 nickname。
+    nickname 由前端通过 GET /auth/nicknames 异步拉取并填充 slot，
+    避免远程调用阻塞页面切换。
+    """
+    t0 = time.monotonic()
     config = await load_config()
     platforms: list[dict[str, Any]] = []
     for p in PLATFORM_INFO:
         status, expires, has_auth = _get_auth_status(config, p["key"])
-        nickname = await _fetch_nickname(config, p["key"]) if has_auth else None
         platforms.append(
             {
                 **p,
                 "token_status": status,
                 "expires": expires,
                 "has_auth": has_auth,
-                "nickname": nickname,
+                "nickname": None,  # 骨架：由前端填充
             }
         )
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    logger.info("🔑 /auth 骨架渲染 %.0fms", elapsed_ms)
     return TEMPLATES.TemplateResponse(
         request,
         "platform_auth.html",

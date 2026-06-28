@@ -73,7 +73,12 @@ class TestAuth:
 
 
 class TestAuthNickname:
-    """验证 /auth 页面在登录态下显示账号昵称、失败降级、登出清缓存。"""
+    """验证 /auth 页面骨架渲染不再阻塞于 nickname 拉取。
+
+    新契约（D1+D3）：
+    - GET /auth 不再调用任何 authenticator，nickname 字段恒为 None
+    - nickname 由前端通过 GET /auth/nicknames 异步拉取（见 TestAuthNicknamesEndpoint）
+    """
 
     def _configure_logged_in_bili(self, mock_load: AsyncMock) -> None:
         """让 bili 处于登录有效态，xhs/weibo 未配置。"""
@@ -86,12 +91,13 @@ class TestAuthNickname:
 
     @patch("web.routes.auth.get_authenticator")
     @patch("web.routes.auth.load_config", new_callable=AsyncMock)
-    async def test_auth_page_shows_nickname_when_logged_in(
+    async def test_auth_page_does_not_call_authenticator(
         self,
         mock_load: AsyncMock,
         mock_get_auth: MagicMock,
         client: AsyncClient,
     ) -> None:
+        """骨架路由必须不触发任何 authenticator.get_user_nickname 调用。"""
         from web.routes.auth import _nickname_cache
 
         _nickname_cache.clear()
@@ -104,54 +110,28 @@ class TestAuthNickname:
 
         resp = await client.get("/auth")
         assert resp.status_code == 200
-        assert "测试UP主" in resp.text
+        # 骨架不拉 nickname
+        assert mock_auth.get_user_nickname.await_count == 0
+        # 但登录卡片的 nickname slot 应该存在（供前端填充）
+        assert "nickname-slot" in resp.text or "加载中" in resp.text
 
-    @patch("web.routes.auth.get_authenticator")
     @patch("web.routes.auth.load_config", new_callable=AsyncMock)
-    async def test_auth_page_hides_nickname_row_when_not_logged_in(
+    async def test_auth_page_unconfigured_has_no_nickname_slot(
         self,
         mock_load: AsyncMock,
-        mock_get_auth: MagicMock,
         client: AsyncClient,
     ) -> None:
+        """未配置平台不应渲染 nickname slot（与 _auth_card.html has_auth 一致）。"""
         from web.routes.auth import _nickname_cache
 
         _nickname_cache.clear()
-        # 所有平台未配置
         mock_load.return_value.bilibili.auth.expires_at = 0.0
         mock_load.return_value.xiaohongshu.auth.expires_at = 0.0
         mock_load.return_value.weibo.auth.expires_at = 0.0
 
-        # get_authenticator 不应被调用（has_auth=False 时跳过 _fetch_nickname）
-        mock_get_auth.return_value = MagicMock()
-
         resp = await client.get("/auth")
         assert resp.status_code == 200
-        assert "账号:" not in resp.text
-
-    @patch("web.routes.auth.get_authenticator")
-    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
-    async def test_auth_page_nickname_failure_falls_back_gracefully(
-        self,
-        mock_load: AsyncMock,
-        mock_get_auth: MagicMock,
-        client: AsyncClient,
-    ) -> None:
-        from web.routes.auth import _nickname_cache
-
-        _nickname_cache.clear()
-        self._configure_logged_in_bili(mock_load)
-
-        # authenticator.get_user_nickname 抛异常 → _fetch_nickname 应捕获、降级 None
-        mock_auth = MagicMock()
-        mock_auth.get_user_nickname = AsyncMock(side_effect=RuntimeError("boom"))
-        mock_auth.close = AsyncMock()
-        mock_get_auth.return_value = mock_auth
-
-        resp = await client.get("/auth")
-        assert resp.status_code == 200
-        # 异常被吞，nickname 为 None → 不应出现 "账号:" 行
-        assert "账号:" not in resp.text
+        assert "账号:" not in resp.text  # 未配置不显示账号行
 
     @patch("web.routes.auth.clear_auth_section", new_callable=AsyncMock)
     async def test_auth_logout_clears_nickname_cache(
@@ -159,9 +139,9 @@ class TestAuthNickname:
         mock_clear: AsyncMock,
         client: AsyncClient,
     ) -> None:
+        """登出仍应清 nickname 缓存（避免下次拉到旧账号名）。"""
         from web.routes.auth import _nickname_cache
 
-        # 预置缓存项，登出后应被清理
         _nickname_cache["bili"] = ("测试UP主", 0.0)
         mock_clear.return_value = True
 
@@ -172,31 +152,6 @@ class TestAuthNickname:
         assert resp.status_code == 200
         assert resp.json() == {"ok": True, "message": "已注销"}
         assert "bili" not in _nickname_cache
-
-    @patch("web.routes.auth.get_authenticator")
-    @patch("web.routes.auth.load_config", new_callable=AsyncMock)
-    async def test_auth_page_nickname_cached_within_ttl(
-        self,
-        mock_load: AsyncMock,
-        mock_get_auth: MagicMock,
-        client: AsyncClient,
-    ) -> None:
-        """二次访问命中缓存，authenticator 不应被第二次调用。"""
-        from web.routes.auth import _nickname_cache
-
-        _nickname_cache.clear()
-        self._configure_logged_in_bili(mock_load)
-
-        mock_auth = MagicMock()
-        mock_auth.get_user_nickname = AsyncMock(return_value="测试UP主")
-        mock_auth.close = AsyncMock()
-        mock_get_auth.return_value = mock_auth
-
-        await client.get("/auth")
-        await client.get("/auth")
-
-        # 缓存命中：get_user_nickname 只应被调用一次
-        assert mock_auth.get_user_nickname.await_count == 1
 
 
 # ── _fetch_nickname timeout 保护（plan Task 1）────────────────────
