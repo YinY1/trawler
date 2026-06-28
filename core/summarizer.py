@@ -315,9 +315,9 @@ async def analyze_content(
         logger.info("AI 内容分析成功: %s", source_id)
         return result
     except Exception as e:
-        # Bug 2: WARNING（非 DEBUG），让运维可见
+        # fallback 链全失败（或单 provider 失败）
         logger.warning("AI 内容分析失败 (%s): %s，返回空结果", source_id, e)
-        return AnalysisResult(source="none")
+        return AnalysisResult(source="none", failed=True)
 
 
 # ── 旧签名薄包装（保持 handlers 调用方不变） ─────────────────────

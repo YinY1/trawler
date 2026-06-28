@@ -343,7 +343,8 @@ A；B
         assert result.keywords == []
         assert result.is_ai is False
         # Bug 2 requirement: failure logged at WARNING (not DEBUG)
-        assert any("AI 内容分析失败" in r.message for r in caplog.records)
+        # 用 r.getMessage() 而非 r.message（issue N7：r.message 是格式化前的模板）
+        assert any("AI 内容分析失败" in r.getMessage() for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_analyze_content_disabled_ai_returns_empty(self) -> None:
@@ -365,6 +366,59 @@ A；B
         result = await analyze_content(source_id="x", title="t", author="a", text="", config=config)
         assert result.summary == ""
         assert result.is_ai is False
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_all_providers_fail_sets_failed_true(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """fallback 链全失败时 result.failed=True（不是空 result）。"""
+        config = Config()
+        config.analysis.enabled = True
+        config.analysis.provider = "openai"
+        config.analysis.api_base = "https://example.com/v1"
+        config.analysis.api_key = "k"
+
+        with patch("core.summarizer.create_provider") as mock_cp:
+            chain = mock_cp.return_value
+            chain.generate = AsyncMock(side_effect=RuntimeError("all failed"))
+
+            with caplog.at_level("WARNING", logger="core.summarizer"):
+                result = await analyze_content(
+                    source_id="bili:BV1",
+                    title="T",
+                    author="A",
+                    text="正文",
+                    config=config,
+                )
+
+        assert result.failed is True
+        assert result.is_ai is False
+        assert result.summary == ""  # 失败时字段为空
+        # 用 r.getMessage()（issue N7）
+        assert any("AI 内容分析失败" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_empty_text_does_not_set_failed(self) -> None:
+        """空正文走 source='empty' 分支，不应标记 failed=True（合理跳过）。"""
+        config = Config()
+        config.analysis.enabled = True
+
+        result = await analyze_content(
+            source_id="x", title="t", author="a", text="   ", config=config
+        )
+        assert result.failed is False
+        assert result.source == "empty"
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_disabled_does_not_set_failed(self) -> None:
+        config = Config()
+        config.analysis.enabled = False
+
+        result = await analyze_content(
+            source_id="x", title="t", author="a", text="txt", config=config
+        )
+        assert result.failed is False
+        assert result.source == "none"
 
 
 class TestLegacyWrappersReturnEmptyOnFailure:
