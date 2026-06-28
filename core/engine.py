@@ -121,7 +121,7 @@ class PipelineEngine:
         如果某阶段未注册 handler，记录错误并停止（不推进 phase）。
         """
         assert isinstance(msg, MessageRecord), f"expected MessageRecord, got {type(msg)}"
-        ctx = PhaseContext(msg=msg, config=config)
+        ctx = PhaseContext(msg=msg, config=config, skip_push=getattr(msg, "_skip_push", False))
         phases = PHASE_FLOW[msg.content_type]
 
         # Bug 3 fix: cross-process state recovery. MessageStore only persists
@@ -273,5 +273,69 @@ class PipelineEngine:
 
         if log_callback:
             log_callback("done", f"✅ {platform} 检查完成")
+
+        store.save()
+
+    @classmethod
+    async def run_specific_messages(
+        cls,
+        msg_ids: list[str],
+        from_phase: Phase,
+        skip_push: bool,
+        config: Config,
+        store: MessageStore,
+    ) -> None:
+        """手动重跑指定消息的流水线（plan 2026-06-28-manual-content-check）。
+
+        与 ``run_platform`` 的区别：
+        - 不跑 detector（只对已存在的消息重跑）
+        - 不调 cleanup（D6：避免误删超 24h 的历史消息）
+        - 支持 skip_push 标志（D4：默认禁止重新推送）
+
+        Args:
+            msg_ids: 要重跑的消息 ID 列表
+            from_phase: 起始阶段（reset 后从这里开始 process）
+            skip_push: True 时 push handler 跳过通知
+            config: 全局配置
+            store: MessageStore 实例（共享调用方创建的）
+
+        ⚠️ 并发安全：此方法不持有文件锁。避免与 cron ``run_check_once`` 同时运行，
+        否则两个进程的 MessageStore 内存快照会互相覆盖（D10）。
+
+        ⚠️ VIDEO + from_phase=summarized 行为：``process_message`` 的 Bug-3 修复
+        会在 ``ctx.downloaded_filepath is None`` 时把 VIDEO 消息回退到 DISCOVERED。
+        手动模式每次创建新 ctx，filepath 必为 None（跨进程不可恢复），所以
+        ``--reset-phase summarized`` 对 VIDEO 消息实际会从 download 阶段重新跑全流水线。
+        这是已知行为，不是 bug。
+        """
+        count = store.reset_specific(msg_ids, from_phase)
+        if count == 0:
+            logger.info("⏭ 无消息需要 reset（msg_ids=%s, target=%s）", msg_ids, from_phase.name)
+            return
+
+        logger.info("▶ 手动重跑 %d 条消息（from %s, skip_push=%s）", count, from_phase.name, skip_push)
+
+        # 延迟导入所有平台 handler 模块（触发装饰器注册）
+        for module_path in cls._HANDLER_MODULES.values():
+            importlib.import_module(module_path)
+
+        for msg_id in msg_ids:
+            msg = store.get_message(msg_id)
+            if msg is None:
+                continue
+            if msg.phase != from_phase:
+                # reset_specific 跳过了某些（phase < target）
+                continue
+            # oracle Issue 3: content_type 与 from_phase 不兼容时跳过
+            # （如 TEXT 消息 reset 到 transcribed，PHASE_FLOW[TEXT] 无 TRANSCRIBED）
+            if from_phase not in PHASE_FLOW[msg.content_type]:
+                logger.warning(
+                    "⏭ 跳过 %s：%s 类型消息的阶段流不含 %s",
+                    msg_id, msg.content_type.name, from_phase.name,
+                )
+                continue
+            # 通过临时属性透传 skip_push 到 PhaseContext（避免污染 MessageRecord schema）
+            setattr(msg, "_skip_push", skip_push)
+            await cls.process_message(msg, config, store)
 
         store.save()

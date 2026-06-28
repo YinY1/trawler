@@ -14,9 +14,19 @@ from shared.protocols import ContentType, Phase, PhaseContext
 
 @pytest.fixture(autouse=True)
 def clean_engine_state() -> None:
-    """每个测试前重置 PipelineEngine 注册表，避免污染。"""
+    """每个测试前重置 PipelineEngine 注册表，避免污染。
+
+    同时清理 sys.modules 中缓存的平台 handler 模块：部分测试（如
+    test_transcribe_phase_missing_filepath）依赖 import 时装饰器重新触发，
+    若模块已被其他测试导入并缓存，装饰器不会再次执行。
+    """
+    import sys
+
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
+    for mod in list(sys.modules):
+        if mod.startswith("platforms.") and mod.endswith(".handlers"):
+            sys.modules.pop(mod, None)
 
 
 @pytest.fixture
