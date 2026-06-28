@@ -321,9 +321,7 @@ class TestSearchUserByName:
         mock_resp = MagicMock()
         mock_resp.status = status
         mock_resp.text = AsyncMock(return_value=body)
-        mock_resp.json = AsyncMock(
-            side_effect=json.JSONDecodeError("Expecting value", body, 0)
-        )
+        mock_resp.json = AsyncMock(side_effect=json.JSONDecodeError("Expecting value", body, 0))
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=None)
         return mock_resp
