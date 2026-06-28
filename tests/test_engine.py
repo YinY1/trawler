@@ -526,8 +526,7 @@ async def test_weibo_download_returns_false_on_summary_failed(
 
     try:
         import platforms.weibo.handlers  # noqa: F401
-
-        from core.summarizer import AnalysisResult
+        from core.summarizer import AnalysisResult  # noqa: I001
 
         # mock download_weibo_media 返回成功
         mock_dl_result = MagicMock()
