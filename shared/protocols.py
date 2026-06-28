@@ -322,6 +322,11 @@ class PhaseContext:
     # 用于 fail-fast 场景：transcribe 文件路径缺失、download access_limited 等重试无意义的失败。
     # 默认 False（保持现有 retry 行为）。handler 在 return False 前置 True 即可。
     permanent_error: bool = False
+    # 手动重跑模式标志（plan 2026-06-28-manual-content-check）：
+    # True 时 push handler 跳过 send_to_subscription，但 phase 仍推进到 PUSHED
+    # （dashboard 状态正确，只是不真发通知，避免重复打扰订阅者）。
+    # 由 engine.run_specific_messages 在 ctx 创建时透传。
+    skip_push: bool = False
 
 
 # ═══════════════════════════════════════════════════════════
