@@ -85,7 +85,8 @@
       <h2 class="text-base font-semibold">AI 分析</h2>
     </div>
     <p class="text-xs text-[var(--text-secondary)] mb-4">
-      摘要与关键词生成。AI 失败时自动降级到本地 TF 摘要，不影响抓取流程。
+      摘要与关键词生成。多 provider 失败自动 fallback；连续失败 5 次的消息会被标记为永久错误（避免无限重试）。
+      备用 provider 请在 config.toml 的 <code>[analysis.extra_providers]</code> 中配置。
     </p>
     <div class="flex items-center justify-between py-2 mb-3 border-b border-gray-100 dark:border-gray-800">
       <span class="text-sm font-medium">启用 AI 分析</span>
