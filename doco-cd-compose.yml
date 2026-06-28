@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────
 # Doco-CD - 服务器端 docker-compose
 #
-# 把这个文件放到服务器，例如 /opt/doco-cd/docker-compose.yml
+# 把这个文件放到服务器，例如 /root/doco-cd/docker-compose.yml
 # 然后 docker compose up -d
 #
 # 它会定期轮询你的 Git 仓库，检测到变更后自动部署
@@ -22,7 +22,7 @@ services:
       GIT_ACCESS_TOKEN: ${GIT_ACCESS_TOKEN}  # 从 .env 文件读，避免硬编码
       POLL_CONFIG: |
         - url: https://github.com/YinY1/trawler.git
-          reference: main
+          reference: master
           interval: 600
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
