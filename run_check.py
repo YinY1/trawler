@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sys
 import time
 from logging.handlers import RotatingFileHandler
@@ -21,10 +22,36 @@ from core.subscription_cli import add_subscription, list_subscriptions, remove_s
 from shared.auth import QRExpiredError, get_authenticator, update_auth_section
 from shared.auth.base import PlatformTokens
 from shared.config import Config, load_config
-from shared.protocols import NotificationContent
+from shared.message_store import MessageStore
+from shared.protocols import NotificationContent, Phase
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+def parse_since(value: str) -> int:
+    """解析 ``--since`` 参数为 Unix 时间戳（手动检查模式专用，plan 2026-06-28）。
+
+    支持两种格式：
+    - 相对：``24h`` / ``7d`` / ``30m``（h=小时, d=天, m=分钟）
+    - 绝对：``2026-06-01`` 或 ``2026-06-01T12:00:00``（本地时区，与 pubdate 存储一致）
+
+    Raises:
+        ValueError: 格式无法识别
+    """
+    # 相对格式：数字 + 单位（h/d/m）
+    match = re.fullmatch(r"(\d+)([hmd])", value)
+    if match:
+        num, unit = int(match.group(1)), match.group(2)
+        multiplier = {"h": 3600, "m": 60, "d": 86400}[unit]
+        return int(time.time()) - num * multiplier
+    # 绝对格式：纯日期 / 日期+时间
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return int(time.mktime(time.strptime(value, fmt)))
+        except ValueError:
+            continue
+    raise ValueError(f"无法解析 --since 值: {value!r}（支持格式: 24h / 7d / 30m / 2026-06-01）")
 
 
 def setup_logging(verbose: bool = False, log_dir: str = "data") -> None:
@@ -492,8 +519,54 @@ def sub_list(platform: str | None) -> None:
     type=click.Choice(["discovered", "downloaded", "transcribed", "summarized"], case_sensitive=False),
     help="从指定阶段开始处理（不指定则自动断点续传）",
 )
-def check(platform: str, config_path: str, verbose: bool, from_phase: str | None) -> None:
-    """检查各平台新内容"""
+# ↓ 手动检查筛选选项（plan 2026-06-28-manual-content-check）
+@click.option(
+    "--since",
+    default=None,
+    help="时间起点筛选（触发手动模式）：相对(24h/7d/30m) 或绝对(2026-06-01)",
+)
+@click.option(
+    "--title",
+    default=None,
+    help="标题模糊匹配，大小写不敏感 substring（触发手动模式）",
+)
+@click.option(
+    "--author",
+    default=None,
+    help="作者模糊匹配，大小写不敏感 substring（触发手动模式）",
+)
+@click.option(
+    "--reset-phase",
+    "reset_phase",
+    default="summarized",
+    type=click.Choice(["discovered", "downloaded", "transcribed", "summarized"], case_sensitive=False),
+    show_default=True,
+    help="手动模式重跑起始阶段（仅手动模式生效）",
+)
+@click.option(
+    "--skip-push/--no-skip-push",
+    default=True,
+    show_default=True,
+    help="是否跳过推送通知（手动模式默认跳过，避免重复打扰订阅者）",
+)
+def check(
+    platform: str,
+    config_path: str,
+    verbose: bool,
+    from_phase: str | None,
+    since: str | None,
+    title: str | None,
+    author: str | None,
+    reset_phase: str,
+    skip_push: bool,
+) -> None:
+    """检查各平台新内容。
+
+    传 --since / --title / --author 任一即进入「手动检查模式」：
+    按筛选条件查询已存在的消息，从 --reset-phase（默认 summarized）阶段重跑流水线。
+    默认 --skip-push（不重新推送通知），加 --no-skip-push 才真正推送。
+    不传筛选参数则走原 cron 全量扫描路径（run_check_once）。
+    """
     try:
         config = asyncio.run(load_config(config_path))
     except Exception as exc:
@@ -503,8 +576,19 @@ def check(platform: str, config_path: str, verbose: bool, from_phase: str | None
     setup_logging(verbose=verbose, log_dir=config.general.data_dir)
     if verbose:
         console.print("[dim]调试模式已启用[/]")
+
+    # 判断是否手动模式：传了任意筛选参数
+    manual_mode = any([since, title, author])
+
     try:
-        asyncio.run(run_check_once(config, platform, config_path, from_phase=from_phase))
+        if manual_mode:
+            asyncio.run(
+                _run_manual_check(
+                    config, platform, since, title, author, reset_phase, skip_push,
+                )
+            )
+        else:
+            asyncio.run(run_check_once(config, platform, config_path, from_phase=from_phase))
     except KeyboardInterrupt:
         console.print("\n[yellow]已中断[/]")
         sys.exit(130)
@@ -533,6 +617,65 @@ def check(platform: str, config_path: str, verbose: bool, from_phase: str | None
         except Exception as alert_exc:
             logger.error("推送健康告警失败: %s", alert_exc)
         sys.exit(1)
+
+
+async def _run_manual_check(
+    config: Config,
+    platform: str,
+    since: str | None,
+    title: str | None,
+    author: str | None,
+    reset_phase: str,
+    skip_push: bool,
+) -> None:
+    """手动模式：按筛选条件查询消息并重跑（plan 2026-06-28-manual-content-check）。
+
+    ⚠️ VIDEO + reset_phase=summarized 实际会从 download 开始跑全流水线：
+    ``PipelineEngine.process_message`` 的 Bug-3 修复会在 ``ctx.downloaded_filepath is None``
+    时把 VIDEO 消息回退到 DISCOVERED。手动模式每次创建新 ctx，filepath 必为 None
+    （跨进程不可恢复），所以 VIDEO 消息重跑 summarize 实际会重新下载。
+    """
+    # 延迟导入避免模块加载顺序问题
+    from core.engine import PipelineEngine
+
+    store = MessageStore(config.general.data_dir)
+    # ⚠️ 不调 cleanup（D6：避免误删超 24h 的历史消息）
+
+    since_ts = parse_since(since) if since else None
+    platform_filter = None if platform == "all" else platform
+    target_phase = Phase[reset_phase.upper()]
+
+    matched = store.query_messages(
+        since=since_ts,
+        title=title,
+        author=author,
+        platform=platform_filter,
+    )
+    if not matched:
+        console.print("[yellow]⚠️[/] 没有匹配的消息")
+        return
+
+    # 显示匹配结果
+    table = Table(title=f"匹配 {len(matched)} 条消息")
+    table.add_column("ID", style="dim")
+    table.add_column("标题")
+    table.add_column("平台")
+    table.add_column("作者")
+    table.add_column("当前阶段")
+    for m in matched:
+        table.add_row(m.msg_id, m.title[:30], m.platform, m.author, m.phase.name)
+    console.print(table)
+
+    console.print(f"[bold blue]▶[/] 从 {reset_phase.upper()} 阶段重跑，skip_push={skip_push}")
+
+    msg_ids = [m.msg_id for m in matched]
+    await PipelineEngine.run_specific_messages(
+        msg_ids=msg_ids,
+        from_phase=target_phase,
+        skip_push=skip_push,
+        config=config,
+        store=store,
+    )
 
 
 if __name__ == "__main__":

@@ -115,14 +115,68 @@ class WeiboMonitorConfig:
 
 
 @dataclass
+class LLMProviderConfig:
+    """单个 LLM provider 配置（fallback 链的一节）。
+
+    与 ``AnalysisConfig`` 的关系：
+    - ``AnalysisConfig`` 顶层有 ``enabled`` 全局开关 + 旧的 4 个字段（作为「主 provider」）
+    - ``AnalysisConfig.extra_providers`` 是 ``list[LLMProviderConfig]``（备用链，按序 fallback）
+    """
+
+    name: str = ""  # 可选标识符（仅日志用，无 name 时用 provider+api_base）
+    provider: str = "openai"
+    api_base: str = ""
+    api_key: str = ""
+    model_name: str = ""
+
+
+@dataclass
 class AnalysisConfig:
-    """AI 分析配置"""
+    """AI 分析配置。
+
+    支持两种配置方式（向上兼容）：
+    1. **单 provider（旧）**：直接填 ``provider`` / ``api_base`` / ``api_key`` / ``model_name``
+    2. **多 provider fallback（新）**：填上面的主 provider + ``extra_providers`` 列表。
+       ``providers_chain`` property 返回 [主 provider, *extra_providers] 作为 fallback 链。
+
+    ``enabled=False`` 时 ``providers_chain`` 返回空列表。
+    """
 
     enabled: bool = True
     provider: str = "openai"
     api_base: str = ""
     api_key: str = ""
     model_name: str = ""
+    # fallback 链（按序尝试，前一个失败才用下一个）
+    extra_providers: list[LLMProviderConfig] = field(default_factory=list)
+
+    @property
+    def providers_chain(self) -> list[LLMProviderConfig]:
+        """统一访问入口：返回 fallback 链。
+
+        ``enabled=False`` 时返回空链（disabled 语义）。
+
+        退化修复：``enabled=True`` 但主 provider ``api_base`` 为空时，主 provider
+        被跳过（视为「未配置」，与 disabled 语义对齐）。避免旧配置残留默认值场景
+        （enabled=true 且 api_base/api_key 都为空）退化成卡 SUMMARIZED：旧版本直接
+        source="none" 不卡，新版本若主 provider 进入链会让 create_provider
+        抛 ValueError → analyze_content except 后 failed=True 卡住。
+        """
+        if not self.enabled:
+            return []
+        chain: list[LLMProviderConfig] = []
+        # 主 provider：api_base 非空才纳入链（避免残留默认值退化）
+        if self.api_base:
+            chain.append(
+                LLMProviderConfig(
+                    provider=self.provider,
+                    api_base=self.api_base,
+                    api_key=self.api_key,
+                    model_name=self.model_name,
+                )
+            )
+        chain.extend(self.extra_providers)
+        return chain
 
 
 # ── 推送端点配置 ───────────────────────────────────────────────
@@ -266,7 +320,15 @@ def _parse_config(raw: dict) -> Config:
     if tr := raw.get("transcribe"):
         cfg.transcribe = _dict_to_dataclass(TranscribeConfig, tr)
     if ana := raw.get("analysis"):
-        cfg.analysis = _dict_to_dataclass(AnalysisConfig, ana)
+        # 单独处理 extra_providers（list of dict → list[LLMProviderConfig]）
+        extras_raw = ana.get("extra_providers", [])
+        extras = [
+            _dict_to_dataclass(LLMProviderConfig, ep) if isinstance(ep, dict) else ep
+            for ep in extras_raw
+        ]
+        ana_no_extras = {k: v for k, v in ana.items() if k != "extra_providers"}
+        cfg.analysis = _dict_to_dataclass(AnalysisConfig, ana_no_extras)
+        cfg.analysis.extra_providers = extras
 
     # bilibili
     if bili := raw.get("bilibili"):

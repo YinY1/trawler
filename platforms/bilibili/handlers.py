@@ -146,6 +146,9 @@ async def transcribe_phase(ctx: PhaseContext) -> bool:
     filepath = ctx.downloaded_filepath
     if filepath is None or not filepath.exists():
         ctx.error = "downloaded_filepath missing"
+        # 永久失败：filepath 缺失重试也不会变（Bug 3 兜底；正常路径 engine rewind 已先一步重试）。
+        # 标记 permanent_error 让 engine 直接 mark_error 跳过 retry，避免 5 次无意义刷日志。
+        ctx.permanent_error = True
         logger.warning("⚠️  %s — 转写阶段无可用媒体文件", ctx.error)
         return False
 
@@ -220,12 +223,20 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
             text=text_to_summarize,
             config=ctx.config,
         )
+        if analysis.failed:
+            # fallback 链全部失败：标记 ctx.error 让 engine 处理 retry
+            # （engine 会读 retry_count 决定是 mark_retry_failure 还是 mark_error）
+            ctx.error = "AI 摘要失败：所有 provider 不可用"
+            logger.warning("⚠️  %s — 消息将卡在 SUMMARIZED 阶段等待重试", ctx.error)
+            return False
         ctx.summary_text = analysis.summary
         ctx.keywords = analysis.keywords
     except Exception as exc:
-        # analyze_content 内部已吞异常并返回空结果；这里兜底防极端情况
-        logger.error("✗ 摘要/关键词生成失败: %s", exc)
+        # analyze_content 内部已吞异常；这里兜底防极端情况
+        ctx.error = f"摘要/关键词生成异常: {exc}"
+        logger.error("✗ %s", ctx.error)
         logger.exception("Analysis failed for %s", source_id)
+        return False
 
     return True
 
@@ -236,6 +247,14 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
 @PipelineEngine.register("bili", Phase.PUSHED)
 async def bili_push(ctx: PhaseContext) -> bool:
     """推送 B站通知（视频 / 动态），fan-out 到订阅声明的所有 endpoints。"""
+    # 手动重跑模式（plan 2026-06-28 D4/D7）：skip_push=True 时跳过 send_to_subscription，
+    # 但 phase 仍推进到 PUSHED（dashboard 状态正确）。
+    # 注意：skip_push 提前 return 同时跳过 media cleanup（这是有意为之，
+    # 保留本地视频文件以便后续手动重跑时不需重新下载）。
+    if ctx.skip_push:
+        logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
+        return True
+
     is_dynamic = ctx.msg.content_type == ContentType.DYNAMIC
     source_id = ctx.msg.msg_id.replace("bili_dyn:" if is_dynamic else "bili:", "")
 

@@ -59,6 +59,22 @@ api_key = ""
 # 模型名称
 model_name = ""
 
+# 备用 provider 链（可选）：主 provider 失败（401/超时/网络错）时按序尝试。
+# 失败重试上限见 shared/constants.py:MAX_SUMMARY_RETRIES（默认 5 次）。
+# 启用方法：取消下面注释，按需填入备用 provider。
+#
+# [[analysis.extra_providers]]
+# provider = "ollama"
+# api_base = "http://localhost:11434/v1"
+# api_key = "ollama"
+# model_name = "qwen2.5:7b"
+#
+# [[analysis.extra_providers]]
+# provider = "openai"
+# api_base = "https://backup-provider.com/v1"
+# api_key = "sk-backup"
+# model_name = "gpt-4o-mini"
+
 # ══════════════════════════════════════════════════════════════════
 # B 站（Bilibili）配置
 # ══════════════════════════════════════════════════════════════════

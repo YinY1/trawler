@@ -12,7 +12,7 @@ import logging
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
 from core.notifiers import send_to_subscription
-from core.summarizer import extract_keywords, generate_summary
+from core.summarizer import analyze_content
 from platforms.weibo.api import fetch_user_posts
 from platforms.weibo.comments import fetch_weibo_comment_highlights
 from platforms.weibo.downloader import download_weibo_media
@@ -105,30 +105,26 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         logger.warning("Weibo parse failed for %s: %s", post_id, exc)
 
     # Generate summary and keywords (TEXT type skips SUMMARIZED phase)
+    # 改造为单次 analyze_content 调用（顺带修了 F1/A3 的双 AI 请求低效问题）
     try:
-        summary_text, source, _ = await generate_summary(
+        analysis = await analyze_content(
             source_id=post_id,
             title=ctx.msg.title,
             author=ctx.msg.author,
             text=ctx.content_text,
             config=ctx.config,
         )
-        ctx.summary_text = summary_text
-        logger.info("📝 摘要 (%s)", source)
+        if analysis.failed:
+            ctx.error = "AI 摘要失败：所有 provider 不可用"
+            logger.warning("⚠️  %s — 消息将卡在 DOWNLOADED 阶段等待重试", ctx.error)
+            return False
+        ctx.summary_text = analysis.summary
+        ctx.keywords = analysis.keywords
+        logger.info("📝 摘要 (%s)", analysis.source)
     except Exception as exc:
-        logger.warning("⚠️  摘要生成失败: %s", exc)
-        ctx.summary_text = ctx.content_text[:500]
-
-    try:
-        ctx.keywords = await extract_keywords(
-            text=ctx.content_text,
-            title=ctx.msg.title,
-            author=ctx.msg.author,
-            config=ctx.config,
-        )
-    except Exception as exc:
-        logger.warning("⚠️  关键词提取失败: %s", exc)
-        ctx.keywords = []
+        ctx.error = f"摘要生成异常: {exc}"
+        logger.warning("⚠️  %s", ctx.error)
+        return False
 
     # Fetch comment highlights
     try:
@@ -152,6 +148,12 @@ async def weibo_download(ctx: PhaseContext) -> bool:
 @PipelineEngine.register("weibo", Phase.PUSHED)
 async def weibo_push(ctx: PhaseContext) -> bool:
     """推送微博通知。"""
+    # 手动重跑模式（plan 2026-06-28 D4/D7）：skip_push=True 时跳过 send_to_subscription，
+    # 但 phase 仍推进到 PUSHED。
+    if ctx.skip_push:
+        logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
+        return True
+
     post_id = ctx.msg.msg_id.replace("weibo:", "")
 
     matched = None

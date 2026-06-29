@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from shared.config import Config
+from shared.constants import MAX_SUMMARY_RETRIES
 from shared.message_store import MessageStore
 from shared.protocols import PHASE_FLOW, ContentType, MessageRecord, Phase, PhaseContext
 
@@ -120,7 +121,7 @@ class PipelineEngine:
         如果某阶段未注册 handler，记录错误并停止（不推进 phase）。
         """
         assert isinstance(msg, MessageRecord), f"expected MessageRecord, got {type(msg)}"
-        ctx = PhaseContext(msg=msg, config=config)
+        ctx = PhaseContext(msg=msg, config=config, skip_push=getattr(msg, "_skip_push", False))
         phases = PHASE_FLOW[msg.content_type]
 
         # Bug 3 fix: cross-process state recovery. MessageStore only persists
@@ -156,13 +157,50 @@ class PipelineEngine:
 
             success = await handler(ctx)
             if not success:
-                store.mark_error(msg.msg_id, ctx.error)
+                # 失败处理：三档策略
+                # 1. ctx.permanent_error=True（handler 主动标记永久失败）：
+                #    直接 mark_error 跳过 retry，cron 永久跳过。
+                #    用于 fail-fast 场景：transcribe 文件路径缺失、access_limited 等
+                #    重试无意义的失败（Issue 6 / R10）。
+                # 2. retry_count < MAX：写 last_error，cron 仍会重试此消息
+                # 3. retry_count >= MAX：写 error，cron 永久跳过（避免无限重试）
+                current = store.get_message(msg.msg_id)
+                current_count = current.retry_count if current else 0
+                if ctx.permanent_error:
+                    store.mark_error(msg.msg_id, ctx.error)
+                    logger.warning(
+                        "⛔ %s:%s 永久失败（handler 标记 permanent_error）: %s（cron 将跳过）",
+                        msg.platform,
+                        msg.msg_id,
+                        ctx.error,
+                    )
+                elif current_count + 1 >= MAX_SUMMARY_RETRIES:
+                    store.mark_error(msg.msg_id, ctx.error)
+                    logger.warning(
+                        "⛔ %s:%s 连续失败 %d 次达到上限，标记永久错误（cron 将跳过）",
+                        msg.platform,
+                        msg.msg_id,
+                        current_count + 1,
+                    )
+                else:
+                    store.mark_retry_failure(msg.msg_id, ctx.error)
+                    logger.info(
+                        "↻ %s:%s 失败（第 %d/%d 次），将在下次 cron 重试",
+                        msg.platform,
+                        msg.msg_id,
+                        current_count + 1,
+                        MAX_SUMMARY_RETRIES,
+                    )
                 store.save()
                 break
 
             msg.phase = next_phase
             store.mark_phase(msg.msg_id, next_phase)
             _flush_ctx_to_store(msg.msg_id, ctx, store, next_phase)
+            # 成功推进：重置 retry_count（之前失败过的消息恢复后清状态）
+            updated = store.get_message(msg.msg_id)
+            if updated and updated.retry_count > 0:
+                store.mark_retry_reset(msg.msg_id)
             logger.info("%s:%s → %s ✓", msg.platform, msg.msg_id, next_phase.name)
             store.save()
 
@@ -235,5 +273,69 @@ class PipelineEngine:
 
         if log_callback:
             log_callback("done", f"✅ {platform} 检查完成")
+
+        store.save()
+
+    @classmethod
+    async def run_specific_messages(
+        cls,
+        msg_ids: list[str],
+        from_phase: Phase,
+        skip_push: bool,
+        config: Config,
+        store: MessageStore,
+    ) -> None:
+        """手动重跑指定消息的流水线（plan 2026-06-28-manual-content-check）。
+
+        与 ``run_platform`` 的区别：
+        - 不跑 detector（只对已存在的消息重跑）
+        - 不调 cleanup（D6：避免误删超 24h 的历史消息）
+        - 支持 skip_push 标志（D4：默认禁止重新推送）
+
+        Args:
+            msg_ids: 要重跑的消息 ID 列表
+            from_phase: 起始阶段（reset 后从这里开始 process）
+            skip_push: True 时 push handler 跳过通知
+            config: 全局配置
+            store: MessageStore 实例（共享调用方创建的）
+
+        ⚠️ 并发安全：此方法不持有文件锁。避免与 cron ``run_check_once`` 同时运行，
+        否则两个进程的 MessageStore 内存快照会互相覆盖（D10）。
+
+        ⚠️ VIDEO + from_phase=summarized 行为：``process_message`` 的 Bug-3 修复
+        会在 ``ctx.downloaded_filepath is None`` 时把 VIDEO 消息回退到 DISCOVERED。
+        手动模式每次创建新 ctx，filepath 必为 None（跨进程不可恢复），所以
+        ``--reset-phase summarized`` 对 VIDEO 消息实际会从 download 阶段重新跑全流水线。
+        这是已知行为，不是 bug。
+        """
+        count = store.reset_specific(msg_ids, from_phase)
+        if count == 0:
+            logger.info("⏭ 无消息需要 reset（msg_ids=%s, target=%s）", msg_ids, from_phase.name)
+            return
+
+        logger.info("▶ 手动重跑 %d 条消息（from %s, skip_push=%s）", count, from_phase.name, skip_push)
+
+        # 延迟导入所有平台 handler 模块（触发装饰器注册）
+        for module_path in cls._HANDLER_MODULES.values():
+            importlib.import_module(module_path)
+
+        for msg_id in msg_ids:
+            msg = store.get_message(msg_id)
+            if msg is None:
+                continue
+            if msg.phase != from_phase:
+                # reset_specific 跳过了某些（phase < target）
+                continue
+            # oracle Issue 3: content_type 与 from_phase 不兼容时跳过
+            # （如 TEXT 消息 reset 到 transcribed，PHASE_FLOW[TEXT] 无 TRANSCRIBED）
+            if from_phase not in PHASE_FLOW[msg.content_type]:
+                logger.warning(
+                    "⏭ 跳过 %s：%s 类型消息的阶段流不含 %s",
+                    msg_id, msg.content_type.name, from_phase.name,
+                )
+                continue
+            # 通过临时属性透传 skip_push 到 PhaseContext（避免污染 MessageRecord schema）
+            setattr(msg, "_skip_push", skip_push)
+            await cls.process_message(msg, config, store)
 
         store.save()

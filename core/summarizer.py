@@ -15,7 +15,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from shared.config import AnalysisConfig, Config
+from shared.config import AnalysisConfig, Config, LLMProviderConfig
 from shared.constants import LLM_API_TIMEOUT
 from shared.protocols import LLMProvider
 
@@ -77,6 +77,7 @@ class AnalysisResult:
     tags: list[str] = field(default_factory=lambda: [])
     is_ai: bool = False
     source: str = "none"  # provider name | "none" | "empty"
+    failed: bool = False  # True 表示 fallback 链全部失败（与 source="empty" 区分）
 
 
 def _strip_code_fence(text: str) -> str:
@@ -197,30 +198,84 @@ class OpenAIProvider:
 # ── 公共接口 ─────────────────────────────────────────────────────
 
 
-def create_provider(config: AnalysisConfig) -> LLMProvider:
-    """根据配置创建 LLM 提供商。
+class FallbackChainProvider:
+    """按序尝试多个 provider，前一个失败（异常）才 fallback 到下一个。
 
-    Raises:
-        ValueError: 不支持的 provider 类型
+    实现 ``LLMProvider`` Protocol（鸭子类型，无需显式继承）。
+
+    设计要点：
+    - 所有失败类型（401 / 超时 / 网络错 / 5xx / parse 错）都触发 fallback。
+      不区分「永久失败」vs「临时失败」（见 plan F2），永久失败的 provider
+      反复重试由 ``MessageRecord.retry_count`` 上限兜底。
+    - 每个 provider 失败时记 WARNING（运维可见），所有失败后抛 RuntimeError
+      让上层 ``analyze_content`` 标记 ``failed=True``。
+    - 空 providers 列表在构造时抛 ``ValueError``。
     """
-    provider_name = config.provider.lower().strip()
+
+    def __init__(self, providers: list[LLMProvider]) -> None:
+        if not providers:
+            raise ValueError("providers 列表不能为空")
+        self._providers = providers
+
+    async def generate(self, prompt: str) -> str:
+        errors: list[str] = []
+        for idx, provider in enumerate(self._providers, start=1):
+            try:
+                result = await provider.generate(prompt)
+                if idx > 1:
+                    logger.info("✓ fallback 到第 %d 个 provider 成功", idx)
+                return result
+            except Exception as e:
+                msg = f"provider #{idx} 失败: {e}"
+                errors.append(msg)
+                logger.warning("⚠️  %s", msg)
+        raise RuntimeError(f"所有 provider 失败 ({len(errors)} 个): {' | '.join(errors)}")
+
+
+def _build_single_provider(p_cfg: AnalysisConfig | LLMProviderConfig) -> LLMProvider:
+    """根据单个 provider 配置构建 OpenAIProvider（内部辅助）。
+
+    p_cfg 可以是 AnalysisConfig（主 provider 走旧字段）或 LLMProviderConfig（备用）。
+    两者字段名一致（provider/api_base/api_key/model_name），鸭子类型兼容。
+    """
+    provider_name = p_cfg.provider.lower().strip()
 
     if provider_name == "openai":
-        if not config.api_base:
+        if not p_cfg.api_base:
             raise ValueError("OpenAI provider 需要配置 api_base")
         return OpenAIProvider(
-            api_base=config.api_base,
-            api_key=config.api_key,
-            model_name=config.model_name or "gpt-4o-mini",
+            api_base=p_cfg.api_base,
+            api_key=p_cfg.api_key,
+            model_name=p_cfg.model_name or "gpt-4o-mini",
         )
     elif provider_name == "ollama":
         return OpenAIProvider(
-            api_base=config.api_base or "http://localhost:11434/v1",
-            api_key=config.api_key or "ollama",
-            model_name=config.model_name or "qwen2.5:7b",
+            api_base=p_cfg.api_base or "http://localhost:11434/v1",
+            api_key=p_cfg.api_key or "ollama",
+            model_name=p_cfg.model_name or "qwen2.5:7b",
         )
     else:
-        raise ValueError(f"不支持的 provider: {config.provider}")
+        raise ValueError(f"不支持的 provider: {p_cfg.provider}")
+
+
+def create_provider(config: AnalysisConfig) -> LLMProvider:
+    """根据配置构建 provider 链。
+
+    - 单 provider 配置（无 extra_providers）→ 长度为 1 的链
+    - 多 provider 配置 → 主 provider + extra_providers 按序组成的链
+    - ``enabled=False`` 或主 provider 未配置且 extras 为空 → 抛 ValueError
+
+    兼容性：返回类型仍是 ``LLMProvider``（``FallbackChainProvider`` 实现此协议），
+    调用方代码（``analyze_content`` / ``_probe_provider``）不需要改。
+
+    Raises:
+        ValueError: 不支持的 provider 类型，或链为空
+    """
+    chain = config.providers_chain
+    if not chain:
+        raise ValueError("AI 分析未启用或未配置 provider")
+    providers = [_build_single_provider(p) for p in chain]
+    return FallbackChainProvider(providers=providers)
 
 
 async def analyze_content(
@@ -260,9 +315,9 @@ async def analyze_content(
         logger.info("AI 内容分析成功: %s", source_id)
         return result
     except Exception as e:
-        # Bug 2: WARNING（非 DEBUG），让运维可见
+        # fallback 链全失败（或单 provider 失败）
         logger.warning("AI 内容分析失败 (%s): %s，返回空结果", source_id, e)
-        return AnalysisResult(source="none")
+        return AnalysisResult(source="none", failed=True)
 
 
 # ── 旧签名薄包装（保持 handlers 调用方不变） ─────────────────────

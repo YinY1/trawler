@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import time
@@ -63,13 +64,21 @@ def _get_auth_status(config: Config, platform_key: str) -> tuple[str, str, bool]
 # key: platform_key, value: (nickname: str | None, fetched_at: float)
 # TTL 10 分钟——nickname 几乎不变，长 TTL 可接受。None 也缓存，避免已知失败反复重试。
 _NICKNAME_TTL_SECONDS = 600
+# 单次远程 nickname 调用最长等待时间。超时则取消并降级 None，
+# 防止任一平台慢响应阻塞整个 /auth 或 /auth/nicknames 渲染。
+_NICKNAME_FETCH_TIMEOUT_SECONDS = 3.0
+# close 本身也可能阻塞（cancel 时底层 socket 正在 read/write，weibo aiohttp 尤甚），
+# 用 2s 超时兜底。最坏情况单平台总耗时 = 3s + 2s = 5s。
+_AUTH_CLOSE_TIMEOUT_SECONDS = 2.0
 _nickname_cache: dict[str, tuple[str | None, float]] = {}
 
 
 async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
-    """获取带 TTL 缓存的账号昵称；失败/未登录返回 None。
+    """获取带 TTL 缓存的账号昵称；失败/未登录/超时返回 None。
 
     不会抛异常——调用方用 None 表示"显示 —"，不影响 status 渲染。
+    单次远程调用超过 _NICKNAME_FETCH_TIMEOUT_SECONDS 自动取消并降级 None，
+    防止慢响应/网络抖动阻塞整个页面渲染。
     """
     cached = _nickname_cache.get(platform_key)
     if cached is not None and (time.time() - cached[1]) < _NICKNAME_TTL_SECONDS:
@@ -81,11 +90,21 @@ async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
         _nickname_cache[platform_key] = (None, time.time())
         return None
 
-    # 通过 authenticator probe；异常降级 None
+    # 通过 authenticator probe；超时/异常均降级 None
     auth = get_authenticator(platform_key)
     try:
         try:
-            nick = await auth.get_user_nickname(tokens)
+            nick = await asyncio.wait_for(
+                auth.get_user_nickname(tokens),
+                timeout=_NICKNAME_FETCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "🔑 %s nickname 获取超时 (%.0fs)",
+                platform_key,
+                _NICKNAME_FETCH_TIMEOUT_SECONDS,
+            )
+            nick = None
         except Exception as exc:
             logger.warning("🔑 %s nickname 获取异常: %s", platform_key, exc)
             nick = None
@@ -95,29 +114,83 @@ async def _fetch_nickname(config: Config, platform_key: str) -> str | None:
         # bili/weibo authenticators 无状态——每次 close 安全。
         # xhs 持有内部 _client；get_user_nickname 内部已通过 _ensure_client 重建，
         # close 这里会强制下次重连，10min TTL 下可接受。
+        # close 本身也可能阻塞（cancel 时底层 socket 正在 read/write，
+        # 尤其 weibo 的 aiohttp session），再包一层 2s 超时兜底。
         try:
-            await auth.close()
+            await asyncio.wait_for(auth.close(), timeout=_AUTH_CLOSE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("🔑 %s 关闭 authenticator 超时 (%.0fs)", platform_key, _AUTH_CLOSE_TIMEOUT_SECONDS)
         except Exception as exc:
             logger.warning("🔑 %s 关闭 authenticator 失败: %s", platform_key, exc)
 
 
+async def _fetch_all_nicknames(config: Config) -> dict[str, str | None]:
+    """并行拉取所有已配置平台的 nickname。
+
+    未配置或拉取失败/超时的平台值为 None。
+    用 asyncio.gather(return_exceptions=True) 保证单平台异常不影响其他平台。
+    """
+    keys: list[str] = []
+    for p in PLATFORM_INFO:
+        section, _ = CONFIG_AUTH_KEYS[p["key"]]
+        has_auth = getattr(config, section).auth.expires_at > 0
+        if has_auth:
+            keys.append(p["key"])
+        # 未配置的不进 tasks（_fetch_nickname 内部也会缓存 None，但跳过更干净）
+
+    # Build coroutine list AFTER deciding keys, so task/key order stays in sync.
+    tasks = [_fetch_nickname(config, k) for k in keys]
+
+    if not tasks:
+        return {p["key"]: None for p in PLATFORM_INFO}
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    out: dict[str, str | None] = {p["key"]: None for p in PLATFORM_INFO}
+    for key, result in zip(keys, raw_results, strict=False):
+        if isinstance(result, Exception):
+            logger.warning("🔑 %s nickname gather 异常: %s", key, result)
+            out[key] = None
+        else:
+            # gather(return_exceptions=True) broadens type; safe because we
+            # filtered Exceptions above. Cast to satisfy type checker.
+            out[key] = cast(str | None, result)
+    return out
+
+
+@router.get("/auth/nicknames")
+async def auth_nicknames(request: Request) -> dict[str, str | None]:  # noqa: ARG001
+    """批量返回所有平台 nickname，供前端骨架填充。
+
+    并行拉取，单平台 3s timeout。返回格式：{"bili": "UP名" | None, "xhs": ..., "weibo": ...}
+    """
+    config = await load_config()
+    return await _fetch_all_nicknames(config)
+
+
 @router.get("/auth", response_class=HTMLResponse)
 async def auth_page(request: Request) -> HTMLResponse:
-    """Login management page."""
+    """Login management page.
+
+    返回骨架：仅渲染 token 状态卡片，不在此处拉 nickname。
+    nickname 由前端通过 GET /auth/nicknames 异步拉取并填充 slot，
+    避免远程调用阻塞页面切换。
+    """
+    t0 = time.monotonic()
     config = await load_config()
     platforms: list[dict[str, Any]] = []
     for p in PLATFORM_INFO:
         status, expires, has_auth = _get_auth_status(config, p["key"])
-        nickname = await _fetch_nickname(config, p["key"]) if has_auth else None
         platforms.append(
             {
                 **p,
                 "token_status": status,
                 "expires": expires,
                 "has_auth": has_auth,
-                "nickname": nickname,
+                "nickname": None,  # 骨架：由前端填充
             }
         )
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    logger.info("🔑 /auth 骨架渲染 %.0fms", elapsed_ms)
     return TEMPLATES.TemplateResponse(
         request,
         "platform_auth.html",

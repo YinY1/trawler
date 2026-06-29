@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 
 from platforms.weibo.api import (
@@ -277,11 +279,49 @@ class TestParsePcPost:
 # ── search_user_by_name ─────────────────────────────────────────
 
 
+# ── search_user_by_name ─────────────────────────────────────
+
+# 真实抓取样本（已脱敏，2026-06-28 抓自服务器 s.weibo.com/user?q=人民日报）。
+# 页面里同时含 s.weibo.com 自身标记和 $CONFIG（通过风控校验）。
+# 注意样本里还含一条 html.unescape 测试项（Tom &amp; Jerry）。
+_SAMPLE_SEARCH_HTML = """
+<!DOCTYPE html>
+<html><head>
+    <title>微博搜索</title>
+    <script>var $CONFIG = {}; $CONFIG['islogin'] = '1';</script>
+</head>
+<body>
+  <!-- s.weibo.com 模板标记 -->
+  <a href="//weibo.com/u/2803301701" class="name" target="_blank">人民日报</a>
+  <p class="info">...简介...</p>
+  <a href="//weibo.com/u/1411163204" class="name" target="_blank">人民日报健康客户端</a>
+  <a href="//weibo.com/u/5703735355" class="name" target="_blank">人民日报体育</a>
+  <a href="//weibo.com/u/9999999999" class="name">Tom &amp; Jerry</a>
+  <a href="//weibo.com/u/2803301701" class="name">人民日报</a>  <!-- 重复出现，应去重 -->
+</body></html>
+"""
+
+# 「正常但 0 结果」样本：页面通过风控校验（含 s.weibo.com + $CONFIG），
+# 但没有任何 class="name" 的用户卡。
+_SAMPLE_EMPTY_RESULT_HTML = (
+    "<!DOCTYPE html><html><head><title>搜索-微博</title></head>"
+    "<body><!-- s.weibo.com --><script>$CONFIG['islogin']='1';</script>"
+    "<div>无匹配用户</div></body></html>"
+)
+
+
 class TestSearchUserByName:
-    def _mock_response(self, status: int, json_data: dict) -> MagicMock:
+    def _mock_response(self, status: int, body: str) -> MagicMock:
+        """构造 mock 响应。
+
+        显式把 ``.json`` 设为抛 ``json.JSONDecodeError`` 的 AsyncMock，
+        以便 RED 阶段（旧实现走 ``resp.json()``）能稳定触发解码异常，
+        而不是落到 MagicMock 默认行为导致的隐晦 ``TypeError``。
+        """
         mock_resp = MagicMock()
         mock_resp.status = status
-        mock_resp.json = AsyncMock(return_value=json_data)
+        mock_resp.text = AsyncMock(return_value=body)
+        mock_resp.json = AsyncMock(side_effect=json.JSONDecodeError("Expecting value", body, 0))
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=None)
         return mock_resp
@@ -294,50 +334,47 @@ class TestSearchUserByName:
         return mock_cls, mock_session
 
     @pytest.mark.asyncio
-    async def test_returns_matching_users(self):
-        mock_resp = self._mock_response(
-            200,
-            {
-                "ok": 1,
-                "data": {
-                    "cards": [
-                        {
-                            "card_group": [
-                                {
-                                    "user": {
-                                        "id": 2803301701,
-                                        "screen_name": "人民日报",
-                                        "description": "人民日报官方微博",
-                                    }
-                                }
-                            ]
-                        }
-                    ]
-                },
-            },
-        )
+    async def test_returns_matching_users_from_html(self):
+        """TDD-RED: 旧实现走 JSON 解析（resp.json()）。
+
+        由于 ``_mock_response`` 显式把 ``.json`` 设为抛 ``JSONDecodeError``，
+        旧实现调用 ``await resp.json()`` 时直接抛 ``json.JSONDecodeError``，
+        测试失败，错误形式直观可读（不是隐晦的 MagicMock TypeError）。
+        """
+        mock_resp = self._mock_response(200, _SAMPLE_SEARCH_HTML)
         mock_cls, _session = self._setup_mocks(mock_resp)
 
         with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
             users = await search_user_by_name("cookie", "人民日报")
 
-        assert len(users) == 1
+        assert len(users) == 4  # 3 个人民日报 + 1 个 Tom & Jerry（重复 uid 去重）
         assert users[0]["id"] == 2803301701
         assert users[0]["screen_name"] == "人民日报"
+        assert users[1]["id"] == 1411163204
+        assert users[2]["screen_name"] == "人民日报体育"
+        # html.unescape 路径
+        assert users[3]["id"] == 9999999999
+        assert users[3]["screen_name"] == "Tom & Jerry"
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_no_match(self):
-        mock_resp = self._mock_response(200, {"ok": 1, "data": {"cards": []}})
+        """页面正常返回但没有任何匹配项 → 空 list。
+
+        样本通过风控校验（含 s.weibo.com + $CONFIG），避免与
+        ``test_returns_empty_on_risk_control_page`` 走同一分支。
+        """
+        mock_resp = self._mock_response(200, _SAMPLE_EMPTY_RESULT_HTML)
         mock_cls, _session = self._setup_mocks(mock_resp)
 
         with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
-            users = await search_user_by_name("cookie", "未知用户")
+            users = await search_user_by_name("cookie", "不存在的用户名XYZ")
 
         assert users == []
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_api_error(self):
-        mock_resp = self._mock_response(500, {})
+    async def test_returns_empty_on_404(self):
+        """服务端 404（与当前 bug 同症状）→ 空 list + warning log。"""
+        mock_resp = self._mock_response(404, "<html>404</html>")
         mock_cls, _session = self._setup_mocks(mock_resp)
 
         with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
@@ -346,11 +383,58 @@ class TestSearchUserByName:
         assert users == []
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_not_ok(self):
-        mock_resp = self._mock_response(200, {"ok": 0})
+    async def test_returns_empty_on_request_exception(self):
+        """网络异常 → 空 list + exception log。
+
+        注意: 这是「兜底回归」测试，验证 ``try/except Exception`` 兜住任何异常并返回 []。
+        不依赖具体的异常类型——只要异常从 ``session.get`` 路径抛出，实现都应该返回 []。
+
+        这里把异常挂在 ``session.get`` 上（更接近真实网络层抛 ClientError 的语义），
+        而不是 ``__aenter__``，因为实现写的是
+        ``try: async with session.get(...) as resp:``——异常既可能从 ``get()``
+        也可能从 ``__aenter__`` 抛，但挂在 ``get`` 上语义更直白。
+        """
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(side_effect=aiohttp.ClientError("boom"))
+        mock_cls = MagicMock()
+        mock_cls.return_value.__aenter__.return_value = mock_session
+
+        with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
+            users = await search_user_by_name("cookie", "test")
+
+        assert users == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_risk_control_page(self):
+        """风控场景: s.weibo.com 返回 200，但页面是验证/跳转页（无 s.weibo.com 自身标记、无 $CONFIG）。
+
+        必须与「正常但 0 结果」区分：当前实现先做页面有效性校验后 return []，
+        避免把风控页错误地解析成「正常但 0 结果」。
+        """
+        risk_html = (
+            "<!DOCTYPE html><html><head><title>验证码</title></head>"
+            "<body><script>location.href='https://passport.weibo.com/...'</script>"
+            "</body></html>"
+        )
+        mock_resp = self._mock_response(200, risk_html)
         mock_cls, _session = self._setup_mocks(mock_resp)
 
         with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
             users = await search_user_by_name("cookie", "test")
 
         assert users == []
+
+    @pytest.mark.asyncio
+    async def test_uses_pc_search_endpoint(self):
+        """回归测试：断言请求走 s.weibo.com/user 而非 m.weibo.cn suggestion。"""
+        mock_resp = self._mock_response(200, _SAMPLE_SEARCH_HTML)
+        mock_cls, mock_session = self._setup_mocks(mock_resp)
+
+        with patch("platforms.weibo.api.aiohttp.ClientSession", mock_cls):
+            await search_user_by_name("cookie", "人民日报")
+
+        called_url = mock_session.get.call_args[0][0]
+        assert called_url.startswith("https://s.weibo.com/user"), (
+            f"必须走 s.weibo.com PC 网页搜索，当前 URL: {called_url}"
+        )
+        assert "q=%E4%BA%BA%E6%B0%91%E6%97%A5%E6%8A%A5" in called_url  # urlencoded 人民日报

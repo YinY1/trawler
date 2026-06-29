@@ -43,6 +43,49 @@
 </div>
 
 <script>
+  // ── Nickname 异步填充（骨架渲染后并发拉取）──────────────────
+  // /auth 返回的骨架中 nickname 恒为空，slot 显示「加载中…」。
+  // DOM ready 后单次批量请求 /auth/nicknames（后端并行拉取 3 平台），
+  // 拿到结果后遍历 .nickname-slot 填充。
+  //
+  // ⚠️ slot 渲染规则（_auth_card.html）：模板内用 p.nickname or '加载中…'
+  //   - 整页 /auth（骨架）：p.nickname=None → 显示「加载中…」→ 下面 fetch 填充
+  //   - partial refresh /auth/card/{p}：p.nickname=<真实> → 直接显示真实 nickname
+  //     此时 slot.textContent 已是真实值，fillNicknameSlots() 不会覆盖
+  //     （仅当 slot 仍为「加载中…」占位时才填，避免破坏 partial refresh 路径）
+  function fillNicknameSlots() {
+    var slots = document.querySelectorAll('.nickname-slot');
+    if (slots.length === 0) return;  // 无登录平台，无需请求
+
+    // 只处理仍是占位「加载中…」的 slot（partial refresh 已填好的跳过）
+    var pending = [];
+    slots.forEach(function(slot) {
+      if (slot.textContent.trim() === '加载中…') pending.push(slot);
+    });
+    if (pending.length === 0) return;
+
+    fetch('/auth/nicknames', { headers: { 'Accept': 'application/json' } })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        pending.forEach(function(slot) {
+          var platform = slot.getAttribute('data-platform');
+          var nick = data[platform];
+          slot.textContent = nick || '—';
+        });
+      })
+      .catch(function(err) {
+        // 整体失败（网络错误）—— 降级显示「—」，不弹 toast（nickname 是装饰信息）
+        console.warn('nickname fetch failed', err);
+        pending.forEach(function(slot) { slot.textContent = '—'; });
+      });
+  }
+
+  // 整页 /auth 首次加载：DOM ready 后填充骨架 slot
+  fillNicknameSlots();
+
   // Override base.html placeholders with real implementation
   var qrPollInterval = null;
   var qrCountdownInterval = null;

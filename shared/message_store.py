@@ -87,6 +87,8 @@ class MessageStore:
             subscription_ref=data.get("subscription_ref", ""),
             body=data.get("body", ""),
             summary=data.get("summary", ""),
+            retry_count=data.get("retry_count", 0),
+            last_error=data.get("last_error", ""),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -163,6 +165,45 @@ class MessageStore:
                     continue
                 if not exclude and msg_phase != phase.value:
                     continue
+            results.append(self._msg_from_dict(msg_id, data))
+        return results
+
+    def query_messages(
+        self,
+        *,
+        since: int | None = None,
+        title: str | None = None,
+        author: str | None = None,
+        platform: str | None = None,
+        phase: Phase | None = None,
+    ) -> list[MessageRecord]:
+        """多维度筛选消息（手动检查专用，plan 2026-06-28）。
+
+        所有过滤条件 AND 组合，None 表示不限制。
+
+        Args:
+            since: Unix 时间戳，只返回 pubdate >= since 的消息（绝对时间戳，不是 hours）
+            title: 大小写不敏感 substring 匹配
+            author: 大小写不敏感 substring 匹配
+            platform: 精确匹配平台标识
+            phase: 精确匹配阶段
+
+        与 ``get_messages_in_window`` 区别：本方法不做 cleanup，支持超过 24h 的历史消息查询。
+        """
+        title_lower = title.lower() if title else None
+        author_lower = author.lower() if author else None
+        results: list[MessageRecord] = []
+        for msg_id, data in self._messages.items():
+            if since is not None and data.get("pubdate", 0) < since:
+                continue
+            if platform is not None and data.get("platform") != platform:
+                continue
+            if phase is not None and data.get("phase") != phase.value:
+                continue
+            if title_lower is not None and title_lower not in data.get("title", "").lower():
+                continue
+            if author_lower is not None and author_lower not in data.get("author", "").lower():
+                continue
             results.append(self._msg_from_dict(msg_id, data))
         return results
 
@@ -261,6 +302,31 @@ class MessageStore:
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
+    def mark_retry_failure(self, msg_id: str, error: str) -> None:
+        """记录一次可重试失败：retry_count += 1，写 last_error（不写 error）。
+
+        与 ``mark_error`` 的区别：
+        - ``mark_error`` 写 ``error`` 字段 → cron ``run_platform`` 跳过此消息（永久失败语义）
+        - ``mark_retry_failure`` 写 ``last_error`` 字段 → cron 仍会重试此消息
+
+        engine 层根据 ``retry_count`` 是否达到 ``MAX_SUMMARY_RETRIES`` 决定调哪个。
+        """
+        if msg_id not in self._messages:
+            return
+        self._messages[msg_id]["retry_count"] = self._messages[msg_id].get("retry_count", 0) + 1
+        self._messages[msg_id]["last_error"] = error
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
+    def mark_retry_reset(self, msg_id: str) -> None:
+        """handler 成功后重置 retry_count 和 last_error。"""
+        if msg_id not in self._messages:
+            return
+        self._messages[msg_id]["retry_count"] = 0
+        self._messages[msg_id]["last_error"] = ""
+        self._messages[msg_id]["updated_at"] = time.time()
+        self._dirty = True
+
     def reset_to_phase(self, target: Phase, platform: str | None = None) -> None:
         """将所有阶段 >= target 的消息回退到 target 阶段，清除 error。
 
@@ -275,8 +341,43 @@ class MessageStore:
             if current_phase >= target.value:
                 data["phase"] = target.value
                 data["error"] = ""
+                data["retry_count"] = 0
+                data["last_error"] = ""
                 data["updated_at"] = time.time()
                 self._dirty = True
+
+    def reset_specific(self, msg_ids: list[str], target: Phase) -> int:
+        """将指定 ID 的消息回退到 target 阶段，清除 error（手动检查专用）。
+
+        与 ``reset_to_phase`` 区别：按 msg_id 列表精准 reset，而不是按 platform 批量。
+        与 ``reset_to_phase`` 不同，本方法内部立即 ``save()``，因为手动模式的调用方
+        （CLI ``_run_manual_check``）不经过 ``run_platform`` 末尾的 save()。
+
+        Args:
+            msg_ids: 要 reset 的消息 ID 列表
+            target: 目标阶段
+
+        Returns:
+            实际被 reset 的消息数量（跳过未知 ID 和 phase < target 的消息）
+        """
+        count = 0
+        target_value = target.value
+        for msg_id in msg_ids:
+            data = self._messages.get(msg_id)
+            if data is None:
+                continue
+            current_phase = data.get("phase", Phase.DISCOVERED.value)
+            if current_phase < target_value:
+                continue
+            data["phase"] = target_value
+            data["error"] = ""
+            data["retry_count"] = 0
+            data["last_error"] = ""
+            data["updated_at"] = time.time()
+            self._dirty = True
+            count += 1
+        self.save()
+        return count
 
     # ── 清理 ─────────────────────────────────────────────────
 

@@ -71,7 +71,12 @@ async def test_full_pipeline_happy_path(config: Config, tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_full_pipeline_handler_failure(config: Config, tmp_path: Path) -> None:
-    """If a handler returns False, pipeline stops and error is recorded."""
+    """If a handler returns False, pipeline stops and error is recorded.
+
+    Engine 改造后失败走 retry_count 机制（< MAX 不写 error）。本测试预置
+    retry_count = MAX-1，让单次失败就触发 mark_error，保持原断言语义。"""
+    from shared.constants import MAX_SUMMARY_RETRIES
+    from shared.message_store import MessageStore
 
     @PipelineEngine.register_detector("test")
     async def test_detector(cfg: Config, st: MessageStore) -> None:
@@ -83,6 +88,9 @@ async def test_full_pipeline_handler_failure(config: Config, tmp_path: Path) -> 
             title="Fail Test",
             author="Tester",
         )
+        # 预置 retry_count = MAX - 1
+        for _ in range(MAX_SUMMARY_RETRIES - 1):
+            st.mark_retry_failure("test:002", "prev fail")
 
     @PipelineEngine.register("test", Phase.DOWNLOADED)
     async def test_download(ctx) -> bool:  # type: ignore[type-arg]

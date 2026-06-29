@@ -8,11 +8,13 @@ PC 端: weibo.com/ajax (需要完整 Cookie，数据更丰富)
 from __future__ import annotations
 
 # pyright: basic
+import html as _html_module
 import logging
 import re
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -133,7 +135,9 @@ def _parse_weibo_time(time_str: str) -> int:
     try:
         dt = datetime.strptime(time_str, _WEIBO_TIME_FORMAT)
         return int(dt.timestamp())
-    except ValueError, OSError:
+    except ValueError:
+        pass
+    except OSError:
         pass
 
     # 尝试中文格式
@@ -478,7 +482,29 @@ async def fetch_user_posts(
 
 # ── 用户搜索 ────────────────────────────────────────────────────
 
-MOBILE_USER_SEARCH_API = "https://m.weibo.cn/api/container/getIndex?type=suggestion&value={nickname}"
+# PC 网页搜索（s.weibo.com），返回 HTML。
+# 用法: PC_USER_SEARCH_API.format(query=url_encoded_name)
+# 2026-06-28: m.weibo.cn/api/container/getIndex?type=suggestion 已下线（404）；
+# weibo.com/ajax/search/all 等也已失效（404 message:地址不存在）。
+# s.weibo.com/user 是当前唯一仍可用的搜索入口，HTML 内嵌 <a class="name">。
+# 风控兜底: s.weibo.com 在被风控时仍返回 200，但 HTML 是验证/跳转页，
+# 既不含 s.weibo.com 自身标记也不含 $CONFIG。函数内会先校验页面有效性，
+# 再用下面的块正则解析（见 search_user_by_name 实现）。
+PC_USER_SEARCH_API = "https://s.weibo.com/user?q={query}&Refer=SUer_box"
+
+# 搜索结果解析：以单个 <a ...>...</a> 为块（DOTALL 跨行），块内分别匹配 uid 与 name。
+# 不假设 href/class 顺序，不假设属性在同一行（微博模板排版不稳定）。
+# 单条样本形如:
+#   <a href="//weibo.com/u/2803301701" class="name" ...>人民日报</a>
+_SEARCH_RESULT_BLOCK_RE = re.compile(
+    r"<a\b(?P<attrs>[^>]*)>(?P<name>.*?)</a>",
+    re.DOTALL,
+)
+_SEARCH_UID_RE = re.compile(r'href\s*=\s*"?//weibo\.com/u/(?P<uid>\d+)"?')
+# 严格匹配 class 含 name token：要求 name 前后是空白或引号边界，
+# 避免 class="my-name-card" / class="nickname" / class="username" 等假阳性。
+# 实测 s.weibo.com 搜索结果页面只用 class="name"，无歧义用例。
+_SEARCH_NAME_CLASS_RE = re.compile(r'class\s*=\s*"(?:[^"]*\s)?name(?:\s[^"]*)?"')
 
 
 async def search_user_by_name(
@@ -486,20 +512,26 @@ async def search_user_by_name(
     nickname: str,
     user_agent: str = _DEFAULT_UA,
 ) -> list[dict[str, Any]]:
-    """通过昵称搜索微博用户（移动端 suggestion API）。
+    """通过昵称搜索微博用户（PC 网页 s.weibo.com/user）。
+
+    失败原因（状态码 != 200 / 风控页 / 网络异常）只通过 ``logger.warning`` /
+    ``logger.exception`` 写到日志，**不抛异常、不在返回值中体现**。
+    因此调用方（``core/subscription_cli.py:_search_weibo``）只能看到空列表 +
+    通用提示「未找到名为「...」的用户」，无法区分「API 下线/风控」与「真的没结果」。
+    这是有意取舍：见 plan §10「日志与可见性」对权衡的讨论。
 
     Args:
-        cookie: 微博 Cookie 字符串（需含 SUB）
+        cookie: 微博 Cookie 字符串（需含 weibo.com 域 SUB）
         nickname: 搜索的昵称
         user_agent: 自定义 UA
 
     Returns:
-        用户列表，每项含 id / screen_name / description 等字段
+        用户列表，每项含 id / screen_name 字段（保持与旧 API 字段名兼容）
     """
-    url = MOBILE_USER_SEARCH_API.format(nickname=nickname)
+    url = PC_USER_SEARCH_API.format(query=quote(nickname))
     headers = {
         "User-Agent": user_agent,
-        "Referer": "https://m.weibo.cn/",
+        "Referer": "https://weibo.com/",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9",
         "Cookie": cookie,
@@ -513,25 +545,43 @@ async def search_user_by_name(
                 timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
+                    logger.warning("微博用户搜索返回状态码: %s", resp.status)
                     return []
-                data = await resp.json()
+                html = await resp.text()
         except Exception:
             logger.exception("微博用户搜索请求异常")
             return []
 
-    if not data.get("ok"):
+    # 风控兜底：s.weibo.com 在被风控时仍返回 200，但页面是
+    # passport.weibo.com 跳转/验证页，HTML 中既无 $CONFIG 也无 s.weibo.com 自身标记。
+    # 与「正常但 0 结果」必须区分（否则用户/UI 无法判断是 API 失效还是真的没结果）。
+    #
+    # 阈值决策（NEW-1, 2026-06-28 真机验证）：
+    #   真实页面总长 127923，'s.weibo.com' 首次偏移 3162，'$CONFIG' 首次偏移 2116。
+    #   plan 原值 html[:2000] 检查 's.weibo.com' 会误判（真实偏移 3162 > 2000）。
+    #   因此改用整文搜索（不截断），避免依赖 head 长度的不稳定假设。
+    if "s.weibo.com" not in html and "$CONFIG" not in html:
+        logger.warning("微博搜索返回疑似验证/风控页面（无 s.weibo.com / $CONFIG 标记），可能触发了风控")
         return []
 
-    cards = data.get("data", {}).get("cards", [])
+    # 去重（同 uid 可能多次出现）
+    seen: set[str] = set()
     users: list[dict[str, Any]] = []
-    for card in cards:
-        if not isinstance(card, dict):
+    for block_m in _SEARCH_RESULT_BLOCK_RE.finditer(html):
+        attrs = block_m.group("attrs")
+        raw_name = block_m.group("name")
+        uid_m = _SEARCH_UID_RE.search(attrs)
+        if not uid_m:
             continue
-        card_group = card.get("card_group", [])
-        if not isinstance(card_group, list):
+        if not _SEARCH_NAME_CLASS_RE.search(attrs):
             continue
-        for item in card_group:
-            user = item.get("user", {}) if isinstance(item, dict) else {}
-            if user.get("id") and user.get("screen_name"):
-                users.append(user)
+        uid = uid_m.group("uid")
+        # html.unescape: 用户名里可能含 &amp; &lt; &quot; &#xxx; 等实体
+        name = _html_module.unescape(raw_name).strip()
+        if uid in seen or not name:
+            continue
+        seen.add(uid)
+        # 保持旧字段名: id (int) / screen_name (str)，
+        # 因为 core/subscription_cli.py:_search_weibo 用这两个键。
+        users.append({"id": int(uid), "screen_name": name})
     return users

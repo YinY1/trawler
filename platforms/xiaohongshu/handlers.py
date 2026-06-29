@@ -115,6 +115,13 @@ async def xhs_download(ctx: PhaseContext) -> bool:
 @PipelineEngine.register("xhs", Phase.PUSHED)
 async def xhs_push(ctx: PhaseContext) -> bool:
     """推送小红书笔记通知。"""
+    # 手动重跑模式（plan 2026-06-28 D4/D7）：skip_push=True 时跳过 send_to_subscription，
+    # 但 phase 仍推进到 PUSHED。提前 return 同时跳过 media cleanup（有意为之，
+    # 保留本地文件以便后续重跑；xhs 视频笔记需重新下载成本高）。
+    if ctx.skip_push:
+        logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
+        return True
+
     note_id = ctx.msg.msg_id.replace("xhs:", "")
 
     matched = None
