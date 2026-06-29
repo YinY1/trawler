@@ -167,6 +167,9 @@ async def bili_download(ctx: PhaseContext) -> bool:
 async def transcribe_phase(ctx: PhaseContext) -> bool:
     """视频转写（跨平台共用 handler）。
 
+    仅 VIDEO 类型消息会到达此阶段(PHASE_FLOW 保证:TEXT flow 不含 TRANSCRIBED),
+    所以不需要 content_type 特判(spec §5 / issue #46 重构)。
+
     Bug 3 fix:
     - ``filepath`` 缺失时不再静默 return True，而是 ``ctx.error='downloaded_filepath missing'``
       并 return False，让消息停留在当前阶段并暴露在 dashboard 上，避免
@@ -175,9 +178,6 @@ async def transcribe_phase(ctx: PhaseContext) -> bool:
     - ``transcribe_file_async`` 真异常时记 WARNING 并降级用 ``content_text``
       继续流程（return True），保持既有的优雅降级语义。
     """
-    if ctx.msg.content_type != ContentType.VIDEO:
-        return True
-
     filepath = ctx.downloaded_filepath
     if filepath is None or not filepath.exists():
         ctx.error = "downloaded_filepath missing"

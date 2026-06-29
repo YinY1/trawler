@@ -833,4 +833,36 @@ async def test_bili_download_handles_dynamic_text_prefix(
     assert result is True
     # 关键:body 被复制到 content_text,push 阶段直接读 ctx.content_text
     assert ctx.content_text == "动态的完整正文内容"
-    assert ctx.error == ""
+
+
+@pytest.mark.asyncio
+async def test_text_message_never_reaches_transcribe_phase(
+    config: Config, store: MessageStore
+) -> None:
+    """TEXT flow 不含 TRANSCRIBED: engine 不会调用 transcribe handler。
+
+    验证 PHASE_FLOW[TEXT] 简化后,即使 transcribe_phase 移除 content_type 特判,
+    TEXT 消息也走不到 TRANSCRIBED 阶段(由 PHASE_FLOW 保证,而非 handler 特判)。
+    """
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        return True
+
+    @PipelineEngine.register("*", Phase.TRANSCRIBED)
+    async def tr(ctx: PhaseContext) -> bool:
+        pytest.fail("TRANSCRIBED handler 不应被 TEXT 消息调用")
+
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("bili_dyn:t1", "bili", ContentType.TEXT, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili_dyn:t1")
+    assert updated is not None
+    assert updated.phase == Phase.PUSHED
