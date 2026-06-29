@@ -141,3 +141,32 @@ class TestDownloadWeiboMedia:
 
         assert result.success is False
         assert result.error is not None
+
+
+class TestWeiboDownloadResultFilepathField:
+    def test_filepath_defaults_to_none(self):
+        """WeiboDownloadResult 必须有 filepath 字段,默认 None。
+
+        download_weibo_video 把视频路径写入此字段,download handler 读它设到 ctx.downloaded_filepath。
+        """
+        from shared.protocols import WeiboDownloadResult
+
+        result = WeiboDownloadResult(
+            success=True,
+            source_id="post1",
+            title="t",
+        )
+        assert result.filepath is None
+
+    def test_filepath_accepts_path(self):
+        from pathlib import Path
+
+        from shared.protocols import WeiboDownloadResult
+
+        result = WeiboDownloadResult(
+            success=True,
+            source_id="post1",
+            title="t",
+            filepath=Path("/tmp/weibo/post1/post1.mp4"),
+        )
+        assert result.filepath == Path("/tmp/weibo/post1/post1.mp4")

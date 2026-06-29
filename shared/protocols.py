@@ -119,6 +119,9 @@ class WeiboPost:
     is_original: bool = True
     is_long_text: bool = False
     long_text: str = ""  # 长文全文（isLongText=True 时填充）
+    # 视频直链(mp4)。detector 用此字段判断注册为 VIDEO 或 TEXT(spec §3 / issue #46)。
+    # 实现:has_video = bool(video_urls)
+    video_urls: list[str] = field(default_factory=list)
     reposted_post: WeiboPost | None = None  # 转发时可嵌套
 
 
@@ -131,6 +134,8 @@ class WeiboDownloadResult:
     title: str
     text: str = ""
     image_paths: list[Path] = field(default_factory=list)
+    # 视频文件路径(VIDEO 类型,download_weibo_video 填入;TEXT 类型保持 None)
+    filepath: Path | None = None
     error: str | None = None
     permanent: bool = False  # True = 永久失败（post 不存在/用户注销等），不 retry
 
