@@ -29,7 +29,12 @@ logger = logging.getLogger("trawler.weibo.handlers")
 
 @PipelineEngine.register_detector("weibo")
 async def weibo_detector(config: Config, store: MessageStore) -> None:
-    """检测新微博帖子并加入 store。"""
+    """检测新微博帖子并加入 store。
+
+    按 ``WeiboPost.video_urls`` 区分 VIDEO / TEXT(spec §3 / issue #46 PR-2):
+    - 含视频直链 → VIDEO(走完整 5 阶段:下载→转写→摘要→推送)
+    - 无视频 → TEXT(走 3 阶段:下载→推送)
+    """
     for sub in config.weibo.subscriptions:
         posts = await fetch_user_posts(
             cookie=config.weibo.auth.cookie,
@@ -37,10 +42,11 @@ async def weibo_detector(config: Config, store: MessageStore) -> None:
             max_posts=10,
         )
         for p in posts:
+            content_type = ContentType.VIDEO if p.video_urls else ContentType.TEXT
             store.add_new(
                 msg_id=f"weibo:{p.post_id}",
                 platform="weibo",
-                content_type=ContentType.TEXT,
+                content_type=content_type,
                 pubdate=p.pubdate,
                 title=p.clean_text[:50] if p.clean_text else p.post_id,
                 author=p.author,
