@@ -101,6 +101,27 @@
   <div class="mb-3">
     <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1">错误</div>
     <div class="text-xs text-red-500 leading-relaxed whitespace-pre-wrap">{{ msg.error }}</div>
+    {# 错误恢复入口 (UX: Try again button + help link)。
+       HTMX hx-target="this" + hx-swap="outerHTML" 让返回的 span 原地替换整个按钮容器。
+       hx-disabled-elt 防止请求中重复点击。
+       base.html 全局 htmx:beforeRequest hook 会自动给按钮加 spin + disabled。 #}
+    <div class="mt-2 flex items-center gap-3"
+         hx-post="/messages/{{ msg.msg_id | urlencode }}/retry"
+         hx-target="this"
+         hx-swap="outerHTML"
+         hx-disabled-elt="button">
+      <button type="button"
+              class="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/20 cursor-pointer transition-colors duration-200"
+              aria-label="重新处理此消息">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        重试此消息
+      </button>
+      <span class="text-[10px] text-[var(--text-tertiary)]">cron 下次循环将重新处理当前阶段</span>
+    </div>
   </div>
   {% endif %}
   {% if msg.summary %}
