@@ -71,11 +71,25 @@ class MessageStore:
             logger.error("保存 %s 失败: %s", self._path, exc)
 
     def _msg_from_dict(self, msg_id: str, data: dict) -> MessageRecord:
-        """将存储的 dict 转换为 MessageRecord（处理枚举反序列化）。"""
+        """将存储的 dict 转换为 MessageRecord（处理枚举反序列化）。
+
+        content_type 反序列化失败时（例如旧版 messages.json 含已废弃的 DYNAMIC=3 值，
+        见 issue #46 / PR-1），降级到 TEXT 并 WARNING，避免整个 store 加载失败。
+        """
+        try:
+            content_type = ContentType(data["content_type"])
+        except ValueError:
+            logger.warning(
+                "消息 %s 的 content_type=%r 不识别（可能是旧版 DYNAMIC 类型），"
+                "降级为 TEXT 处理（issue #46 PR-1 后 DYNAMIC 已废弃）",
+                msg_id,
+                data.get("content_type"),
+            )
+            content_type = ContentType.TEXT
         return MessageRecord(
             msg_id=msg_id,
             platform=data["platform"],
-            content_type=ContentType(data["content_type"]),
+            content_type=content_type,
             phase=Phase(data["phase"]),
             pubdate=data["pubdate"],
             title=data["title"],
