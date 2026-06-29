@@ -84,11 +84,11 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
                     )
                     continue
                 # 罕见：动态先于视频被发现（视频超出时间窗口或抓取失败）
-                # 仍保留 linked_bvid 信息但不阻塞，按独立 DYNAMIC 注册
+                # PR-1 临时：未反查 bvid 前先按 TEXT 注册,Task 6 会重写此分支
             store.add_new(
                 msg_id=f"bili_dyn:{dyn.dynamic_id}",
                 platform="bili",
-                content_type=ContentType.DYNAMIC,
+                content_type=ContentType.TEXT,
                 pubdate=dyn.pubdate,
                 title=dyn.title,
                 author=dyn.author,
@@ -253,7 +253,7 @@ async def bili_push(ctx: PhaseContext) -> bool:
         logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
         return True
 
-    is_dynamic = ctx.msg.content_type == ContentType.DYNAMIC
+    is_dynamic = ctx.msg.msg_id.startswith("bili_dyn:")
     source_id = ctx.msg.msg_id.replace("bili_dyn:" if is_dynamic else "bili:", "")
 
     # 通过 subscription_ref 精确匹配订阅

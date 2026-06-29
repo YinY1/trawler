@@ -239,9 +239,8 @@ class LLMProvider(Protocol):
 class ContentType(Enum):
     """内容类型"""
 
-    VIDEO = auto()  # B站视频 / XHS视频笔记 — 完整五阶段
-    TEXT = auto()  # 微博 / XHS图文笔记 — 三阶段（下载+推送）
-    DYNAMIC = auto()  # B站动态 — 三阶段（摘要+推送，无下载/转写）
+    VIDEO = auto()  # 任何含视频附件的内容 — 完整五阶段
+    TEXT = auto()  # 纯文字/图片 — 三阶段（下载+推送）
 
 
 class Phase(Enum):
@@ -266,11 +265,6 @@ PHASE_FLOW: dict[ContentType, list[Phase]] = {
     ContentType.TEXT: [
         Phase.DISCOVERED,
         Phase.DOWNLOADED,
-        Phase.PUSHED,
-    ],
-    ContentType.DYNAMIC: [
-        Phase.DISCOVERED,
-        Phase.SUMMARIZED,
         Phase.PUSHED,
     ],
 }

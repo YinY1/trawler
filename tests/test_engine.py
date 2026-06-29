@@ -171,7 +171,7 @@ async def test_process_message_handler_failure_stops_flow(config: Config, store:
 async def test_process_message_resume_from_mid_phase(config: Config, store: MessageStore) -> None:
     """Should resume from current phase, not repeat completed phases.
 
-    Uses DYNAMIC content: DYNAMIC phase flow excludes DOWNLOADED/TRANSCRIBED,
+    Uses TEXT content: TEXT phase flow excludes TRANSCRIBED/SUMMARIZED,
     so the Bug-3 VIDEO-only rewind gate never fires here and this test keeps
     verifying the pure resume semantics."""
     PipelineEngine._handlers = {}
@@ -179,9 +179,9 @@ async def test_process_message_resume_from_mid_phase(config: Config, store: Mess
 
     calls: list[str] = []
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        calls.append("summarized")
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        calls.append("downloaded")
         return True
 
     @PipelineEngine.register("bili", Phase.PUSHED)
@@ -189,15 +189,15 @@ async def test_process_message_resume_from_mid_phase(config: Config, store: Mess
         calls.append("pushed")
         return True
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "Test", "Author")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "Test", "Author")
     assert msg is not None
-    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    store.mark_phase("bili:BV1", Phase.DOWNLOADED)
     msg = store.get_message("bili:BV1")
     assert msg is not None
-    assert msg.phase == Phase.SUMMARIZED
+    assert msg.phase == Phase.DOWNLOADED
 
     await PipelineEngine.process_message(msg, config, store)
-    assert calls == ["pushed"]  # only pushed, summarized is not repeated
+    assert calls == ["pushed"]  # only pushed, downloaded is not repeated
 
 
 # ── run_platform ────────────────────────────────────────────────
@@ -593,25 +593,25 @@ async def test_handler_failure_increments_retry_count(
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        ctx.error = "AI 摘要失败"
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.error = "download 失败"
         return False
 
     @PipelineEngine.register("bili", Phase.PUSHED)
     async def ps(ctx: PhaseContext) -> bool:
         pytest.fail("PUSHED 不应被调用")
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "T", "A")
     assert msg is not None
     await PipelineEngine.process_message(msg, config, store)
 
     updated = store.get_message("bili:BV1")
     assert updated is not None
-    # DYNAMIC flow=[DISCOVERED, SUMMARIZED, PUSHED]：handler 失败时 next_phase=SUMMARIZED 未推进
+    # TEXT flow=[DISCOVERED, DOWNLOADED, PUSHED]：handler 失败时 next_phase=DOWNLOADED 未推进
     assert updated.phase == Phase.DISCOVERED
     assert updated.retry_count == 1
-    assert updated.last_error == "AI 摘要失败"
+    assert updated.last_error == "download 失败"
     assert updated.error == ""  # 关键：未达上限，不写 error
 
 
@@ -625,12 +625,12 @@ async def test_handler_failure_after_max_retries_marks_error(
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        ctx.error = "AI 摘要失败"
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.error = "download 失败"
         return False
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "T", "A")
     assert msg is not None
     # 预置 retry_count = MAX - 1，下一次失败应触发 mark_error
     for _ in range(MAX_SUMMARY_RETRIES - 1):
@@ -645,9 +645,9 @@ async def test_handler_failure_after_max_retries_marks_error(
 
     updated = store.get_message("bili:BV1")
     assert updated is not None
-    assert updated.phase == Phase.DISCOVERED  # DYNAMIC flow 中 SUMMARIZED 未推进
+    assert updated.phase == Phase.DISCOVERED  # TEXT flow 中 DOWNLOADED 未推进
     assert updated.error != ""  # 关键：达到上限，写 error
-    assert "AI 摘要失败" in updated.error
+    assert "download 失败" in updated.error
     # 注：mark_error 不增加 retry_count（mark_error 只写 error 字段）。
     # engine 的「达到上限」检查用 current_count+1 >= MAX，触发后直接 mark_error，
     # 所以 retry_count 仍为预置的 MAX-1（最后一次失败的计数未写入）。
@@ -695,16 +695,16 @@ async def test_handler_success_resets_retry_count(
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        ctx.summary_text = "成功摘要"
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.content_text = "成功正文"
         return True
 
     @PipelineEngine.register("bili", Phase.PUSHED)
     async def ps(ctx: PhaseContext) -> bool:
         return True
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "T", "A")
     assert msg is not None
     store.mark_retry_failure("bili:BV1", "prev fail")
     store.mark_retry_failure("bili:BV1", "prev fail")
