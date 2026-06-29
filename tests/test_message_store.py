@@ -557,3 +557,34 @@ def test_reset_specific_persists_immediately(tmp_path: Path) -> None:
     msg = s2.get_message("bili:BV1")
     assert msg is not None
     assert msg.phase == Phase.SUMMARIZED
+
+
+def test_load_tolerates_legacy_dynamic_content_type(tmp_path: Path) -> None:
+    """issue #46 PR-1 删除了 ContentType.DYNAMIC。
+
+    旧 messages.json 可能含 content_type=3(原 DYNAMIC 的 auto() 值)，
+    _msg_from_dict 必须降级为 TEXT 而不是抛 ValueError 中断整个 store 加载。
+    """
+    # 手动构造一个含旧 DYNAMIC=3 的 messages.json
+    legacy_data = {
+        "messages": {
+            "bili_dyn:legacy": {
+                "platform": "bili",
+                "content_type": 3,  # 旧 DYNAMIC 枚举值
+                "phase": Phase.DISCOVERED.value,
+                "pubdate": int(time.time()),
+                "title": "legacy dynamic",
+                "author": "UP",
+            }
+        }
+    }
+    (tmp_path / "messages.json").write_text(
+        json.dumps(legacy_data), encoding="utf-8"
+    )
+
+    # 不抛异常
+    store = MessageStore(tmp_path)
+    msg = store.get_message("bili_dyn:legacy")
+    assert msg is not None
+    # 关键：降级为 TEXT 而不是 crash
+    assert msg.content_type == ContentType.TEXT

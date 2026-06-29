@@ -70,30 +70,53 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
     for sub in config.bilibili.subscriptions:
         dynamics = await fetch_new_dynamics(uid=sub.uid, config=config)
         for dyn in dynamics:
-            if dyn.linked_bvid:
-                # 视频型动态：检查对应视频是否已被 bili_detector 注册
+            if dyn.has_video:
+                # 视频型动态(spec §2 case 1/2):
+                # - case 1: linked_bvid 对应视频已被 bili_detector 注册 → 追加 dynamic_text
+                # - case 2: 视频未注册 → 以 bili:{bvid} 注册为 VIDEO,动态正文作 dynamic_text
                 video_msg_id = f"bili:{dyn.linked_bvid}"
+                content_text = dyn.content.strip()
                 if store.is_known(video_msg_id):
-                    # 视频已注册，跳过动态；如有附加文字则追加到视频消息
-                    if dyn.content.strip():
-                        store.append_dynamic_text(video_msg_id, dyn.content.strip())
+                    # case 1: 视频已注册,追加附加文字(若有)
+                    if content_text:
+                        store.append_dynamic_text(video_msg_id, content_text)
                     logger.debug(
-                        "动态 %s 与已注册视频 %s 重复，跳过注册",
+                        "视频型动态 %s 与已注册视频 %s 重复,追加 dynamic_text",
                         dyn.dynamic_id,
                         dyn.linked_bvid,
                     )
                     continue
-                # 罕见：动态先于视频被发现（视频超出时间窗口或抓取失败）
-                # 仍保留 linked_bvid 信息但不阻塞，按独立 DYNAMIC 注册
-            store.add_new(
+
+                # case 2: 视频未注册,以 bili:{bvid} 注册为 VIDEO
+                # (spec §2 提到的「反查 bvid」在当前 _parse_dynamic 实现下不需要——
+                #  linked_bvid 已从动态 API 的 major.archive.bvid 直接拿到)
+                new_msg = store.add_new(
+                    msg_id=video_msg_id,
+                    platform="bili",
+                    content_type=ContentType.VIDEO,
+                    pubdate=dyn.pubdate,
+                    title=dyn.title or f"bili:{dyn.linked_bvid}",
+                    author=dyn.author,
+                    subscription_ref=str(sub.uid),
+                )
+                if new_msg is not None and content_text:
+                    # plan D7: 动态正文作为 dynamic_text 附加到 VIDEO 消息
+                    store.append_dynamic_text(video_msg_id, content_text)
+                continue
+
+            # case 3: 纯文字 / 图文动态 → 注册为 TEXT
+            new_msg = store.add_new(
                 msg_id=f"bili_dyn:{dyn.dynamic_id}",
                 platform="bili",
-                content_type=ContentType.DYNAMIC,
+                content_type=ContentType.TEXT,
                 pubdate=dyn.pubdate,
                 title=dyn.title,
                 author=dyn.author,
                 subscription_ref=str(sub.uid),
             )
+            if new_msg is not None and dyn.content.strip():
+                # plan D3: detector 同步把动态正文写入 body,供 push 阶段渲染全文
+                store.mark_body(f"bili_dyn:{dyn.dynamic_id}", dyn.content.strip())
 
 
 # -- Phase: DOWNLOADED -------------------------------------------
@@ -101,7 +124,16 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
 
 @PipelineEngine.register("bili", Phase.DOWNLOADED)
 async def bili_download(ctx: PhaseContext) -> bool:
-    """下载 B站视频音频。"""
+    """下载 B站视频音频。
+
+    纯文字动态(bili_dyn: 前缀, plan D3)无媒体可下载,no-op 推进。
+    detector 已通过 store.mark_body 写入的正文复制到 ctx.content_text,
+    让 push 阶段能拿到动态正文。
+    """
+    if ctx.msg.msg_id.startswith("bili_dyn:"):
+        ctx.content_text = ctx.msg.body
+        return True
+
     bvid = ctx.msg.msg_id.replace("bili:", "")
     logger.info("⬇ 下载 %s (%s)...", ctx.msg.title, bvid)
 
@@ -135,6 +167,9 @@ async def bili_download(ctx: PhaseContext) -> bool:
 async def transcribe_phase(ctx: PhaseContext) -> bool:
     """视频转写（跨平台共用 handler）。
 
+    仅 VIDEO 类型消息会到达此阶段(PHASE_FLOW 保证:TEXT flow 不含 TRANSCRIBED),
+    所以不需要 content_type 特判(spec §5 / issue #46 重构)。
+
     Bug 3 fix:
     - ``filepath`` 缺失时不再静默 return True，而是 ``ctx.error='downloaded_filepath missing'``
       并 return False，让消息停留在当前阶段并暴露在 dashboard 上，避免
@@ -143,9 +178,6 @@ async def transcribe_phase(ctx: PhaseContext) -> bool:
     - ``transcribe_file_async`` 真异常时记 WARNING 并降级用 ``content_text``
       继续流程（return True），保持既有的优雅降级语义。
     """
-    if ctx.msg.content_type != ContentType.VIDEO:
-        return True
-
     filepath = ctx.downloaded_filepath
     if filepath is None or not filepath.exists():
         ctx.error = "downloaded_filepath missing"
@@ -253,7 +285,7 @@ async def bili_push(ctx: PhaseContext) -> bool:
         logger.info("⏭ 跳过推送（skip_push=True）: %s", ctx.msg.msg_id)
         return True
 
-    is_dynamic = ctx.msg.content_type == ContentType.DYNAMIC
+    is_dynamic = ctx.msg.msg_id.startswith("bili_dyn:")
     source_id = ctx.msg.msg_id.replace("bili_dyn:" if is_dynamic else "bili:", "")
 
     # 通过 subscription_ref 精确匹配订阅
@@ -292,8 +324,9 @@ async def bili_push(ctx: PhaseContext) -> bool:
     ok = sum(1 for r in results if r.success)
     logger.info("通知推送完成 (%d/%d)", ok, len(results))
 
-    # 媒体清理（仅视频）
-    if not is_dynamic and ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
+    # plan D6: 媒体清理条件改为 downloaded_filepath is not None
+    # (改造后 TEXT 类型无视频文件,filepath 始终 None,条件自然不成立)
+    if ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
         try:
             cleanup_media(filepath=ctx.downloaded_filepath, source_id=source_id)
         except Exception as exc:

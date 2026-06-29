@@ -171,7 +171,7 @@ async def test_process_message_handler_failure_stops_flow(config: Config, store:
 async def test_process_message_resume_from_mid_phase(config: Config, store: MessageStore) -> None:
     """Should resume from current phase, not repeat completed phases.
 
-    Uses DYNAMIC content: DYNAMIC phase flow excludes DOWNLOADED/TRANSCRIBED,
+    Uses TEXT content: TEXT phase flow excludes TRANSCRIBED/SUMMARIZED,
     so the Bug-3 VIDEO-only rewind gate never fires here and this test keeps
     verifying the pure resume semantics."""
     PipelineEngine._handlers = {}
@@ -179,9 +179,9 @@ async def test_process_message_resume_from_mid_phase(config: Config, store: Mess
 
     calls: list[str] = []
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        calls.append("summarized")
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        calls.append("downloaded")
         return True
 
     @PipelineEngine.register("bili", Phase.PUSHED)
@@ -189,15 +189,15 @@ async def test_process_message_resume_from_mid_phase(config: Config, store: Mess
         calls.append("pushed")
         return True
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "Test", "Author")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "Test", "Author")
     assert msg is not None
-    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    store.mark_phase("bili:BV1", Phase.DOWNLOADED)
     msg = store.get_message("bili:BV1")
     assert msg is not None
-    assert msg.phase == Phase.SUMMARIZED
+    assert msg.phase == Phase.DOWNLOADED
 
     await PipelineEngine.process_message(msg, config, store)
-    assert calls == ["pushed"]  # only pushed, summarized is not repeated
+    assert calls == ["pushed"]  # only pushed, downloaded is not repeated
 
 
 # ── run_platform ────────────────────────────────────────────────
@@ -593,25 +593,25 @@ async def test_handler_failure_increments_retry_count(
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        ctx.error = "AI 摘要失败"
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.error = "download 失败"
         return False
 
     @PipelineEngine.register("bili", Phase.PUSHED)
     async def ps(ctx: PhaseContext) -> bool:
         pytest.fail("PUSHED 不应被调用")
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "T", "A")
     assert msg is not None
     await PipelineEngine.process_message(msg, config, store)
 
     updated = store.get_message("bili:BV1")
     assert updated is not None
-    # DYNAMIC flow=[DISCOVERED, SUMMARIZED, PUSHED]：handler 失败时 next_phase=SUMMARIZED 未推进
+    # TEXT flow=[DISCOVERED, DOWNLOADED, PUSHED]：handler 失败时 next_phase=DOWNLOADED 未推进
     assert updated.phase == Phase.DISCOVERED
     assert updated.retry_count == 1
-    assert updated.last_error == "AI 摘要失败"
+    assert updated.last_error == "download 失败"
     assert updated.error == ""  # 关键：未达上限，不写 error
 
 
@@ -625,12 +625,12 @@ async def test_handler_failure_after_max_retries_marks_error(
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        ctx.error = "AI 摘要失败"
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.error = "download 失败"
         return False
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "T", "A")
     assert msg is not None
     # 预置 retry_count = MAX - 1，下一次失败应触发 mark_error
     for _ in range(MAX_SUMMARY_RETRIES - 1):
@@ -645,9 +645,9 @@ async def test_handler_failure_after_max_retries_marks_error(
 
     updated = store.get_message("bili:BV1")
     assert updated is not None
-    assert updated.phase == Phase.DISCOVERED  # DYNAMIC flow 中 SUMMARIZED 未推进
+    assert updated.phase == Phase.DISCOVERED  # TEXT flow 中 DOWNLOADED 未推进
     assert updated.error != ""  # 关键：达到上限，写 error
-    assert "AI 摘要失败" in updated.error
+    assert "download 失败" in updated.error
     # 注：mark_error 不增加 retry_count（mark_error 只写 error 字段）。
     # engine 的「达到上限」检查用 current_count+1 >= MAX，触发后直接 mark_error，
     # 所以 retry_count 仍为预置的 MAX-1（最后一次失败的计数未写入）。
@@ -695,16 +695,16 @@ async def test_handler_success_resets_retry_count(
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
-    @PipelineEngine.register("bili", Phase.SUMMARIZED)
-    async def sm(ctx: PhaseContext) -> bool:
-        ctx.summary_text = "成功摘要"
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        ctx.content_text = "成功正文"
         return True
 
     @PipelineEngine.register("bili", Phase.PUSHED)
     async def ps(ctx: PhaseContext) -> bool:
         return True
 
-    msg = store.add_new("bili:BV1", "bili", ContentType.DYNAMIC, 2000000000, "T", "A")
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, 2000000000, "T", "A")
     assert msg is not None
     store.mark_retry_failure("bili:BV1", "prev fail")
     store.mark_retry_failure("bili:BV1", "prev fail")
@@ -790,3 +790,79 @@ async def test_bili_download_handler_passthrough_permanent_to_engine(
         assert updated.retry_count == 0  # 未走 retry 路径
     finally:
         sys.modules.pop("platforms.bilibili.handlers", None)
+
+
+@pytest.mark.asyncio
+async def test_bili_download_handles_dynamic_text_prefix(
+    config: Config, store: MessageStore
+) -> None:
+    """bili_dyn: 前缀的 TEXT 消息走到 DOWNLOADED 时,bili_download 应 no-op return True
+    并把 msg.body 复制到 ctx.content_text,让 push 阶段能拿到正文 (plan D3)。
+
+    背景:detector 把纯文字动态注册为 bili_dyn:{id} + TEXT,TEXT flow 含 DOWNLOADED。
+    若 bili_download 不特判,会用 msg_id.replace('bili:', '') 切出错误 bvid='dyn:xxx',
+    调 download_video 必然失败,消息卡死在 DOWNLOADED。
+    """
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    # 重新注册真实的 bili_download(不依赖模块导入副作用)
+    from platforms.bilibili.handlers import bili_download
+
+    PipelineEngine._handlers[("bili", Phase.DOWNLOADED)] = bili_download
+
+    msg = store.add_new(
+        msg_id="bili_dyn:12345",
+        platform="bili",
+        content_type=ContentType.TEXT,
+        pubdate=2000000000,
+        title="纯文字动态",
+        author="UP1",
+    )
+    assert msg is not None
+    # 模拟 detector 阶段已写入的动态正文
+    store.mark_body("bili_dyn:12345", "动态的完整正文内容")
+
+    # 重新读出含 body 的 msg
+    msg = store.get_message("bili_dyn:12345")
+    assert msg is not None
+    ctx = PhaseContext(msg=msg, config=config)
+
+    result = await bili_download(ctx)
+
+    assert result is True
+    # 关键:body 被复制到 content_text,push 阶段直接读 ctx.content_text
+    assert ctx.content_text == "动态的完整正文内容"
+
+
+@pytest.mark.asyncio
+async def test_text_message_never_reaches_transcribe_phase(
+    config: Config, store: MessageStore
+) -> None:
+    """TEXT flow 不含 TRANSCRIBED: engine 不会调用 transcribe handler。
+
+    验证 PHASE_FLOW[TEXT] 简化后,即使 transcribe_phase 移除 content_type 特判,
+    TEXT 消息也走不到 TRANSCRIBED 阶段(由 PHASE_FLOW 保证,而非 handler 特判)。
+    """
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register("bili", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        return True
+
+    @PipelineEngine.register("*", Phase.TRANSCRIBED)
+    async def tr(ctx: PhaseContext) -> bool:
+        pytest.fail("TRANSCRIBED handler 不应被 TEXT 消息调用")
+
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("bili_dyn:t1", "bili", ContentType.TEXT, 2000000000, "T", "A")
+    assert msg is not None
+    await PipelineEngine.process_message(msg, config, store)
+
+    updated = store.get_message("bili_dyn:t1")
+    assert updated is not None
+    assert updated.phase == Phase.PUSHED
