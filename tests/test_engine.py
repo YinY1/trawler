@@ -790,3 +790,47 @@ async def test_bili_download_handler_passthrough_permanent_to_engine(
         assert updated.retry_count == 0  # 未走 retry 路径
     finally:
         sys.modules.pop("platforms.bilibili.handlers", None)
+
+
+@pytest.mark.asyncio
+async def test_bili_download_handles_dynamic_text_prefix(
+    config: Config, store: MessageStore
+) -> None:
+    """bili_dyn: 前缀的 TEXT 消息走到 DOWNLOADED 时,bili_download 应 no-op return True
+    并把 msg.body 复制到 ctx.content_text,让 push 阶段能拿到正文 (plan D3)。
+
+    背景:detector 把纯文字动态注册为 bili_dyn:{id} + TEXT,TEXT flow 含 DOWNLOADED。
+    若 bili_download 不特判,会用 msg_id.replace('bili:', '') 切出错误 bvid='dyn:xxx',
+    调 download_video 必然失败,消息卡死在 DOWNLOADED。
+    """
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    # 重新注册真实的 bili_download(不依赖模块导入副作用)
+    from platforms.bilibili.handlers import bili_download
+
+    PipelineEngine._handlers[("bili", Phase.DOWNLOADED)] = bili_download
+
+    msg = store.add_new(
+        msg_id="bili_dyn:12345",
+        platform="bili",
+        content_type=ContentType.TEXT,
+        pubdate=2000000000,
+        title="纯文字动态",
+        author="UP1",
+    )
+    assert msg is not None
+    # 模拟 detector 阶段已写入的动态正文
+    store.mark_body("bili_dyn:12345", "动态的完整正文内容")
+
+    # 重新读出含 body 的 msg
+    msg = store.get_message("bili_dyn:12345")
+    assert msg is not None
+    ctx = PhaseContext(msg=msg, config=config)
+
+    result = await bili_download(ctx)
+
+    assert result is True
+    # 关键:body 被复制到 content_text,push 阶段直接读 ctx.content_text
+    assert ctx.content_text == "动态的完整正文内容"
+    assert ctx.error == ""

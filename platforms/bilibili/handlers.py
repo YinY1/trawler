@@ -96,7 +96,16 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
 
 @PipelineEngine.register("bili", Phase.DOWNLOADED)
 async def bili_download(ctx: PhaseContext) -> bool:
-    """下载 B站视频音频。"""
+    """下载 B站视频音频。
+
+    纯文字动态(bili_dyn: 前缀, plan D3)无媒体可下载,no-op 推进。
+    detector 已通过 store.mark_body 写入的正文复制到 ctx.content_text,
+    让 push 阶段能拿到动态正文。
+    """
+    if ctx.msg.msg_id.startswith("bili_dyn:"):
+        ctx.content_text = ctx.msg.body
+        return True
+
     bvid = ctx.msg.msg_id.replace("bili:", "")
     logger.info("⬇ 下载 %s (%s)...", ctx.msg.title, bvid)
 
