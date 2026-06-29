@@ -392,17 +392,21 @@ async def test_process_message_flushes_summary_after_summarized(config: Config, 
 
 
 @pytest.mark.asyncio
-async def test_process_message_flushes_inline_summary_after_downloaded(config: Config, store: MessageStore) -> None:
-    """覆盖 weibo 内联摘要路径（F6/R2/D5）：DOWNLOADED handler 内直接设置
-    ctx.summary_text，流程不经过 SUMMARIZED 阶段（TEXT 类型）。
-    engine 集中 flush 必须在 DOWNLOADED 后也捞 summary。"""
+async def test_process_message_does_not_flush_summary_after_downloaded(
+    config: Config, store: MessageStore
+) -> None:
+    """spec §6 / issue #46 PR-2: 移除 weibo 内联摘要路径后,_flush_ctx_to_store 简化。
+
+    DOWNLOADED handler 即使设置了 ctx.summary_text,engine 也不应在 DOWNLOADED 后 flush
+    summary 到 store(只有 SUMMARIZED 阶段才 flush)。
+    """
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
     @PipelineEngine.register("weibo", Phase.DOWNLOADED)
     async def dl(ctx: PhaseContext) -> bool:
         ctx.content_text = "微博正文"
-        ctx.summary_text = "内联摘要"  # 模拟 weibo download handler 内联生成摘要
+        ctx.summary_text = "误设的内联摘要"  # 模拟历史代码遗留
         return True
 
     @PipelineEngine.register("weibo", Phase.PUSHED)
@@ -417,8 +421,8 @@ async def test_process_message_flushes_inline_summary_after_downloaded(config: C
     assert updated is not None
     # body 来自 content_text
     assert updated.body == "微博正文"
-    # summary 来自内联摘要（关键：DOWNLOADED 阶段也要 flush summary）
-    assert updated.summary == "内联摘要"
+    # 关键:summary 不应在 DOWNLOADED 阶段被 flush(只有 SUMMARIZED 阶段才 flush)
+    assert updated.summary == ""
 
 
 @pytest.mark.asyncio

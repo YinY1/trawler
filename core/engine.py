@@ -36,16 +36,17 @@ def _flush_ctx_to_store(msg_id: str, ctx: PhaseContext, store: MessageStore, jus
     """阶段推进成功后，把 ctx 上对应阶段的产出回写到 store（plan D5）。
 
     - DOWNLOADED 完成：ctx.content_text → body（截断到 _BODY_MAX_CHARS）
-    - DOWNLOADED 或 SUMMARIZED 完成：ctx.summary_text → summary
-      （weibo 在 download handler 内联生成摘要，所以 DOWNLOADED 也捞 summary；
-       双 if 而非 if/elif，见 plan R2/D5）
+    - SUMMARIZED 完成：ctx.summary_text → summary
+
+    spec §6 / issue #46 PR-2: 移除 weibo 内联摘要路径后,
+    summary 只在 SUMMARIZED 阶段 flush(不再有 DOWNLOADED 双 if 兼容)。
     """
     if just_completed == Phase.DOWNLOADED and ctx.content_text:
         body = ctx.content_text[:_BODY_MAX_CHARS]
         if len(ctx.content_text) > _BODY_MAX_CHARS:
             body += "…"
         store.mark_body(msg_id, body)
-    if ctx.summary_text and just_completed in (Phase.DOWNLOADED, Phase.SUMMARIZED):
+    if just_completed == Phase.SUMMARIZED and ctx.summary_text:
         store.mark_summary(msg_id, ctx.summary_text)
 
 
