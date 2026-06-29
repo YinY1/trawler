@@ -71,9 +71,37 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
         dynamics = await fetch_new_dynamics(uid=sub.uid, config=config)
         for dyn in dynamics:
             if dyn.has_video:
-                # 视频型动态：Task 6 实现去重追加 / 反查 bvid 注册 VIDEO 分支
-                # 本 task 暂保留「未处理就跳过」的临时行为,Task 6 覆盖
-                logger.debug("视频型动态 %s 由 Task 6 处理", dyn.dynamic_id)
+                # 视频型动态(spec §2 case 1/2):
+                # - case 1: linked_bvid 对应视频已被 bili_detector 注册 → 追加 dynamic_text
+                # - case 2: 视频未注册 → 以 bili:{bvid} 注册为 VIDEO,动态正文作 dynamic_text
+                video_msg_id = f"bili:{dyn.linked_bvid}"
+                content_text = dyn.content.strip()
+                if store.is_known(video_msg_id):
+                    # case 1: 视频已注册,追加附加文字(若有)
+                    if content_text:
+                        store.append_dynamic_text(video_msg_id, content_text)
+                    logger.debug(
+                        "视频型动态 %s 与已注册视频 %s 重复,追加 dynamic_text",
+                        dyn.dynamic_id,
+                        dyn.linked_bvid,
+                    )
+                    continue
+
+                # case 2: 视频未注册,以 bili:{bvid} 注册为 VIDEO
+                # (spec §2 提到的「反查 bvid」在当前 _parse_dynamic 实现下不需要——
+                #  linked_bvid 已从动态 API 的 major.archive.bvid 直接拿到)
+                new_msg = store.add_new(
+                    msg_id=video_msg_id,
+                    platform="bili",
+                    content_type=ContentType.VIDEO,
+                    pubdate=dyn.pubdate,
+                    title=dyn.title or f"bili:{dyn.linked_bvid}",
+                    author=dyn.author,
+                    subscription_ref=str(sub.uid),
+                )
+                if new_msg is not None and content_text:
+                    # plan D7: 动态正文作为 dynamic_text 附加到 VIDEO 消息
+                    store.append_dynamic_text(video_msg_id, content_text)
                 continue
 
             # case 3: 纯文字 / 图文动态 → 注册为 TEXT
