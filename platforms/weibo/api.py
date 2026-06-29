@@ -169,6 +169,49 @@ def _parse_weibo_time(time_str: str) -> int:
     return int(time.time())
 
 
+def _extract_video_urls(page_info: Any) -> list[str]:
+    """从 page_info 提取视频直链(spec §3 / issue #46 PR-2)。
+
+    优先级:
+    1. page_info.urls (dict[str, str]) — 多分辨率 mp4 直链,取所有 .mp4 值
+    2. page_info.media_info.stream_url_hd — 高清 mp4
+    3. page_info.media_info.stream_url — 最低码率 mp4(兜底)
+
+    Args:
+        page_info: 原始 page_info 字段(dict),可能为 None / 非 dict
+
+    Returns:
+        视频 URL 列表;page_info.type != "video" 或无可用 URL 时返回空 list
+    """
+    if not isinstance(page_info, dict):
+        return []
+    if page_info.get("type") != "video":
+        return []
+
+    urls: list[str] = []
+
+    # 1. page_info.urls (多分辨率 dict)
+    pi_urls = page_info.get("urls")
+    if isinstance(pi_urls, dict):
+        for v in pi_urls.values():
+            if isinstance(v, str) and v:
+                urls.append(v)
+
+    # 2/3. media_info 兜底
+    if not urls:
+        media_info = page_info.get("media_info")
+        if isinstance(media_info, dict):
+            hd = media_info.get("stream_url_hd")
+            if isinstance(hd, str) and hd:
+                urls.append(hd)
+            else:
+                low = media_info.get("stream_url")
+                if isinstance(low, str) and low:
+                    urls.append(low)
+
+    return urls
+
+
 def _parse_mobile_post(raw: dict[str, Any]) -> WeiboPost | None:
     """解析移动端 API 返回的单条微博数据。
 
@@ -206,6 +249,9 @@ def _parse_mobile_post(raw: dict[str, Any]) -> WeiboPost | None:
                 if url:
                     image_urls.append(url)
 
+        # 视频直链(spec §3 / issue #46 PR-2)
+        video_urls = _extract_video_urls(raw.get("page_info"))
+
         # 统计数据
         reposts_count = int(raw.get("reposts_count", 0) or 0)
         comments_count = int(raw.get("comments_count", 0) or 0)
@@ -230,6 +276,7 @@ def _parse_mobile_post(raw: dict[str, Any]) -> WeiboPost | None:
             comments_count=comments_count,
             likes_count=likes_count,
             is_original=is_original,
+            video_urls=video_urls,
             reposted_post=reposted_post,
         )
     except Exception as e:
@@ -278,6 +325,9 @@ def _parse_pc_post(raw: dict[str, Any]) -> WeiboPost | None:
                 # 降级：使用模板 URL
                 image_urls.append(SINAIMG_URL_TEMPLATE.format(pic_id=pid))
 
+        # 视频直链(spec §3 / issue #46 PR-2)
+        video_urls = _extract_video_urls(raw.get("page_info"))
+
         # 统计数据（PC 端返回字符串）
         reposts_count = int(raw.get("reposts_count", "0") or "0")
         comments_count = int(raw.get("comments_count", "0") or "0")
@@ -303,6 +353,7 @@ def _parse_pc_post(raw: dict[str, Any]) -> WeiboPost | None:
             likes_count=likes_count,
             is_original=is_original,
             is_long_text=is_long_text,
+            video_urls=video_urls,
             reposted_post=reposted_post,
         )
     except Exception as e:

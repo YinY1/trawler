@@ -236,6 +236,69 @@ class TestParseMobilePost:
         result = _parse_mobile_post(raw)
         assert result is None
 
+    def test_parses_video_urls_from_page_info(self):
+        """移动端 mblog 含 page_info.type=video 时,提取 mp4 URL 到 video_urls(spec §3)。"""
+        raw = {
+            "id": "videopost1",
+            "text": "视频微博内容",
+            "user": {"screen_name": "视频博主", "id": 88888},
+            "created_at": "Tue Jun 11 10:00:00 +0800 2026",
+            "page_info": {
+                "type": "video",
+                "urls": {
+                    "mp4_720p": "https://example.com/720p.mp4",
+                    "mp4_360p": "https://example.com/360p.mp4",
+                },
+                "media_info": {
+                    "stream_url": "https://example.com/low.mp4",
+                    "stream_url_hd": "https://example.com/hd.mp4",
+                },
+            },
+        }
+        result = _parse_mobile_post(raw)
+        assert result is not None
+        assert len(result.video_urls) > 0
+        # 优先取 page_info.urls 中的 mp4 直链
+        assert all(url.endswith(".mp4") for url in result.video_urls)
+        assert "https://example.com/720p.mp4" in result.video_urls
+        assert "https://example.com/360p.mp4" in result.video_urls
+
+    def test_parses_video_fallback_to_stream_url(self):
+        """page_info.urls 为空时,降级到 media_info.stream_url(spec §3)。"""
+        raw = {
+            "id": "videopost2",
+            "text": "视频微博",
+            "user": {"screen_name": "博主", "id": 77777},
+            "created_at": "Tue Jun 11 10:00:00 +0800 2026",
+            "page_info": {
+                "type": "video",
+                "media_info": {
+                    "stream_url": "https://example.com/fallback.mp4",
+                },
+            },
+        }
+        result = _parse_mobile_post(raw)
+        assert result is not None
+        assert result.video_urls == ["https://example.com/fallback.mp4"]
+
+    def test_ignores_non_video_page_info(self):
+        """page_info.type != 'video' 时不提取视频字段(避免误抓图文/直播卡片)。"""
+        raw = {
+            "id": "picpost1",
+            "text": "图文微博",
+            "user": {"screen_name": "博主", "id": 66666},
+            "created_at": "Tue Jun 11 10:00:00 +0800 2026",
+            "pics": [{"url": "https://example.com/pic.jpg"}],
+            "page_info": {
+                "type": "pic",
+                "media_info": {"stream_url": "https://example.com/should_be_ignored.mp4"},
+            },
+        }
+        result = _parse_mobile_post(raw)
+        assert result is not None
+        assert result.video_urls == []
+        assert len(result.image_urls) == 1
+
 
 # ── _parse_pc_post ────────────────────────────────────────
 
@@ -274,6 +337,46 @@ class TestParsePcPost:
         raw = {"text": "no id"}
         result = _parse_pc_post(raw)
         assert result is None
+
+    def test_parses_video_urls_from_page_info(self):
+        """PC 端 post 含 page_info.type=video 时提取 mp4 URL(spec §3)。"""
+        raw = {
+            "id": 100001,
+            "idstr": "100001",
+            "text": "PC视频微博",
+            "user": {"screen_name": "PC视频博主", "id": 55555},
+            "created_at": "Tue Jun 11 10:00:00 +0800 2026",
+            "page_info": {
+                "type": "video",
+                "urls": {
+                    "mp4_720p": "https://example.com/pc_720p.mp4",
+                    "mp4_360p": "https://example.com/pc_360p.mp4",
+                },
+                "media_info": {
+                    "stream_url": "https://example.com/pc_low.mp4",
+                },
+            },
+        }
+        result = _parse_pc_post(raw)
+        assert result is not None
+        assert len(result.video_urls) > 0
+        assert "https://example.com/pc_720p.mp4" in result.video_urls
+
+    def test_parses_video_fallback_to_stream_url(self):
+        raw = {
+            "id": 100002,
+            "idstr": "100002",
+            "text": "PC视频",
+            "user": {"screen_name": "博主", "id": 44444},
+            "created_at": "Tue Jun 11 10:00:00 +0800 2026",
+            "page_info": {
+                "type": "video",
+                "media_info": {"stream_url": "https://example.com/pc_fb.mp4"},
+            },
+        }
+        result = _parse_pc_post(raw)
+        assert result is not None
+        assert result.video_urls == ["https://example.com/pc_fb.mp4"]
 
 
 # ── search_user_by_name ─────────────────────────────────────────
