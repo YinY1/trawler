@@ -89,7 +89,7 @@ async def main() -> int:
         notes = notes_data.get("notes", [])
         if notes:
             first = notes[0]
-            print(f"\n  [parser 假设验证] first note 关键字段:")
+            print("\n  [parser 假设验证] first note 关键字段:")
             for field in ("note_id", "display_title", "cover", "interact_info", "xsec_token", "type", "user"):
                 exists = field in first
                 preview = ""
@@ -131,7 +131,7 @@ async def main() -> int:
             comments = comments_data.get("comments", [])
             if comments:
                 first_c = comments[0]
-                print(f"\n  [parser 假设验证] first comment 关键字段:")
+                print("\n  [parser 假设验证] first comment 关键字段:")
                 for field in ("id", "content", "user_info", "like_count", "sub_comment_count"):
                     exists = field in first_c
                     print(f"    {field}: {'✓' if exists else '✗'}")
@@ -148,7 +148,7 @@ async def main() -> int:
         users = users_data.get("users", [])
         if users:
             first_u = users[0]
-            print(f"\n  [parser 假设验证] first user 关键字段:")
+            print("\n  [parser 假设验证] first user 关键字段:")
             for field in ("user_id", "nickname", "avatar", "red_id"):
                 exists = field in first_u
                 print(f"    {field}: {'✓' if exists else '✗'}")
