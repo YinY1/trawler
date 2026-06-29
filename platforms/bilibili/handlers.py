@@ -70,22 +70,14 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
     for sub in config.bilibili.subscriptions:
         dynamics = await fetch_new_dynamics(uid=sub.uid, config=config)
         for dyn in dynamics:
-            if dyn.linked_bvid:
-                # 视频型动态：检查对应视频是否已被 bili_detector 注册
-                video_msg_id = f"bili:{dyn.linked_bvid}"
-                if store.is_known(video_msg_id):
-                    # 视频已注册，跳过动态；如有附加文字则追加到视频消息
-                    if dyn.content.strip():
-                        store.append_dynamic_text(video_msg_id, dyn.content.strip())
-                    logger.debug(
-                        "动态 %s 与已注册视频 %s 重复，跳过注册",
-                        dyn.dynamic_id,
-                        dyn.linked_bvid,
-                    )
-                    continue
-                # 罕见：动态先于视频被发现（视频超出时间窗口或抓取失败）
-                # PR-1 临时：未反查 bvid 前先按 TEXT 注册,Task 6 会重写此分支
-            store.add_new(
+            if dyn.has_video:
+                # 视频型动态：Task 6 实现去重追加 / 反查 bvid 注册 VIDEO 分支
+                # 本 task 暂保留「未处理就跳过」的临时行为,Task 6 覆盖
+                logger.debug("视频型动态 %s 由 Task 6 处理", dyn.dynamic_id)
+                continue
+
+            # case 3: 纯文字 / 图文动态 → 注册为 TEXT
+            new_msg = store.add_new(
                 msg_id=f"bili_dyn:{dyn.dynamic_id}",
                 platform="bili",
                 content_type=ContentType.TEXT,
@@ -94,6 +86,9 @@ async def bili_dynamic_detector(config: Config, store: MessageStore) -> None:
                 author=dyn.author,
                 subscription_ref=str(sub.uid),
             )
+            if new_msg is not None and dyn.content.strip():
+                # plan D3: detector 同步把动态正文写入 body,供 push 阶段渲染全文
+                store.mark_body(f"bili_dyn:{dyn.dynamic_id}", dyn.content.strip())
 
 
 # -- Phase: DOWNLOADED -------------------------------------------
