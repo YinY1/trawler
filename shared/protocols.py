@@ -128,6 +128,7 @@ class WeiboDownloadResult:
     text: str = ""
     image_paths: list[Path] = field(default_factory=list)
     error: str | None = None
+    permanent: bool = False  # True = 永久失败（post 不存在/用户注销等），不 retry
 
 
 # ═══════════════════════════════════════════════════════════
@@ -146,6 +147,7 @@ class DownloadResult:
     error: str | None = None
     access_limited: bool = False
     access_note: str = ""
+    permanent: bool = False  # True = 永久失败（凭证缺失/BVID 不存在等），不 retry
 
 
 @dataclass
@@ -159,6 +161,7 @@ class XhsDownloadResult:
     image_paths: list[Path] = field(default_factory=list)
     content_text: str = ""
     error: str | None = None
+    permanent: bool = False  # True = 永久失败（笔记被删/用户不存在等），不 retry
 
 
 @dataclass

@@ -69,9 +69,11 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         pubdate=ctx.msg.pubdate,
     )
 
-    # 尝试获取完整长文（如果标题被截断）
+    # 尝试获取完整长文（仅当 title 看起来被截断时才请求）
+    # title 是 monitor 阶段截断到 50 字符的预览；长度等于 50 表明原文更长，
+    # 需要拉长文；短于 50 直接用 title 作为 clean_text，省一次 HTTP 调用。
     cookie = ctx.config.weibo.auth.cookie
-    if cookie:
+    if cookie and len(post.clean_text) >= 50:
         from platforms.weibo.api import _fetch_long_text
 
         full_text = await _fetch_long_text(cookie, post_id)
@@ -88,6 +90,11 @@ async def weibo_download(ctx: PhaseContext) -> bool:
 
     if not result.success:
         ctx.error = result.error or "下载未成功"
+        # downloader 标记的永久失败（post 不存在/用户注销等）→ engine 直接 mark_error
+        # 当前 weibo downloader 未标记任何 permanent（无 image_urls 时直接 success），
+        # 保留接口为未来补充做准备。
+        if result.permanent:
+            ctx.permanent_error = True
         logger.warning("⚠️  %s", ctx.error)
         return False
 

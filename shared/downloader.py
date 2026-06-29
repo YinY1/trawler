@@ -111,6 +111,7 @@ async def _download_bili_video(
             source_id=bvid,
             title=display_name,
             error="B站未配置登录凭证",
+            permanent=True,  # 配置错误不会因 retry 消失
         )
 
     from bilibili_api import Credential, video
@@ -127,6 +128,8 @@ async def _download_bili_video(
     try:
         info = await v.get_info()
     except Exception as e:
+        # bilibili_api 对 404/不存在/参数错误抛异常，但和网络异常无法区分；
+        # 保守不标 permanent，让 retry 兜底（临时网络抖动比 BVID 不存在更常见）。
         return DownloadResult(
             success=False,
             source_id=bvid,
@@ -141,6 +144,7 @@ async def _download_bili_video(
             source_id=bvid,
             title=display_name,
             error="无法获取视频页面信息",
+            permanent=True,  # 视频数据结构异常，retry 无意义
         )
 
     cid = pages[0].get("cid")
@@ -150,6 +154,7 @@ async def _download_bili_video(
             source_id=bvid,
             title=display_name,
             error="无法获取视频 CID",
+            permanent=True,
         )
 
     try:
@@ -170,6 +175,7 @@ async def _download_bili_video(
             source_id=bvid,
             title=display_name,
             error="无可用音频流",
+            permanent=True,  # 视频可能没有音频流（如纯图片动态），结构问题
         )
 
     # 按配置选择音频流（按 bandwidth 排序）
@@ -187,6 +193,7 @@ async def _download_bili_video(
             source_id=bvid,
             title=display_name,
             error="音频 URL 为空",
+            permanent=True,
         )
 
     # ── 下载音频 ──

@@ -75,6 +75,11 @@ async def xhs_download(ctx: PhaseContext) -> bool:
 
     if not result.success:
         ctx.error = result.error or "下载未成功"
+        # downloader 标记的永久失败（笔记被删/用户不存在等）→ engine 直接 mark_error
+        # 当前 xhs downloader 未标记任何 permanent（无明显可识别场景），
+        # 保留接口为未来补充做准备。
+        if result.permanent:
+            ctx.permanent_error = True
         logger.warning("⚠️  %s", ctx.error)
         return False
 

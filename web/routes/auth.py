@@ -146,7 +146,9 @@ async def _fetch_all_nicknames(config: Config) -> dict[str, str | None]:
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     out: dict[str, str | None] = {p["key"]: None for p in PLATFORM_INFO}
-    for key, result in zip(keys, raw_results, strict=False):
+    # keys 与 raw_results 同源(gather 按 keys 顺序)，长度必然相等；
+    # strict=True 防御未来若有人改坏 tasks/keys 顺序时静默错位。
+    for key, result in zip(keys, raw_results, strict=True):
         if isinstance(result, Exception):
             logger.warning("🔑 %s nickname gather 异常: %s", key, result)
             out[key] = None

@@ -217,6 +217,7 @@ def create_app() -> FastAPI:
     from web.routes.dashboard import router as dashboard_router
     from web.routes.endpoints import router as endpoints_router
     from web.routes.logs import router as logs_router
+    from web.routes.messages import router as messages_router
     from web.routes.settings import router as settings_router
     from web.routes.subscriptions import router as subscriptions_router
     from web.routes.web_auth import router as web_auth_router
@@ -229,6 +230,7 @@ def create_app() -> FastAPI:
     app.include_router(endpoints_router)
     app.include_router(settings_router)
     app.include_router(web_auth_router)
+    app.include_router(messages_router)
 
     return app
 

@@ -721,3 +721,72 @@ async def test_handler_success_resets_retry_count(
     assert updated.phase == Phase.PUSHED
     assert updated.retry_count == 0  # 重置
     assert updated.last_error == ""
+
+
+# ── bili_download handler permanent passthrough (Issue #47) ─────
+
+
+@pytest.mark.asyncio
+async def test_bili_download_handler_passthrough_permanent_to_engine(
+    config: Config, store: MessageStore
+) -> None:
+    """Issue #47: shared/downloader.py 标记 ``permanent=True`` 的下载失败
+    必须由 bili_download handler 透传到 ``ctx.permanent_error``，
+    进而被 engine 直接 mark_error（不增 retry_count）。
+
+    与 ``test_handler_permanent_error_marks_error_immediately`` 的区别：
+    后者直接在测试 handler 内手动设 ``ctx.permanent_error=True``，本测试
+    透过真实 bili_download handler 验证「result.permanent → ctx.permanent_error」
+    的透传链路完整。
+    """
+    import sys
+    from unittest.mock import AsyncMock, patch
+
+    from shared.protocols import DownloadResult
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    try:
+        import platforms.bilibili.handlers  # noqa: F401
+
+        # mock download_video 返回 permanent=True 失败（如凭证缺失）
+        fail_result = DownloadResult(
+            success=False,
+            source_id="BV1",
+            title="T",
+            error="B站未配置登录凭证",
+            permanent=True,
+        )
+        with patch(
+            "shared.downloader.download_video",
+            new=AsyncMock(return_value=fail_result),
+        ):
+            # bili_download 是模块级装饰器注册的 handler；从注册表取出调用
+            handler = PipelineEngine._handlers.get(("bili", Phase.DOWNLOADED))
+            assert handler is not None, "bili_download handler should be registered"
+
+            msg = store.add_new("bili:BV1", "bili", ContentType.VIDEO, 2000000000, "T", "A")
+            assert msg is not None
+            ctx = PhaseContext(msg=msg, config=config)
+
+            result = await handler(ctx)
+
+        # handler 层断言：透传成功
+        assert result is False
+        assert ctx.permanent_error is True  # 关键：透传
+        assert "凭证" in (ctx.error or "")
+
+        # engine 层断言：permanent_error 触发直接 mark_error（retry_count 不增）
+        msg = store.get_message("bili:BV1")
+        assert msg is not None
+        await PipelineEngine.process_message(msg, config, store)
+
+        updated = store.get_message("bili:BV1")
+        assert updated is not None
+        assert updated.phase == Phase.DISCOVERED  # DOWNLOADED 未推进
+        assert updated.error != ""  # 直接 mark_error
+        assert "凭证" in updated.error
+        assert updated.retry_count == 0  # 未走 retry 路径
+    finally:
+        sys.modules.pop("platforms.bilibili.handlers", None)
