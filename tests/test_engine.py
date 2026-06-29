@@ -520,6 +520,52 @@ async def test_summarize_phase_returns_true_when_analysis_succeeds(
         sys.modules.pop("platforms.bilibili.handlers", None)
 
 
+@pytest.mark.asyncio
+async def test_summarize_phase_fetches_weibo_comments_for_video(
+    config: Config, store: MessageStore
+) -> None:
+    """weibo VIDEO 走 SUMMARIZED 时,summarize_phase 必须抓 weibo 评论(spec §5 / issue #46 PR-2)。
+
+    weibo TEXT 不走 SUMMARIED 阶段(在 download 抓评论),此测试只覆盖 VIDEO。
+    """
+    import sys
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    try:
+        import platforms.bilibili.handlers  # noqa: F401  (注册通用 summarize_phase)
+
+        config.analysis.enabled = False  # 跳过 LLM 调用,聚焦评论抓取验证
+
+        # mock fetch_weibo_comment_highlights 返回非空
+        mock_highlight = MagicMock()
+        with patch(
+            "platforms.weibo.comments.fetch_weibo_comment_highlights",
+            new=AsyncMock(return_value=[mock_highlight]),
+        ) as mock_fetch:
+            handler = PipelineEngine._handlers.get(("*", Phase.SUMMARIZED))
+            assert handler is not None
+
+            msg = store.add_new("weibo:v1", "weibo", ContentType.VIDEO, 2000000000, "T", "A")
+            assert msg is not None
+            ctx = PhaseContext(msg=msg, config=config)
+            ctx.transcript_text = "transcript"  # 提供 text_to_summarize
+
+            result = await handler(ctx)
+
+        assert result is True
+        # 关键:weibo VIDEO 触发了评论抓取
+        mock_fetch.assert_called_once()
+        assert mock_fetch.call_args.kwargs.get("post_id") == "v1"
+        # comment_highlights 被填充(非空字符串)
+        # format_comment_highlights 对非空 list 会返回非空 str
+        assert ctx.comment_highlights  # truthy
+    finally:
+        sys.modules.pop("platforms.bilibili.handlers", None)
+
+
 # ── engine retry_count handling (plan 2026-06-28) ───────────────
 
 

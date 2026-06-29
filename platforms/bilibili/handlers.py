@@ -242,6 +242,20 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
             logger.warning("⚠️  评论获取失败: %s", exc)
             logger.warning("XHS comment highlights failed for %s: %s", source_id, exc)
 
+    elif ctx.msg.platform == "weibo":
+        # spec §5 / issue #46 PR-2: weibo VIDEO 抓评论(TEXT 不走 SUMMARIZED 阶段)
+        post_id = source_id.replace("weibo:", "")
+        try:
+            from platforms.weibo.comments import fetch_weibo_comment_highlights
+
+            highlights = await fetch_weibo_comment_highlights(
+                post_id=post_id, config=ctx.config
+            )
+            ctx.comment_highlights = format_comment_highlights(highlights)
+        except Exception as exc:
+            logger.warning("⚠️  评论获取失败: %s", exc)
+            logger.warning("Weibo comment highlights failed for %s: %s", source_id, exc)
+
     logger.info("🤖 生成摘要...")
 
     text_to_summarize = ctx.transcript_text or ctx.content_text
