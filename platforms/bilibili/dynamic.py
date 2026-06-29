@@ -148,6 +148,7 @@ def _parse_dynamic(item: dict, uid: int) -> DynamicInfo | None:
         content=content,
         image_urls=image_urls,
         linked_bvid=linked_bvid,
+        has_video=bool(linked_bvid),
     )
 
 

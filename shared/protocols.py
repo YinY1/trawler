@@ -56,6 +56,10 @@ class DynamicInfo:
     content: str = ""
     image_urls: list[str] = field(default_factory=list)
     linked_bvid: str = ""
+    # 是否为视频型动态(type 8 视频投屏 / type 1 转发原视频)。
+    # detector 用此字段决定注册为 VIDEO 还是 TEXT(spec §2)。
+    # 实现:has_video = bool(linked_bvid)
+    has_video: bool = False
 
 
 @dataclass
