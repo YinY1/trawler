@@ -117,6 +117,9 @@ async def bili_download(ctx: PhaseContext) -> bool:
 
     if not result.success:
         ctx.error = result.error or "下载未成功"
+        # downloader 层标记的永久失败（凭证缺失/BVID 不存在等）→ engine 直接 mark_error
+        if result.permanent:
+            ctx.permanent_error = True
         logger.warning("⚠️  %s", ctx.error)
         return False
 

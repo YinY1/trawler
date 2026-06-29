@@ -90,6 +90,11 @@ async def weibo_download(ctx: PhaseContext) -> bool:
 
     if not result.success:
         ctx.error = result.error or "下载未成功"
+        # downloader 标记的永久失败（post 不存在/用户注销等）→ engine 直接 mark_error
+        # 当前 weibo downloader 未标记任何 permanent（无 image_urls 时直接 success），
+        # 保留接口为未来补充做准备。
+        if result.permanent:
+            ctx.permanent_error = True
         logger.warning("⚠️  %s", ctx.error)
         return False
 
