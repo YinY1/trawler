@@ -353,6 +353,13 @@ class MessageStore:
         与 ``reset_to_phase`` 不同，本方法内部立即 ``save()``，因为手动模式的调用方
         （CLI ``_run_manual_check``）不经过 ``run_platform`` 末尾的 save()。
 
+        retry_count 清零行为：与 ``reset_to_phase`` 一致（data["retry_count"] = 0）。
+        这意味着用户手动重跑「已永久失败」(error != "")的消息时，
+        retry 历史会被抹掉，重新从 0 计 MAX_SUMMARY_RETRIES 次配额。
+        这是**有意为之**：让用户主动重试不受历史 retry 影响
+        （否则用户重试一次就直接 mark_error 跳过，违反直觉）。
+        cron 模式不会调本方法，cron 永久跳过的消息只能通过手动入口（CLI/Web UI）恢复。
+
         Args:
             msg_ids: 要 reset 的消息 ID 列表
             target: 目标阶段
