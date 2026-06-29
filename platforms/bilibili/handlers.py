@@ -324,8 +324,9 @@ async def bili_push(ctx: PhaseContext) -> bool:
     ok = sum(1 for r in results if r.success)
     logger.info("通知推送完成 (%d/%d)", ok, len(results))
 
-    # 媒体清理（仅视频）
-    if not is_dynamic and ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
+    # plan D6: 媒体清理条件改为 downloaded_filepath is not None
+    # (改造后 TEXT 类型无视频文件,filepath 始终 None,条件自然不成立)
+    if ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
         try:
             cleanup_media(filepath=ctx.downloaded_filepath, source_id=source_id)
         except Exception as exc:
