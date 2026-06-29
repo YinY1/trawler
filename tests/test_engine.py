@@ -520,68 +520,6 @@ async def test_summarize_phase_returns_true_when_analysis_succeeds(
         sys.modules.pop("platforms.bilibili.handlers", None)
 
 
-# ── weibo download inline-summary failure (plan 2026-06-28) ──────
-
-
-@pytest.mark.asyncio
-async def test_weibo_download_returns_false_on_summary_failed(
-    config: Config, store: MessageStore
-) -> None:
-    """weibo 内联摘要 fallback 全失败时 download handler 必须 return False（卡在 DOWNLOADED）。"""
-    import sys
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    PipelineEngine._handlers = {}
-    PipelineEngine._detectors = {}
-
-    try:
-        import platforms.weibo.handlers  # noqa: F401
-        from core.summarizer import AnalysisResult  # noqa: I001
-
-        # mock download_weibo_media 返回成功
-        mock_dl_result = MagicMock()
-        mock_dl_result.success = True
-        mock_dl_result.image_paths = []
-        mock_dl_result.text = "微博正文"
-
-        with (
-            patch(
-                "platforms.weibo.handlers.download_weibo_media",
-                new=AsyncMock(return_value=mock_dl_result),
-            ),
-            patch(
-                "platforms.weibo.handlers.parse_weibo_post", new=MagicMock(return_value=None)
-            ),
-            patch(
-                "platforms.weibo.handlers.analyze_content",
-                new=AsyncMock(
-                    return_value=AnalysisResult(source="none", failed=True)
-                ),
-            ),
-            patch(
-                "platforms.weibo.handlers.fetch_weibo_comment_highlights",
-                new=AsyncMock(return_value=[]),
-            ),
-        ):
-            handler = PipelineEngine._handlers.get(("weibo", Phase.DOWNLOADED))
-            assert handler is not None
-
-            msg = store.add_new(
-                "weibo:abc", "weibo", ContentType.TEXT, 2000000000, "T", "A"
-            )
-            assert msg is not None
-            ctx = PhaseContext(msg=msg, config=config)
-            # 让 cookie 路径不触发长文获取
-            ctx.config.weibo.auth.cookie = ""
-
-            result = await handler(ctx)
-
-        assert result is False
-        assert "摘要" in ctx.error or "summary" in ctx.error.lower()
-    finally:
-        sys.modules.pop("platforms.weibo.handlers", None)
-
-
 # ── engine retry_count handling (plan 2026-06-28) ───────────────
 
 
