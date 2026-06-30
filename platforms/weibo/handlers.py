@@ -12,10 +12,9 @@ import logging
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
 from core.notifiers import send_to_subscription
-from core.summarizer import analyze_content
 from platforms.weibo.api import fetch_user_posts
 from platforms.weibo.comments import fetch_weibo_comment_highlights
-from platforms.weibo.downloader import download_weibo_media
+from platforms.weibo.downloader import download_weibo_media, download_weibo_video
 from platforms.weibo.parser import parse_weibo_post
 from shared.config import Config
 from shared.message_store import MessageStore
@@ -29,7 +28,12 @@ logger = logging.getLogger("trawler.weibo.handlers")
 
 @PipelineEngine.register_detector("weibo")
 async def weibo_detector(config: Config, store: MessageStore) -> None:
-    """检测新微博帖子并加入 store。"""
+    """检测新微博帖子并加入 store。
+
+    按 ``WeiboPost.video_urls`` 区分 VIDEO / TEXT(spec §3 / issue #46 PR-2):
+    - 含视频直链 → VIDEO(走完整 5 阶段:下载→转写→摘要→推送)
+    - 无视频 → TEXT(走 3 阶段:下载→推送)
+    """
     for sub in config.weibo.subscriptions:
         posts = await fetch_user_posts(
             cookie=config.weibo.auth.cookie,
@@ -37,10 +41,11 @@ async def weibo_detector(config: Config, store: MessageStore) -> None:
             max_posts=10,
         )
         for p in posts:
+            content_type = ContentType.VIDEO if p.video_urls else ContentType.TEXT
             store.add_new(
                 msg_id=f"weibo:{p.post_id}",
                 platform="weibo",
-                content_type=ContentType.TEXT,
+                content_type=content_type,
                 pubdate=p.pubdate,
                 title=p.clean_text[:50] if p.clean_text else p.post_id,
                 author=p.author,
@@ -53,9 +58,15 @@ async def weibo_detector(config: Config, store: MessageStore) -> None:
 
 @PipelineEngine.register("weibo", Phase.DOWNLOADED)
 async def weibo_download(ctx: PhaseContext) -> bool:
-    """下载微博媒体、解析内容、生成摘要和关键词。"""
+    """下载微博媒体(VIDEO: 下视频 / TEXT: 下图片)。
+
+    spec §3 / §6 / issue #46 PR-2:
+    - VIDEO 类型调 download_weibo_video,设 ctx.downloaded_filepath,后续走 transcribe + summarize
+    - TEXT 类型调 download_weibo_media(下图片),推全文,不再内联 AI 摘要
+    - 内联 AI 摘要代码块已移除,由 PHASE_FLOW 自然调度通用 summarize_phase
+    """
     post_id = ctx.msg.msg_id.replace("weibo:", "")
-    logger.info("⬇ 下载 %s (%s)...", ctx.msg.title, post_id)
+    logger.info("⬇ 下载 %s (%s, %s)...", ctx.msg.title, post_id, ctx.msg.content_type.name)
 
     # Reconstruct WeiboPost from MessageRecord
     from shared.protocols import WeiboPost
@@ -80,6 +91,44 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         if full_text:
             post.clean_text = full_text
 
+    # VIDEO 类型:从单条详情 API 反查 video_urls（detector 未持久化该字段）。
+    # 失败/无视频 URL → 标 permanent_error，避免无意义 retry（issue #47 范式）。
+    if ctx.msg.content_type == ContentType.VIDEO and cookie:
+        from platforms.weibo.api import _extract_video_urls, fetch_post_detail
+
+        detail = await fetch_post_detail(cookie, post_id)
+        page_info = detail.get("page_info", {}) if isinstance(detail, dict) else {}
+        post.video_urls = _extract_video_urls(page_info)
+        if not post.video_urls:
+            ctx.error = "视频 URL 反查失败或无可用视频流"
+            ctx.permanent_error = True
+            logger.warning("⚠️  %s", ctx.error)
+            return False
+
+    # 按 content_type 分支:VIDEO 走视频下载,TEXT 走图片下载
+    if ctx.msg.content_type == ContentType.VIDEO:
+        try:
+            result = await download_weibo_video(post=post, config=ctx.config)
+        except Exception as exc:
+            ctx.error = f"视频下载失败: {exc}"
+            logger.error("✗ %s", ctx.error)
+            logger.exception("Weibo video download failed for %s", post_id)
+            return False
+
+        if not result.success:
+            ctx.error = result.error or "视频下载未成功"
+            if result.permanent:
+                ctx.permanent_error = True
+            logger.warning("⚠️  %s", ctx.error)
+            return False
+
+        # 关键:透传 filepath 到 ctx(下游 transcribe_phase 需要)
+        ctx.downloaded_filepath = result.filepath
+        ctx.content_text = result.text
+        logger.info("✓ 视频下载完成")
+        return True
+
+    # TEXT 类型:走图片下载(原行为)
     try:
         result = await download_weibo_media(post=post, config=ctx.config)
     except Exception as exc:
@@ -111,29 +160,7 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         logger.warning("⚠️  内容解析失败: %s", exc)
         logger.warning("Weibo parse failed for %s: %s", post_id, exc)
 
-    # Generate summary and keywords (TEXT type skips SUMMARIZED phase)
-    # 改造为单次 analyze_content 调用（顺带修了 F1/A3 的双 AI 请求低效问题）
-    try:
-        analysis = await analyze_content(
-            source_id=post_id,
-            title=ctx.msg.title,
-            author=ctx.msg.author,
-            text=ctx.content_text,
-            config=ctx.config,
-        )
-        if analysis.failed:
-            ctx.error = "AI 摘要失败：所有 provider 不可用"
-            logger.warning("⚠️  %s — 消息将卡在 DOWNLOADED 阶段等待重试", ctx.error)
-            return False
-        ctx.summary_text = analysis.summary
-        ctx.keywords = analysis.keywords
-        logger.info("📝 摘要 (%s)", analysis.source)
-    except Exception as exc:
-        ctx.error = f"摘要生成异常: {exc}"
-        logger.warning("⚠️  %s", ctx.error)
-        return False
-
-    # Fetch comment highlights
+    # TEXT 类型在 download 阶段抓评论(SUMMARIZED 阶段只对 VIDEO 触发,TEXT 不走那里)
     try:
         highlights = await fetch_weibo_comment_highlights(
             post_id=post_id,

@@ -98,3 +98,50 @@ class TestParseWeiboPost:
         result = parse_weibo_post(post, dl)
 
         assert result["topics"] == []
+
+
+def _make_video_post(video_urls: list[str] | None = None) -> WeiboPost:
+    return WeiboPost(
+        post_id="videopost1",
+        text="视频微博",
+        clean_text="视频微博",
+        author="用户V",
+        user_id="99999",
+        pubdate=2000,
+        video_urls=video_urls or [],
+    )
+
+
+class TestWeiboPostVideoField:
+    def test_video_urls_defaults_to_empty_list(self):
+        """WeiboPost 实例化时 video_urls 必须默认为空 list(spec §3)。"""
+        post = WeiboPost(
+            post_id="p1",
+            text="t",
+            clean_text="ct",
+            author="a",
+            user_id="u",
+            pubdate=1,
+        )
+        assert post.video_urls == []
+
+    def test_video_urls_accepts_list_of_urls(self):
+        post = _make_video_post(
+            video_urls=["https://example.com/v1.mp4", "https://example.com/v2.mp4"]
+        )
+        assert len(post.video_urls) == 2
+        assert post.video_urls[0].endswith(".mp4")
+
+    def test_existing_post_without_video_urls_still_works(self):
+        """已有 WeiboPost 实例化位置(api.py parser, handlers 重建)不需改 — 默认值兜底。"""
+        post = WeiboPost(
+            post_id="legacy",
+            text="t",
+            clean_text="ct",
+            author="a",
+            user_id="u",
+            pubdate=1,
+        )
+        # 旧代码没传 video_urls,字段必须存在且为空
+        assert hasattr(post, "video_urls")
+        assert post.video_urls == []

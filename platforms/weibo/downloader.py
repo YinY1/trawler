@@ -104,3 +104,49 @@ async def download_weibo_media(post: WeiboPost, config: Config) -> WeiboDownload
         image_paths=image_paths,
         error=None if success else "图片下载全部失败",
     )
+
+
+async def download_weibo_video(post: WeiboPost, config: Config) -> WeiboDownloadResult:
+    """下载微博帖子的视频文件(mp4)。
+
+    用于 VIDEO 类型 weibo 帖子(spec §3 / issue #46 PR-2)。
+    下载到 ``{download_dir}/weibo/{post_id}/{post_id}.mp4``,填入返回值的 ``filepath`` 字段。
+
+    Args:
+        post: 微博帖子(需含 video_urls)
+        config: 全局配置
+
+    Returns:
+        下载结果;``filepath`` 字段填入下载后的 mp4 路径
+    """
+    if not post.video_urls:
+        return WeiboDownloadResult(
+            success=False,
+            source_id=post.post_id,
+            title=post.clean_text[:50] if post.clean_text else post.post_id,
+            text=post.clean_text,
+            error="无视频 URL 可下载",
+        )
+
+    post_dir = _get_post_dir(config, post.post_id)
+    video_path = post_dir / f"{post.post_id}.mp4"
+
+    # 取第一个 URL(已在 api.py 按优先级排序:多分辨率 > stream_url_hd > stream_url)
+    video_url = post.video_urls[0]
+    ok = await _download_file(video_url, video_path)
+    if not ok:
+        return WeiboDownloadResult(
+            success=False,
+            source_id=post.post_id,
+            title=post.clean_text[:50] if post.clean_text else post.post_id,
+            text=post.clean_text,
+            error="视频下载失败",
+        )
+
+    return WeiboDownloadResult(
+        success=True,
+        source_id=post.post_id,
+        title=post.clean_text[:50] if post.clean_text else post.post_id,
+        text=post.clean_text,
+        filepath=video_path,
+    )

@@ -392,17 +392,21 @@ async def test_process_message_flushes_summary_after_summarized(config: Config, 
 
 
 @pytest.mark.asyncio
-async def test_process_message_flushes_inline_summary_after_downloaded(config: Config, store: MessageStore) -> None:
-    """覆盖 weibo 内联摘要路径（F6/R2/D5）：DOWNLOADED handler 内直接设置
-    ctx.summary_text，流程不经过 SUMMARIZED 阶段（TEXT 类型）。
-    engine 集中 flush 必须在 DOWNLOADED 后也捞 summary。"""
+async def test_process_message_does_not_flush_summary_after_downloaded(
+    config: Config, store: MessageStore
+) -> None:
+    """spec §6 / issue #46 PR-2: 移除 weibo 内联摘要路径后,_flush_ctx_to_store 简化。
+
+    DOWNLOADED handler 即使设置了 ctx.summary_text,engine 也不应在 DOWNLOADED 后 flush
+    summary 到 store(只有 SUMMARIZED 阶段才 flush)。
+    """
     PipelineEngine._handlers = {}
     PipelineEngine._detectors = {}
 
     @PipelineEngine.register("weibo", Phase.DOWNLOADED)
     async def dl(ctx: PhaseContext) -> bool:
         ctx.content_text = "微博正文"
-        ctx.summary_text = "内联摘要"  # 模拟 weibo download handler 内联生成摘要
+        ctx.summary_text = "误设的内联摘要"  # 模拟历史代码遗留
         return True
 
     @PipelineEngine.register("weibo", Phase.PUSHED)
@@ -417,8 +421,8 @@ async def test_process_message_flushes_inline_summary_after_downloaded(config: C
     assert updated is not None
     # body 来自 content_text
     assert updated.body == "微博正文"
-    # summary 来自内联摘要（关键：DOWNLOADED 阶段也要 flush summary）
-    assert updated.summary == "内联摘要"
+    # 关键:summary 不应在 DOWNLOADED 阶段被 flush(只有 SUMMARIZED 阶段才 flush)
+    assert updated.summary == ""
 
 
 @pytest.mark.asyncio
@@ -520,14 +524,14 @@ async def test_summarize_phase_returns_true_when_analysis_succeeds(
         sys.modules.pop("platforms.bilibili.handlers", None)
 
 
-# ── weibo download inline-summary failure (plan 2026-06-28) ──────
-
-
 @pytest.mark.asyncio
-async def test_weibo_download_returns_false_on_summary_failed(
+async def test_summarize_phase_fetches_weibo_comments_for_video(
     config: Config, store: MessageStore
 ) -> None:
-    """weibo 内联摘要 fallback 全失败时 download handler 必须 return False（卡在 DOWNLOADED）。"""
+    """weibo VIDEO 走 SUMMARIZED 时,summarize_phase 必须抓 weibo 评论(spec §5 / issue #46 PR-2)。
+
+    weibo TEXT 不走 SUMMARIED 阶段(在 download 抓评论),此测试只覆盖 VIDEO。
+    """
     import sys
     from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -535,51 +539,35 @@ async def test_weibo_download_returns_false_on_summary_failed(
     PipelineEngine._detectors = {}
 
     try:
-        import platforms.weibo.handlers  # noqa: F401
-        from core.summarizer import AnalysisResult  # noqa: I001
+        import platforms.bilibili.handlers  # noqa: F401  (注册通用 summarize_phase)
 
-        # mock download_weibo_media 返回成功
-        mock_dl_result = MagicMock()
-        mock_dl_result.success = True
-        mock_dl_result.image_paths = []
-        mock_dl_result.text = "微博正文"
+        config.analysis.enabled = False  # 跳过 LLM 调用,聚焦评论抓取验证
 
-        with (
-            patch(
-                "platforms.weibo.handlers.download_weibo_media",
-                new=AsyncMock(return_value=mock_dl_result),
-            ),
-            patch(
-                "platforms.weibo.handlers.parse_weibo_post", new=MagicMock(return_value=None)
-            ),
-            patch(
-                "platforms.weibo.handlers.analyze_content",
-                new=AsyncMock(
-                    return_value=AnalysisResult(source="none", failed=True)
-                ),
-            ),
-            patch(
-                "platforms.weibo.handlers.fetch_weibo_comment_highlights",
-                new=AsyncMock(return_value=[]),
-            ),
-        ):
-            handler = PipelineEngine._handlers.get(("weibo", Phase.DOWNLOADED))
+        # mock fetch_weibo_comment_highlights 返回非空
+        mock_highlight = MagicMock()
+        with patch(
+            "platforms.weibo.comments.fetch_weibo_comment_highlights",
+            new=AsyncMock(return_value=[mock_highlight]),
+        ) as mock_fetch:
+            handler = PipelineEngine._handlers.get(("*", Phase.SUMMARIZED))
             assert handler is not None
 
-            msg = store.add_new(
-                "weibo:abc", "weibo", ContentType.TEXT, 2000000000, "T", "A"
-            )
+            msg = store.add_new("weibo:v1", "weibo", ContentType.VIDEO, 2000000000, "T", "A")
             assert msg is not None
             ctx = PhaseContext(msg=msg, config=config)
-            # 让 cookie 路径不触发长文获取
-            ctx.config.weibo.auth.cookie = ""
+            ctx.transcript_text = "transcript"  # 提供 text_to_summarize
 
             result = await handler(ctx)
 
-        assert result is False
-        assert "摘要" in ctx.error or "summary" in ctx.error.lower()
+        assert result is True
+        # 关键:weibo VIDEO 触发了评论抓取
+        mock_fetch.assert_called_once()
+        assert mock_fetch.call_args.kwargs.get("post_id") == "v1"
+        # comment_highlights 被填充(非空字符串)
+        # format_comment_highlights 对非空 list 会返回非空 str
+        assert ctx.comment_highlights  # truthy
     finally:
-        sys.modules.pop("platforms.weibo.handlers", None)
+        sys.modules.pop("platforms.bilibili.handlers", None)
 
 
 # ── engine retry_count handling (plan 2026-06-28) ───────────────
