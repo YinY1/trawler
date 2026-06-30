@@ -248,9 +248,7 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
         try:
             from platforms.weibo.comments import fetch_weibo_comment_highlights
 
-            highlights = await fetch_weibo_comment_highlights(
-                post_id=post_id, config=ctx.config
-            )
+            highlights = await fetch_weibo_comment_highlights(post_id=post_id, config=ctx.config)
             ctx.comment_highlights = format_comment_highlights(highlights)
         except Exception as exc:
             logger.warning("⚠️  评论获取失败: %s", exc)
@@ -279,6 +277,17 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
         ctx.error = "AI 摘要失败：所有 provider 不可用"
         logger.warning("⚠️  %s — 消息将卡在 SUMMARIZED 阶段等待重试", ctx.error)
         return False
+    # Issue #56: 解析成功（HTTP 200 + 无异常）但 summary 为空 —— silent empty。
+    # 接受空 summary 继续推进（避免重试爆炸），但必须打 warning 让运维可见。
+    # core/engine.py:49 的 `if ctx.summary_text:` 守卫会确保空 summary 不落 messages.json，
+    # 这是预期行为，handler 只负责让"摘要丢失"这件事可观测。
+    if not analysis.summary:
+        logger.warning(
+            "⚠️  AI 摘要解析为空（source_id=%s, source=%s, raw 长度=%d）— 检查 LLM 输出格式或 reasoning_content 兜底",
+            source_id,
+            analysis.source,
+            len(analysis.raw),
+        )
     ctx.summary_text = analysis.summary
     ctx.keywords = analysis.keywords
 
