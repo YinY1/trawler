@@ -344,6 +344,75 @@ A"""
         result = parse_markdown_analysis(raw)
         assert result.raw == raw
 
+    def test_parse_long_summary_with_numbered_keypoints(self) -> None:
+        """Issue #54 回归: prompt 改完后 LLM 输出 400+ 字 + 3-8 条序号要点，
+        解析层必须完整保留，不被「## 关键词」提前截断或被「1. 2. 」序号干扰。"""
+        # 构造一个 400+ 字、5 条要点的摘要（模拟新 prompt 输出）
+        long_summary = (
+            "1. 视频开篇作者引用了一组关键数据：2024 年中国短视频用户规模达到 9.8 亿，"
+            "占总网民的 87.5%，相比 2022 年增长了 12 个百分点。"
+            "这组数据来源于中国互联网络信息中心发布的第 53 次统计报告，"
+            "作者特别强调下沉市场（三线及以下城市）贡献了增量的 68%。\n"
+            "2. 第二个论点围绕算法推荐机制展开，作者以抖音的协同过滤为例，"
+            "解释了「信息茧房」效应如何在 6 个月内形成。"
+            "他引用了一位北大新闻传播学院教授的访谈，"
+            "指出每天刷 90 分钟短视频的用户，"
+            "接触异质观点的概率会从最初的 35% 下降到 8% 左右。\n"
+            "3. 第三个案例是某三线城市 UP 主通过分析后台数据，"
+            "在 3 个月内将完播率从 22% 提升到 47% 的实操路径。"
+            "具体方法包括：前 3 秒设置悬念、每 15 秒插入信息增量、"
+            "片尾用开放式提问引导评论，这三步让互动率同步上涨 3 倍。\n"
+            "4. 时间线梳理：2023Q1 政策收紧 → 2023Q3 平台调整 → 2024Q2 创作者生态反弹，"
+            "整个周期约 18 个月。作者特别提到 2023 年 8 月的「清朗行动」"
+            "导致 12% 的中腰部账号停更，但同期 MCN 机构数量反而增长了 9%。\n"
+            "5. 最后作者提出三个开放性问题，邀请观众在评论区讨论，"
+            "并引用了《注意力经济》一书的观点作为收尾。"
+            "他呼吁平台方公开推荐权重的可解释性指标，"
+            "同时建议创作者建立独立邮件列表降低对算法分发的依赖。"
+        )
+        assert len(long_summary) > 400  # 满足新 prompt 的字数下限
+
+        raw = f"""## 摘要
+{long_summary}
+
+## 一句话总结
+新 prompt 下产出的长摘要解析回归测试
+
+## 关键词
+短视频；算法推荐；信息茧房
+
+## 标签
+教程, 评测"""
+
+        result = parse_markdown_analysis(raw)
+
+        # 全部 5 条要点必须完整保留（不被截断）
+        assert "9.8 亿" in result.summary
+        assert "协同过滤" in result.summary
+        assert "三线城市 UP 主" in result.summary
+        assert "2023Q1" in result.summary
+        assert "《注意力经济》" in result.summary
+        # 序号格式保留
+        assert "1." in result.summary
+        assert "5." in result.summary
+        # 总长度仍 > 400（未被截断）
+        assert len(result.summary) > 400
+
+    def test_parse_summary_with_bold_numbered_keypoints_pr54(self) -> None:
+        """Issue #54 回归: LLM 偶尔会用「**1.** **要点标题**：内容」格式，
+        解析层（PR-1 已放宽正则兼容加粗标题）必须原样保留字段内容。"""
+        raw = """## 摘要
+**1.** **核心观点**：作者认为算法推荐已经改变了内容创作的底层逻辑
+**2.** **关键数据**：调研样本量 N=12000，置信度 95%
+
+## 关键词
+算法"""
+        result = parse_markdown_analysis(raw)
+        # 决策 7：字段内 **粗体** 原样保留（不剥离）
+        assert "**核心观点**" in result.summary
+        assert "**关键数据**" in result.summary
+        assert "N=12000" in result.summary
+
 
 class TestAnalyzeContent:
     """Tests for analyze_content — AI orchestration + failure semantics."""
@@ -700,3 +769,117 @@ class TestOpenAIProviderResponseParsing:
 
             with pytest.raises(RuntimeError, match="解析 API 响应失败"):
                 await provider.generate("test prompt")
+
+
+class TestPromptTemplateConstraints:
+    """Issue #54: _ANALYSIS_PROMPT_TEMPLATE 必须含字数下限 + 要点数量下限 + 序号格式硬约束，
+    让 LLM 不再过度压缩长视频/长文摘要。
+
+    注意：本类测试只验证 prompt 文本字面量，不验证 LLM 实际遵守。
+    issue #54 的字数下限验收依赖手动跑 check + trawler.log 对照。
+    """
+
+    def test_prompt_contains_word_count_lower_bound(self) -> None:
+        """prompt 模板必须包含「400 字」字数下限约束。
+
+        断言强化（issue #54 review N4）：原 `assert "字" in TEMPLATE` 是 dead assertion
+        （模板里「字」出现几十次永远 PASS），改成紧邻字面量「400 字」。
+        """
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        assert "400 字" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须含「400 字」字数下限紧邻字面量"
+
+    def test_prompt_contains_word_count_upper_bound(self) -> None:
+        """prompt 模板必须包含「1200 字」上限（避免 LLM 输出过长触发 max_tokens 截断）。"""
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        assert "1200" in _ANALYSIS_PROMPT_TEMPLATE
+
+    def test_prompt_contains_keypoints_count_lower_bound(self) -> None:
+        """prompt 必须含「3-8 条要点」数量约束。
+
+        断言强化（issue #54 review）：去掉宽松 OR 后半段（`"3" in ... and "8" in ...`，
+        模板里 3 和 8 任意出处都会假 PASS），只接受紧邻的「3-8」字面约束。
+        """
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        assert "3-8" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须含「3-8 条要点」数量约束"
+
+    def test_prompt_requires_numbered_list_format(self) -> None:
+        """prompt 必须要求用「1. 」「2. 」中文序号格式表达要点。
+
+        断言强化（issue #54 review）：不能只看模板任意位置是否有 "1."，
+        要定位到 `## 摘要` 段说明区（## 摘要 之后、## 一句话总结 之前），
+        断言该子串同时含「1. 」和「3. 」序号约束。
+        """
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        # 定位 `## 摘要\n` 之后到 `## 一句话总结\n` 之前的子串
+        # （两个 find 都带 \n，避免匹配到 prompt 第一段说明区的标题引用）
+        summary_start = _ANALYSIS_PROMPT_TEMPLATE.find("## 摘要\n")
+        next_section = _ANALYSIS_PROMPT_TEMPLATE.find("## 一句话总结\n")
+        assert summary_start != -1, "prompt 必须含 `## 摘要` 段标题"
+        assert next_section != -1, "prompt 必须含 `## 一句话总结` 段标题"
+        summary_block = _ANALYSIS_PROMPT_TEMPLATE[summary_start:next_section]
+        assert "1. " in summary_block, "## 摘要 段必须含「1. 」序号约束"
+        assert "3. " in summary_block, "## 摘要 段必须含「3. 」序号约束（要求至少 3 条要点）"
+
+    def test_prompt_requires_concrete_info_per_point(self) -> None:
+        """prompt 必须要求每条要点含具体信息（数据/案例/时间/论据），不只复述标题。
+
+        断言强化（issue #54 review B3）：原 `any(... 6 选 1)` 过弱，
+        模板偶然出现一个关键词就 PASS。改成锁两个核心关键词（数据 + 论据）。
+        """
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        # 锁两个核心关键词（数据 / 论据），不是 any 6 选 1
+        assert "数据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「数据」类具体信息"
+        assert "论据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「论据」类具体信息"
+
+    def test_prompt_still_has_four_sections(self) -> None:
+        """回归保护：prompt 仍然包含 4 个标准字段标题（解析层依赖）。"""
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        for section in ("## 摘要", "## 一句话总结", "## 关键词", "## 标签"):
+            assert section in _ANALYSIS_PROMPT_TEMPLATE, f"prompt 必须保留 {section} 字段标题"
+
+    def test_prompt_keeps_placeholder_format(self) -> None:
+        """回归保护：prompt 模板必须保留 {title}/{author}/{text} 占位符供 str.format 调用。"""
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        assert "{title}" in _ANALYSIS_PROMPT_TEMPLATE
+        assert "{author}" in _ANALYSIS_PROMPT_TEMPLATE
+        assert "{text}" in _ANALYSIS_PROMPT_TEMPLATE
+
+    def test_prompt_format_succeeds(self) -> None:
+        """prompt 模板能被 str.format 正常渲染（验证无 stray brace 导致 KeyError）。"""
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        rendered = _ANALYSIS_PROMPT_TEMPLATE.format(title="T", author="A", text="正文")
+        assert "T" in rendered
+        assert "A" in rendered
+        assert "正文" in rendered
+
+    def test_prompt_constraints_arithmetically_feasible(self) -> None:
+        """Issue #54 review B3: prompt 字数约束必须算术可达。
+
+        防止再次写出「字数下限 vs 条数下限 × 每条上限」的不可达约束组合：
+        例如旧 prompt「3 条 × 每条 100 字 = 300 字 < 400 字下限」LLM 无法同时满足。
+
+        断言：最少条数 × 每条字数上限 ≥ 字数下限。
+
+        注意：如果 prompt 改了约束数字，同步改本测试的三个常量。
+        （不真的正则解析 prompt —— 过度工程；硬编码常量 + docstring 同步提示足够。）
+        """
+        # 与 _ANALYSIS_PROMPT_TEMPLATE 中「## 摘要」段的约束数字保持一致
+        min_words = 400          # 「字数下限 400 字」
+        min_points = 3           # 「3-8 条要点」的下限
+        max_per_point = 150      # 「每条 30-150 字」的上限
+
+        # 最少条数场景（min_points 条）下，每条都顶到 max_per_point 字，
+        # 总字数必须 ≥ min_words，否则 LLM 永远无法满足下限约束。
+        assert min_points * max_per_point >= min_words, (
+            f"prompt 约束算术不可达：{min_points} 条 × {max_per_point} 字/条 "
+            f"= {min_points * max_per_point} 字 < {min_words} 字下限。"
+            "请调高 max_per_point 或调低 min_words/min_points。"
+        )
