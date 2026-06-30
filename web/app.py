@@ -74,6 +74,27 @@ def _phase_color(phase: Any) -> str:
 TEMPLATES.env.filters["phase_color"] = _phase_color
 
 
+def _phase_label(phase: Any) -> str:
+    """Map a Phase enum value (or its .name) to a Chinese display label.
+
+    Companion to ``phase_color``: phase_color picks the badge color, phase_label
+    picks the human-readable text. Keeps templates free of hardcoded enum names.
+    Returns the raw .name as fallback for unknown phases (forward-compat).
+    """
+    name = phase.name if hasattr(phase, "name") else str(phase)
+    mapping = {
+        "DISCOVERED": "已发现",
+        "DOWNLOADED": "已下载",
+        "TRANSCRIBED": "已转写",
+        "SUMMARIZED": "已摘要",
+        "PUSHED": "已推送",
+    }
+    return mapping.get(name, name)
+
+
+TEMPLATES.env.filters["phase_label"] = _phase_label
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: initialize async resources.

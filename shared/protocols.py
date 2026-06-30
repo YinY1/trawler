@@ -308,6 +308,11 @@ class MessageRecord:
     retry_count: int = 0
     # 最近一次可重试失败的错误信息（与 error 字段区分：error 表示永久失败，cron 跳过）
     last_error: str = ""
+    # 是否为永久失败（engine mark_error 时透传）：
+    # - True: handler 主动标记 (ctx.permanent_error) 或 retry 耗尽，cron 跳过
+    # - False: 默认 / 临时失败（仅 last_error）/ reset 后恢复
+    # UI 用于区分"永久错误"与"可重试错误"两种视觉状态。
+    permanent_error: bool = False
 
 
 @dataclass

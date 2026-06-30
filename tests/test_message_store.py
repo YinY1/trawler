@@ -588,3 +588,110 @@ def test_load_tolerates_legacy_dynamic_content_type(tmp_path: Path) -> None:
     assert msg is not None
     # 关键：降级为 TEXT 而不是 crash
     assert msg.content_type == ContentType.TEXT
+
+
+def test_record_has_permanent_error_default() -> None:
+    """MessageRecord 新字段 permanent_error 默认 False（向后兼容）。"""
+    from shared.protocols import MessageRecord
+
+    r = MessageRecord(
+        msg_id="x",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        phase=Phase.DISCOVERED,
+        pubdate=0,
+        title="t",
+        author="a",
+    )
+    assert r.permanent_error is False
+
+
+# ── permanent_error (plan 2026-06-30-webui-message-state-display) ──
+
+
+def test_msg_from_dict_loads_permanent_error(store: MessageStore) -> None:
+    """_msg_from_dict 必须把存储中的 permanent_error 反序列化进 MessageRecord。"""
+    store._messages["bili:BV1"] = {
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+        "permanent_error": True,
+    }
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.permanent_error is True
+
+
+def test_msg_from_dict_defaults_permanent_error_when_missing(store: MessageStore) -> None:
+    """旧 messages.json 兼容：缺 permanent_error 字段时默认 False。"""
+    store._messages["bili:BV1"] = {
+        "platform": "bili",
+        "content_type": ContentType.VIDEO.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+    }
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.permanent_error is False
+
+
+def test_mark_error_default_not_permanent(store: MessageStore) -> None:
+    """mark_error 不传 permanent 时默认 False（保持向后兼容）。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_error("bili:BV1", "some error")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.error == "some error"
+    assert msg.permanent_error is False  # 默认不标永久
+
+
+def test_mark_error_with_permanent_true(store: MessageStore) -> None:
+    """mark_error(permanent=True) 必须同时写 error 和 permanent_error=True。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_error("bili:BV1", "handler 标记永久失败", permanent=True)
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.error == "handler 标记永久失败"
+    assert msg.permanent_error is True
+
+
+def test_mark_retry_reset_clears_permanent_error(store: MessageStore) -> None:
+    """handler 成功后 mark_retry_reset 必须同步清零 permanent_error。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_error("bili:BV1", "fail", permanent=True)
+    store.mark_retry_reset("bili:BV1")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.permanent_error is False
+
+
+def test_reset_to_phase_clears_permanent_error(store: MessageStore) -> None:
+    """reset_to_phase 必须同步清零 permanent_error（与 retry_count/last_error 一致）。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_error("bili:BV1", "fail", permanent=True)
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+
+    store.reset_to_phase(Phase.DOWNLOADED)
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.permanent_error is False
+
+
+def test_reset_specific_clears_permanent_error(store: MessageStore) -> None:
+    """reset_specific 必须同步清零 permanent_error（手动重跑清状态）。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    store.mark_error("bili:BV1", "summary failed", permanent=True)
+
+    store.reset_specific(["bili:BV1"], Phase.SUMMARIZED)
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.error == ""
+    assert msg.permanent_error is False

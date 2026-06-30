@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import stat_card, badge, platform_tag %}
+{% from "_macros.html" import stat_card, badge, platform_tag, content_type_tag %}
 
 {% block title %}仪表盘 · Trawler{% endblock %}
 
@@ -80,10 +80,11 @@
       <div class="text-sm font-semibold text-[var(--text-primary)] leading-snug">{{ msg.title }}</div>
       <div class="text-xs text-[var(--text-secondary)] mt-1 flex flex-wrap items-center gap-1.5">
         <span class="font-mono">{{ msg.platform }}</span>
+        {{ content_type_tag(msg.content_type) }}
         <span>·</span>
         <span>{{ msg.author }}</span>
         <span>·</span>
-        <span>{{ msg.phase.name }}</span>
+        <span>{{ msg.phase | phase_label }}</span>
       </div>
     </div>
     <button type="button"
@@ -99,7 +100,14 @@
   </div>
   {% if msg.error %}
   <div class="mb-3">
-    <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1">错误</div>
+    <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 flex items-center gap-1.5">
+      <span>错误</span>
+      {% if msg.permanent_error %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-[6px] text-[9px] font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">永久</span>
+      {% else %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-[6px] text-[9px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">可重试</span>
+      {% endif %}
+    </div>
     <div class="text-xs text-red-500 leading-relaxed whitespace-pre-wrap">{{ msg.error }}</div>
     {# 错误恢复入口 (UX: Try again button + help link)。
        HTMX hx-target="this" + hx-swap="outerHTML" 让返回的 span 原地替换整个按钮容器。
@@ -122,6 +130,16 @@
       </button>
       <span class="text-[10px] text-[var(--text-tertiary)]">cron 下次循环将重新处理当前阶段</span>
     </div>
+  </div>
+  {% elif msg.retry_count > 0 %}
+  {# G3: 临时失败（未达永久）展示重试进度。与 {% if msg.error %} 兄弟分支，
+       error 为空时才走到这里（cron 仍会重试）。 #}
+  <div class="mb-3">
+    <div class="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 flex items-center gap-1.5">
+      <span>重试中</span>
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-[6px] text-[9px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">第 {{ msg.retry_count }} 次</span>
+    </div>
+    <div class="text-xs text-orange-500 leading-relaxed whitespace-pre-wrap">{{ msg.last_error }}</div>
   </div>
   {% endif %}
   {% if msg.summary %}
@@ -219,7 +237,7 @@
           <td class="px-5 py-3">{{ platform_tag(msg.platform) }}</td>
           <td class="px-5 py-3 max-w-xs truncate" title="{{ msg.title }}">{{ msg.title }}</td>
           <td class="px-5 py-3 text-[var(--text-secondary)]">{{ msg.author }}</td>
-          <td class="px-5 py-3">{{ badge(msg.phase.name, msg.phase | phase_color) }}</td>
+          <td class="px-5 py-3">{{ badge(msg.phase | phase_label, msg.phase | phase_color) }}</td>
           <td class="px-5 py-3 text-right">
             <button type="button"
                     onclick="document.getElementById('msg-detail-{{ loop.index }}').classList.remove('hidden'); document.getElementById('msg-detail-{{ loop.index }}').scrollIntoView({behavior: 'smooth', block: 'nearest'})"
