@@ -91,6 +91,20 @@ async def weibo_download(ctx: PhaseContext) -> bool:
         if full_text:
             post.clean_text = full_text
 
+    # VIDEO 类型:从单条详情 API 反查 video_urls（detector 未持久化该字段）。
+    # 失败/无视频 URL → 标 permanent_error，避免无意义 retry（issue #47 范式）。
+    if ctx.msg.content_type == ContentType.VIDEO and cookie:
+        from platforms.weibo.api import _extract_video_urls, fetch_post_detail
+
+        detail = await fetch_post_detail(cookie, post_id)
+        page_info = detail.get("page_info", {}) if isinstance(detail, dict) else {}
+        post.video_urls = _extract_video_urls(page_info)
+        if not post.video_urls:
+            ctx.error = "视频 URL 反查失败或无可用视频流"
+            ctx.permanent_error = True
+            logger.warning("⚠️  %s", ctx.error)
+            return False
+
     # 按 content_type 分支:VIDEO 走视频下载,TEXT 走图片下载
     if ctx.msg.content_type == ContentType.VIDEO:
         try:

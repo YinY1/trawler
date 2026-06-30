@@ -35,6 +35,9 @@ SINAIMG_URL_TEMPLATE = "https://wx1.sinaimg.cn/large/{pic_id}.jpg"
 # 长文 API
 LONGTEXT_API = "https://weibo.com/ajax/statuses/longtext?id={post_id}"
 
+# 单条微博详情 API（含视频 page_info，issue #46 PR-2 反查 video_urls）
+POST_DETAIL_API = "https://weibo.com/ajax/statuses/show?id={post_id}"
+
 # 默认 User-Agent
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -113,6 +116,45 @@ async def _fetch_long_text(cookie: str, post_id: str) -> str:
         except Exception:
             logger.debug("获取长文失败: %s", post_id)
             return ""
+
+
+async def fetch_post_detail(cookie: str, post_id: str) -> dict[str, Any]:
+    """获取单条微博详情(含视频 page_info)。
+
+    issue #46 PR-2: download handler 阶段需要 video_urls,但 detector 写入
+    MessageRecord 时未持久化 video_urls。download 阶段通过本函数反查详情拿到。
+
+    Args:
+        cookie: Cookie 字符串
+        post_id: 帖子 ID
+
+    Returns:
+        data 字段(dict);失败返回空 dict
+    """
+    if not cookie or not post_id:
+        return {}
+
+    url = POST_DETAIL_API.format(post_id=post_id)
+    headers = {
+        "User-Agent": _DEFAULT_UA,
+        "Referer": "https://weibo.com/",
+        "Cookie": cookie,
+    }
+
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        try:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=WEIBO_REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+                return data.get("data", {}) or {}
+        except Exception:
+            logger.debug("获取微博详情失败: %s", post_id)
+            return {}
 
 
 def _parse_weibo_time(time_str: str) -> int:

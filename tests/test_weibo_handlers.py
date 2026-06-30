@@ -110,6 +110,7 @@ class TestWeiboDownloadVideoBranch:
         from pathlib import Path
 
         cfg = _make_config()
+        cfg.weibo.auth.cookie = "SUB=fake"  # 启用反查分支(issue #46 PR-2)
 
         msg = MagicMock()
         msg.msg_id = "weibo:v1"
@@ -126,12 +127,24 @@ class TestWeiboDownloadVideoBranch:
         mock_video_result.text = "视频微博正文"
         mock_video_result.image_paths = []
 
+        # mock fetch_post_detail 返回含视频 URL 的 page_info(issue #46 PR-2 反查)
+        fake_detail = {
+            "page_info": {
+                "type": "video",
+                "urls": {"高清 1080P": "https://video.example.com/v1_1080p.mp4"},
+            }
+        }
+
         with (
             patch(
                 "platforms.weibo.handlers.download_weibo_video",
                 new=AsyncMock(return_value=mock_video_result),
             ) as mock_video_fn,
             patch("platforms.weibo.handlers.parse_weibo_post", new=MagicMock(return_value=None)),
+            patch(
+                "platforms.weibo.api.fetch_post_detail",
+                new=AsyncMock(return_value=fake_detail),
+            ),
         ):
             result = await _get_weibo_download()(ctx)
 
@@ -141,6 +154,45 @@ class TestWeiboDownloadVideoBranch:
         # 关键:filepath 透传到 ctx(下游 transcribe_phase 需要)
         assert ctx.downloaded_filepath == Path("/tmp/weibo/v1/v1.mp4")
         assert ctx.content_text == "视频微博正文"
+
+    @pytest.mark.asyncio
+    async def test_video_type_fetch_detail_failure_marks_permanent_error(self):
+        """VIDEO 类型 fetch_post_detail 失败或无 URL → permanent_error(避免 retry,issue #47 范式)。
+
+        issue #46 PR-2 oracle 审查发现的 bug:download handler 重建 WeiboPost 时
+        无 video_urls,download_weibo_video 直接失败。修复方案是反查 fetch_post_detail,
+        反查失败应永久标记而不是无意义 retry。
+        """
+        cfg = _make_config()
+        cfg.weibo.auth.cookie = "SUB=fake"  # 启用反查分支
+
+        msg = MagicMock()
+        msg.msg_id = "weibo:v_novideo"
+        msg.title = "视频微博但反查失败"
+        msg.author = "博主"
+        msg.pubdate = 1000
+        msg.content_type = ContentType.VIDEO
+
+        ctx = PhaseContext(msg=msg, config=cfg)
+
+        with (
+            patch(
+                "platforms.weibo.api.fetch_post_detail",
+                new=AsyncMock(return_value={}),  # 反查返回空
+            ),
+            patch(
+                "platforms.weibo.handlers.download_weibo_video",
+                new=AsyncMock(),
+            ) as mock_video_fn,
+        ):
+            result = await _get_weibo_download()(ctx)
+
+        # 关键:反查失败标 permanent_error,不让 retry
+        assert result is False
+        assert ctx.permanent_error is True
+        assert "视频 URL 反查失败" in ctx.error
+        # 关键:download_weibo_video 不应被调用(video_urls 已空)
+        mock_video_fn.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_video_type_does_not_call_analyze_content(self):
@@ -153,6 +205,7 @@ class TestWeiboDownloadVideoBranch:
         行为侧证明:handler 执行后 ctx.summary_text 应保持空(download 不产摘要)。
         """
         cfg = _make_config()
+        cfg.weibo.auth.cookie = "SUB=fake"  # 启用反查分支(issue #46 PR-2)
 
         msg = MagicMock()
         msg.msg_id = "weibo:v2"
@@ -169,12 +222,23 @@ class TestWeiboDownloadVideoBranch:
         mock_video_result.text = "正文"
         mock_video_result.image_paths = []
 
+        fake_detail = {
+            "page_info": {
+                "type": "video",
+                "urls": {"标清": "https://video.example.com/v2.mp4"},
+            }
+        }
+
         with (
             patch(
                 "platforms.weibo.handlers.download_weibo_video",
                 new=AsyncMock(return_value=mock_video_result),
             ),
             patch("platforms.weibo.handlers.parse_weibo_post", new=MagicMock(return_value=None)),
+            patch(
+                "platforms.weibo.api.fetch_post_detail",
+                new=AsyncMock(return_value=fake_detail),
+            ),
         ):
             await _get_weibo_download()(ctx)
 
