@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from shared.constants import BUILD_DATE, GIT_SHA, VERSION, VERSION_DISPLAY
+
 logger = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent
@@ -21,7 +23,7 @@ TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
 # ── auth_guard 白名单 (Web 站点访问鉴权) ────────────────────────
 # 不需要登录/setup 检查的路径前缀/精确路径
 _PUBLIC_PATHS = {"/login", "/logout", "/setup"}
-_PUBLIC_PREFIXES = ("/static",)
+_PUBLIC_PREFIXES = ("/static", "/api/health")
 
 # CSRF 豁免路径（未登录 POST，无 session 可盗）
 _CSRF_EXEMPT_PATHS = {"/login", "/setup"}
@@ -95,6 +97,17 @@ def _phase_label(phase: Any) -> str:
 TEMPLATES.env.filters["phase_label"] = _phase_label
 
 
+# ── issue #55: 注入版本常量到所有模板 ────────────────────────────
+# 让 base.html sidebar / settings.html 等模板可直接 {{ VERSION_DISPLAY }}，
+# 无需每个路由手动传 context。
+# 顶部 import 区已 import 了 BUILD_DATE/GIT_SHA/VERSION/VERSION_DISPLAY，
+# 此处仅做 globals 赋值，不再重复 import。
+TEMPLATES.env.globals["VERSION"] = VERSION
+TEMPLATES.env.globals["GIT_SHA"] = GIT_SHA
+TEMPLATES.env.globals["BUILD_DATE"] = BUILD_DATE
+TEMPLATES.env.globals["VERSION_DISPLAY"] = VERSION_DISPLAY
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: initialize async resources.
@@ -130,7 +143,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    app = FastAPI(title="Trawler Web UI", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Trawler Web UI", version=VERSION, lifespan=lifespan)
 
     # Initialize async resources on app.state so they exist even when the
     # lifespan handler is not executed (e.g. httpx ASGITransport in tests).
@@ -237,6 +250,7 @@ def create_app() -> FastAPI:
     from web.routes.check import router as check_router
     from web.routes.dashboard import router as dashboard_router
     from web.routes.endpoints import router as endpoints_router
+    from web.routes.health import router as health_router
     from web.routes.logs import router as logs_router
     from web.routes.messages import router as messages_router
     from web.routes.settings import router as settings_router
@@ -252,6 +266,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(web_auth_router)
     app.include_router(messages_router)
+    app.include_router(health_router)
 
     return app
 

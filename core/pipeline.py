@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from shared.config import Config
+from shared.constants import VERSION_DISPLAY
 from shared.protocols import Phase
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ async def run_check_once(
     if from_phase is not None:
         _phase = Phase[from_phase.upper()]
 
-    logger.info("▶ Trawler v0.1.0")
+    logger.info(f"▶ Trawler {VERSION_DISPLAY}")
 
     # 选出本次需要执行的平台（保持 PLATFORM_REGISTRY 顺序）
     selected = [

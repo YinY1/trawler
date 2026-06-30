@@ -22,6 +22,7 @@ from core.subscription_cli import add_subscription, list_subscriptions, remove_s
 from shared.auth import QRExpiredError, get_authenticator, update_auth_section
 from shared.auth.base import PlatformTokens
 from shared.config import Config, load_config
+from shared.constants import VERSION_DISPLAY
 from shared.message_store import MessageStore
 from shared.protocols import NotificationContent, Phase
 
@@ -82,6 +83,7 @@ def setup_logging(verbose: bool = False, log_dir: str = "data") -> None:
 
 
 @click.group()
+@click.version_option(VERSION_DISPLAY, "-V", "--version", message="Trawler %(version)s")
 def cli() -> None:
     """Trawler - 多平台创作者内容追更自动化工作流"""
     pass

@@ -58,3 +58,31 @@ class TestSettings:
         assert resp.status_code == 200
         assert "HX-Trigger" in resp.headers
         assert "toast" in resp.headers.get("HX-Trigger", "")
+
+
+class TestSettingsVersionDisplay:
+    """issue #55: settings 页含 '系统信息' 卡片，展示版本字段。"""
+
+    @patch("web.routes.settings.load_config", new_callable=AsyncMock)
+    async def test_settings_page_contains_system_info_card(self, mock_load, client: AsyncClient) -> None:
+        from shared.config import Config
+        from shared.constants import VERSION_DISPLAY
+
+        mock_load.return_value = Config()
+        resp = await client.get("/settings")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "系统信息" in body
+        # settings 页继承 base.html，sidebar 也会渲染；VERSION_DISPLAY 应出现
+        assert VERSION_DISPLAY in resp.text
+
+    @patch("web.routes.settings.load_config", new_callable=AsyncMock)
+    async def test_settings_page_contains_version_display(self, mock_load, client: AsyncClient) -> None:
+        from shared.config import Config
+        from shared.constants import VERSION_DISPLAY
+
+        mock_load.return_value = Config()
+        resp = await client.get("/settings")
+        assert resp.status_code == 200
+        # VERSION_DISPLAY 形如 `0.1.0+dev (unknown)`，HTML 渲染后应原样出现
+        assert VERSION_DISPLAY in resp.text

@@ -54,6 +54,15 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --extra web --extra xhs
 
+# ── 版本信息注入（issue #55）：构建期 ARG → ENV，运行期 os.environ 读取 ──
+# 本地构建：docker build . （未传 ARG，ENV 为空 → shared/constants.py fallback 'dev'/'unknown'）
+# CI 构建：workflow 传 build-args GIT_SHA/BUILD_DATE
+# 在源码 COPY 之前注入，避免 build-args 变化触发源码 layer 失效导致 uv sync 重复执行
+ARG GIT_SHA=""
+ARG BUILD_DATE=""
+ENV TRAWLER_GIT_SHA=${GIT_SHA}
+ENV TRAWLER_BUILD_DATE=${BUILD_DATE}
+
 # ── 项目源码 ──
 COPY . .
 RUN uv sync --frozen --extra web --extra xhs

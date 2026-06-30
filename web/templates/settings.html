@@ -119,6 +119,31 @@
   </div>
 </form>
 
+<!-- Card: 系统信息 (issue #55) -->
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)] mb-4">
+  <div class="flex items-center gap-2 mb-4">
+    <span class="w-7 h-7 rounded-[8px] bg-apple-blue/10 text-apple-blue inline-flex items-center justify-center">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    </span>
+    <h2 class="text-base font-semibold">系统信息</h2>
+  </div>
+  <p class="text-xs text-[var(--text-secondary)] mb-4">运行版本，用于核对部署是否更新到目标 commit</p>
+  <div class="flex flex-col gap-2 text-sm">
+    <div class="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-gray-800">
+      <span class="text-[var(--text-secondary)]">版本号</span>
+      <span class="font-mono text-xs">{{ VERSION }}</span>
+    </div>
+    <div class="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-gray-800">
+      <span class="text-[var(--text-secondary)]">Git SHA</span>
+      <span class="font-mono text-xs">{{ GIT_SHA }}</span>
+    </div>
+    <div class="flex items-center justify-between py-1.5">
+      <span class="text-[var(--text-secondary)]">构建时间</span>
+      <span class="font-mono text-xs">{{ BUILD_DATE }}</span>
+    </div>
+  </div>
+</div>
+
 <!-- Sticky save bar -->
 <div id="save-bar" class="fixed bottom-0 md:left-60 right-0 bg-white/90 dark:bg-gray-900/90 backdrop-blur-[12px] border-t border-gray-200 dark:border-gray-800 px-6 py-3 z-30 transition-all duration-300 transform translate-y-full">
   <div class="flex items-center justify-between max-w-4xl mx-auto">
