@@ -253,8 +253,8 @@ def test_render_health_alert_has_version_footer():
     assert title == "Trawler 检查失败"
     # summary 出现在 message 中
     assert "check 命令执行失败: KeyError" in msg
-    # 版本 footer 在末尾
-    assert f"(trawler@{GIT_SHA})" in msg
+    # 版本 footer 在末尾（issue #55 review：footer 用短 sha 提升可读性）
+    assert f"(trawler@{GIT_SHA[:7]})" in msg
 
 
 def test_render_health_alert_no_keywords_section():
@@ -276,8 +276,8 @@ def test_render_health_alert_no_keywords_section():
     _, msg = render_markdown(c)
     # summary 出现在 message 第一行
     assert msg.startswith("s")
-    # 版本 footer 在 message 末尾
-    assert msg.endswith(f"(trawler@{GIT_SHA})")
+    # 版本 footer 在 message 末尾（issue #55 review：footer 用短 sha）
+    assert msg.endswith(f"(trawler@{GIT_SHA[:7]})")
 
 
 def test_render_content_type_does_not_get_version_footer():

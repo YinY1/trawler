@@ -67,7 +67,7 @@
       {% endif %}
     </nav>
     <div class="mt-auto px-5 py-4 border-t border-[var(--sidebar-border)] text-[11px] text-[var(--text-tertiary)]">
-      <div class="font-mono truncate" title="{{ VERSION_DISPLAY }}">{{ VERSION_DISPLAY }}</div>
+      <div class="font-mono truncate" title="{{ VERSION_DISPLAY }}">{{ VERSION }}+{{ GIT_SHA[:7] }} ({{ BUILD_DATE }})</div>
     </div>
   </aside>
 

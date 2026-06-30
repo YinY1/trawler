@@ -20,8 +20,8 @@ try:
 except PackageNotFoundError:
     _dist_ver = "0.0.0+unknown"
 VERSION: str = _dist_ver
-GIT_SHA: str = os.environ.get("TRAWLER_GIT_SHA", "dev")
-BUILD_DATE: str = os.environ.get("TRAWLER_BUILD_DATE", "unknown")
+GIT_SHA: str = os.environ.get("TRAWLER_GIT_SHA") or "dev"
+BUILD_DATE: str = os.environ.get("TRAWLER_BUILD_DATE") or "unknown"
 VERSION_DISPLAY: str = f"{VERSION}+{GIT_SHA} ({BUILD_DATE})"
 
 # 超时（秒）

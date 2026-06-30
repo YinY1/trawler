@@ -56,6 +56,22 @@ def test_git_sha_reads_env_when_present(monkeypatch):
     assert constants_mod.GIT_SHA == "a1b2c3d"
 
 
+def test_git_sha_falls_back_when_env_empty_string(monkeypatch):
+    """ENV 存在但值为空字符串时 fallback 'dev'.
+
+    Dockerfile ``ARG GIT_SHA=""`` 未传 build-arg 时 ENV 存在但为空,
+    直接 ``os.environ.get(..., 'dev')`` 会返回 '' 而非 'dev',
+    导致 VERSION_DISPLAY 出现孤零零的 '+' 号。需用 ``or`` 短路兜底。
+    """
+    monkeypatch.setenv("TRAWLER_GIT_SHA", "")
+    import importlib
+
+    from shared import constants as constants_mod
+
+    importlib.reload(constants_mod)
+    assert constants_mod.GIT_SHA == "dev"
+
+
 def test_build_date_defaults_to_unknown_when_env_missing(monkeypatch):
     monkeypatch.delenv("TRAWLER_BUILD_DATE", raising=False)
     import importlib
@@ -74,6 +90,17 @@ def test_build_date_reads_env_when_present(monkeypatch):
 
     importlib.reload(constants_mod)
     assert constants_mod.BUILD_DATE == "2026-06-30T14:29:00Z"
+
+
+def test_build_date_falls_back_when_env_empty_string(monkeypatch):
+    """ENV 存在但值为空字符串时 fallback 'unknown' (同 GIT_SHA 空串边界)."""
+    monkeypatch.setenv("TRAWLER_BUILD_DATE", "")
+    import importlib
+
+    from shared import constants as constants_mod
+
+    importlib.reload(constants_mod)
+    assert constants_mod.BUILD_DATE == "unknown"
 
 
 def test_version_display_format_contains_all_parts(monkeypatch):

@@ -41,7 +41,7 @@ def render_markdown(content: NotificationContent) -> tuple[str, str]:
     # 健康告警（issue #55）：简化模板 + 版本 footer
     # 决策 5 限定：仅 health_alert 分支追加版本号，content/dynamic 不动
     if content.type == "health_alert":
-        parts = [content.summary or content.title, "", f"(trawler@{GIT_SHA})"]
+        parts = [content.summary or content.title, "", f"(trawler@{GIT_SHA[:7]})"]
         return content.title, "\n".join(parts)
 
     if content.type == "dynamic":
