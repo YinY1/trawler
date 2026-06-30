@@ -658,3 +658,40 @@ def test_mark_error_with_permanent_true(store: MessageStore) -> None:
     assert msg is not None
     assert msg.error == "handler 标记永久失败"
     assert msg.permanent_error is True
+
+
+def test_mark_retry_reset_clears_permanent_error(store: MessageStore) -> None:
+    """handler 成功后 mark_retry_reset 必须同步清零 permanent_error。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_error("bili:BV1", "fail", permanent=True)
+    store.mark_retry_reset("bili:BV1")
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.permanent_error is False
+
+
+def test_reset_to_phase_clears_permanent_error(store: MessageStore) -> None:
+    """reset_to_phase 必须同步清零 permanent_error（与 retry_count/last_error 一致）。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_error("bili:BV1", "fail", permanent=True)
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+
+    store.reset_to_phase(Phase.DOWNLOADED)
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.permanent_error is False
+
+
+def test_reset_specific_clears_permanent_error(store: MessageStore) -> None:
+    """reset_specific 必须同步清零 permanent_error（手动重跑清状态）。"""
+    store.add_new("bili:BV1", "bili", ContentType.VIDEO, int(time.time()), "T", "A")
+    store.mark_phase("bili:BV1", Phase.SUMMARIZED)
+    store.mark_error("bili:BV1", "summary failed", permanent=True)
+
+    store.reset_specific(["bili:BV1"], Phase.SUMMARIZED)
+
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+    assert msg.error == ""
+    assert msg.permanent_error is False

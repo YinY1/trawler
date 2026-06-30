@@ -345,11 +345,12 @@ class MessageStore:
         self._dirty = True
 
     def mark_retry_reset(self, msg_id: str) -> None:
-        """handler 成功后重置 retry_count 和 last_error。"""
+        """handler 成功后重置 retry_count、last_error 和 permanent_error。"""
         if msg_id not in self._messages:
             return
         self._messages[msg_id]["retry_count"] = 0
         self._messages[msg_id]["last_error"] = ""
+        self._messages[msg_id]["permanent_error"] = False
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
@@ -369,6 +370,7 @@ class MessageStore:
                 data["error"] = ""
                 data["retry_count"] = 0
                 data["last_error"] = ""
+                data["permanent_error"] = False
                 data["updated_at"] = time.time()
                 self._dirty = True
 
@@ -406,6 +408,7 @@ class MessageStore:
             data["error"] = ""
             data["retry_count"] = 0
             data["last_error"] = ""
+            data["permanent_error"] = False
             data["updated_at"] = time.time()
             self._dirty = True
             count += 1
