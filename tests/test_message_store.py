@@ -588,3 +588,19 @@ def test_load_tolerates_legacy_dynamic_content_type(tmp_path: Path) -> None:
     assert msg is not None
     # 关键：降级为 TEXT 而不是 crash
     assert msg.content_type == ContentType.TEXT
+
+
+def test_record_has_permanent_error_default() -> None:
+    """MessageRecord 新字段 permanent_error 默认 False（向后兼容）。"""
+    from shared.protocols import MessageRecord
+
+    r = MessageRecord(
+        msg_id="x",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        phase=Phase.DISCOVERED,
+        pubdate=0,
+        title="t",
+        author="a",
+    )
+    assert r.permanent_error is False
