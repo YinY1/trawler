@@ -603,6 +603,34 @@ class TestOpenAIProviderResponseParsing:
         assert "fallback 答案" in result
 
     @pytest.mark.asyncio
+    async def test_provider_whitespace_only_content_falls_back_to_reasoning(self) -> None:
+        """Issue #56: whitespace-only content（'   ' / '\\n'）是 truthy 字符串，
+        仅判 falsy 会漏过最终 silent empty。判 .strip() 让空白 content fallback 到 reasoning_content。"""
+        provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
+        fake_response_json = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "   \n  ",
+                        "reasoning_content": "## 摘要\n空白 content fallback 答案",
+                    }
+                }
+            ]
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = fake_response_json
+
+            result = await provider.generate("test prompt")
+
+        assert "空白 content fallback 答案" in result
+
+    @pytest.mark.asyncio
     async def test_provider_normal_content_unaffected(self) -> None:
         """content 非空时不应触碰 reasoning_content（回归保护）。"""
         provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="gpt-4o-mini")

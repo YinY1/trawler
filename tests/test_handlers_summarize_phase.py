@@ -1,7 +1,7 @@
 """Tests for platforms.bilibili.handlers.summarize_phase — Issue #56 silent empty 观测。
 
 独立文件：避免污染 tests/test_summarizer.py 的 458 行结构，
-summarize_phase 是 cross-platform handler（@register('*', Phase.SUMMARIZED)），
+summarize_phase 是 cross-platform handler（@register('*', Phase.SUMMARIZED)）。
 
 重点验证：解析成功但 summary 为空时，handler 必须打 warning 让运维可见，
 同时仍返回 True（消息继续推进，避免重试爆炸）。
@@ -67,10 +67,13 @@ class TestSummarizePhaseEmptyWarning:
         assert result is True
         # ctx.summary_text 为空字符串
         assert ctx.summary_text == ""
-        # 必须打 warning 让运维可见
-        assert any("AI 摘要解析为空" in r.getMessage() for r in caplog.records), (
+        # 必须打 warning 让运维可见，并验证 raw 长度被打入日志
+        # raw="## 摘要\n\n## 关键词\n" 实际长度为 14（len() 计算结果，非猜测）
+        warnings = [r.getMessage() for r in caplog.records if "AI 摘要解析为空" in r.getMessage()]
+        assert warnings, (
             f"未找到 silent empty warning，实际日志: {[r.getMessage() for r in caplog.records]}"
         )
+        assert "raw 长度=14" in warnings[0], f"warning 缺少 raw 长度: {warnings[0]}"
 
     @pytest.mark.asyncio
     async def test_no_warning_when_summary_non_empty(self, caplog: pytest.LogCaptureFixture) -> None:

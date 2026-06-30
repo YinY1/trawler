@@ -81,7 +81,8 @@ class AnalysisResult:
     source: str = "none"  # provider name | "none" | "empty"
     failed: bool = False  # True 表示 fallback 链全部失败（与 source="empty" 区分）
     # Issue #56: 原始 LLM 响应文本，用于排查 silent empty（解析为空但 HTTP 200 的情况）。
-    # analyze_content 在调用 parse_markdown_analysis 之前赋值；失败/禁用分支保持 ""。
+    # parse_markdown_analysis 解析时填入原始 LLM 响应；analyze_content 失败/禁用分支
+    # 不构造该字段，保持默认空字符串。
     raw: str = ""
 
 
@@ -204,7 +205,10 @@ class OpenAIProvider:
             # 不拼接两者：reasoning_content 通常是思考链，包含大量中间推理，
             # 与最终答案混在一起会破坏解析。
             content = message.get("content") or ""
-            if not content:
+            # Issue #56: whitespace-only content（'   ' / '\n'）是 truthy 字符串，
+            # 仅判 falsy 会漏过，最终 .strip() == "" 再次 silent empty。
+            # 改为判 .strip()，让空白 content 同样 fallback 到 reasoning_content。
+            if not content.strip():
                 reasoning = message.get("reasoning_content") or ""
                 if reasoning:
                     logger.debug(
