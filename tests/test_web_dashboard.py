@@ -122,10 +122,19 @@ class TestDashboard:
         data_dir.mkdir()
         # VIDEO 和 TEXT 各一条
         self._seed_message(
-            data_dir, msg_id="bili:V1", content_type=ContentType.VIDEO, phase=Phase.PUSHED
+            data_dir,
+            msg_id="bili:V1",
+            content_type=ContentType.VIDEO,
+            phase=Phase.PUSHED,
+            title="消息甲",  # 不含 '视频'，确保断言只来自 content_type tag
         )
         self._seed_message(
-            data_dir, msg_id="xhs:N1", platform="xhs", content_type=ContentType.TEXT, phase=Phase.PUSHED
+            data_dir,
+            msg_id="xhs:N1",
+            platform="xhs",
+            content_type=ContentType.TEXT,
+            phase=Phase.PUSHED,
+            title="消息乙",  # 不含 '视频' / '图文'
         )
 
         from shared.config import GeneralConfig
@@ -164,7 +173,7 @@ class TestDashboard:
             phase=Phase.SUMMARIZED,
             error="transcribe 模型超时",
             permanent_error=True,
-            title="永久失败",
+            title="消息甲",  # 不含 '永久' / '可重试'，确保断言只来自 error tag
         )
         self._seed_message(
             data_dir,
@@ -172,7 +181,7 @@ class TestDashboard:
             phase=Phase.SUMMARIZED,
             error="临时网络错误",
             permanent_error=False,
-            title="临时失败",
+            title="消息乙",  # 不含 '永久' / '可重试'
         )
 
         from shared.config import GeneralConfig
