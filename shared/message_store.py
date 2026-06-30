@@ -103,6 +103,7 @@ class MessageStore:
             summary=data.get("summary", ""),
             retry_count=data.get("retry_count", 0),
             last_error=data.get("last_error", ""),
+            permanent_error=data.get("permanent_error", False),
         )
 
     # ── 时间窗口 ─────────────────────────────────────────────
@@ -270,11 +271,22 @@ class MessageStore:
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
-    def mark_error(self, msg_id: str, error: str) -> None:
-        """记录消息的错误信息。"""
+    def mark_error(self, msg_id: str, error: str, *, permanent: bool = False) -> None:
+        """记录消息的错误信息。
+
+        Args:
+            msg_id: 消息 ID
+            error: 错误文本
+            permanent: True 表示永久失败（handler 主动标记或 retry 耗尽），
+                cron 将跳过此消息；False（默认）保持向后兼容。
+                语义与 ``error`` 字段独立：error 文本始终写入，permanent_error
+                仅在 permanent=True 时置位。
+        """
         if msg_id not in self._messages:
             return
         self._messages[msg_id]["error"] = error
+        if permanent:
+            self._messages[msg_id]["permanent_error"] = True
         self._messages[msg_id]["updated_at"] = time.time()
         self._dirty = True
 
