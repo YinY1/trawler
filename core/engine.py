@@ -152,7 +152,7 @@ class PipelineEngine:
             if handler is None:
                 logger.error("No handler for %s / %s — stopping", msg.platform, next_phase)
                 ctx.error = f"missing handler: {msg.platform}/{next_phase.name}"
-                store.mark_error(msg.msg_id, ctx.error)
+                store.mark_error(msg.msg_id, ctx.error, permanent=True)
                 store.save()
                 break
 
@@ -168,7 +168,7 @@ class PipelineEngine:
                 current = store.get_message(msg.msg_id)
                 current_count = current.retry_count if current else 0
                 if ctx.permanent_error:
-                    store.mark_error(msg.msg_id, ctx.error)
+                    store.mark_error(msg.msg_id, ctx.error, permanent=True)
                     logger.warning(
                         "⛔ %s:%s 永久失败（handler 标记 permanent_error）: %s（cron 将跳过）",
                         msg.platform,
@@ -176,7 +176,7 @@ class PipelineEngine:
                         ctx.error,
                     )
                 elif current_count + 1 >= MAX_SUMMARY_RETRIES:
-                    store.mark_error(msg.msg_id, ctx.error)
+                    store.mark_error(msg.msg_id, ctx.error, permanent=True)
                     logger.warning(
                         "⛔ %s:%s 连续失败 %d 次达到上限，标记永久错误（cron 将跳过）",
                         msg.platform,
