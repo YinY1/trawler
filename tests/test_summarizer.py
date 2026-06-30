@@ -773,14 +773,21 @@ class TestOpenAIProviderResponseParsing:
 
 class TestPromptTemplateConstraints:
     """Issue #54: _ANALYSIS_PROMPT_TEMPLATE 必须含字数下限 + 要点数量下限 + 序号格式硬约束，
-    让 LLM 不再过度压缩长视频/长文摘要。"""
+    让 LLM 不再过度压缩长视频/长文摘要。
+
+    注意：本类测试只验证 prompt 文本字面量，不验证 LLM 实际遵守。
+    issue #54 的字数下限验收依赖手动跑 check + trawler.log 对照。
+    """
 
     def test_prompt_contains_word_count_lower_bound(self) -> None:
-        """prompt 模板必须包含「400 字」字数下限约束。"""
+        """prompt 模板必须包含「400 字」字数下限约束。
+
+        断言强化（issue #54 review N4）：原 `assert "字" in TEMPLATE` 是 dead assertion
+        （模板里「字」出现几十次永远 PASS），改成紧邻字面量「400 字」。
+        """
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        assert "400" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须含 400 字下限"
-        assert "字" in _ANALYSIS_PROMPT_TEMPLATE
+        assert "400 字" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须含「400 字」字数下限紧邻字面量"
 
     def test_prompt_contains_word_count_upper_bound(self) -> None:
         """prompt 模板必须包含「1200 字」上限（避免 LLM 输出过长触发 max_tokens 截断）。"""
@@ -818,14 +825,16 @@ class TestPromptTemplateConstraints:
         assert "3. " in summary_block, "## 摘要 段必须含「3. 」序号约束（要求至少 3 条要点）"
 
     def test_prompt_requires_concrete_info_per_point(self) -> None:
-        """prompt 必须要求每条要点含具体信息（数据/案例/时间/论据），不只复述标题。"""
+        """prompt 必须要求每条要点含具体信息（数据/案例/时间/论据），不只复述标题。
+
+        断言强化（issue #54 review B3）：原 `any(... 6 选 1)` 过弱，
+        模板偶然出现一个关键词就 PASS。改成锁两个核心关键词（数据 + 论据）。
+        """
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        # 至少要提到具体信息的某一种
-        assert any(
-            kw in _ANALYSIS_PROMPT_TEMPLATE
-            for kw in ("数据", "案例", "时间", "论据", "人名", "引用")
-        ), "prompt 必须要求每条要点含具体信息"
+        # 锁两个核心关键词（数据 / 论据），不是 any 6 选 1
+        assert "数据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「数据」类具体信息"
+        assert "论据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「论据」类具体信息"
 
     def test_prompt_still_has_four_sections(self) -> None:
         """回归保护：prompt 仍然包含 4 个标准字段标题（解析层依赖）。"""
@@ -850,3 +859,27 @@ class TestPromptTemplateConstraints:
         assert "T" in rendered
         assert "A" in rendered
         assert "正文" in rendered
+
+    def test_prompt_constraints_arithmetically_feasible(self) -> None:
+        """Issue #54 review B3: prompt 字数约束必须算术可达。
+
+        防止再次写出「字数下限 vs 条数下限 × 每条上限」的不可达约束组合：
+        例如旧 prompt「3 条 × 每条 100 字 = 300 字 < 400 字下限」LLM 无法同时满足。
+
+        断言：最少条数 × 每条字数上限 ≥ 字数下限。
+
+        注意：如果 prompt 改了约束数字，同步改本测试的三个常量。
+        （不真的正则解析 prompt —— 过度工程；硬编码常量 + docstring 同步提示足够。）
+        """
+        # 与 _ANALYSIS_PROMPT_TEMPLATE 中「## 摘要」段的约束数字保持一致
+        min_words = 400          # 「字数下限 400 字」
+        min_points = 3           # 「3-8 条要点」的下限
+        max_per_point = 150      # 「每条 30-150 字」的上限
+
+        # 最少条数场景（min_points 条）下，每条都顶到 max_per_point 字，
+        # 总字数必须 ≥ min_words，否则 LLM 永远无法满足下限约束。
+        assert min_points * max_per_point >= min_words, (
+            f"prompt 约束算术不可达：{min_points} 条 × {max_per_point} 字/条 "
+            f"= {min_points * max_per_point} 字 < {min_words} 字下限。"
+            "请调高 max_per_point 或调低 min_words/min_points。"
+        )

@@ -38,7 +38,7 @@ _ANALYSIS_PROMPT_TEMPLATE = """\
 ## 摘要
 （详细总结，覆盖所有重要观点。字数下限 400 字、上限 1200 字。\
 按「1. 」「2. 」「3. 」中文序号列出 3-8 条要点，按重要性排序；\
-每条 30-100 字；每条必须含具体信息（数据、案例、时间、地点、人名、引用、论据），\
+每条 30-150 字；每条必须含具体信息（数据、案例、时间、地点、人名、引用、论据），\
 不要只复述标题。如视频/正文较长且信息密度高，应优先覆盖更多要点而非压缩每条字数。\
 如内容确实不足 400 字（如短动态、短评论），按实际信息量输出但必须穷尽要点。）
 
@@ -182,7 +182,7 @@ class OpenAIProvider:
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
         }
 
         logger.debug("调用 OpenAI 兼容 API (model=%s)...", self.model_name)
