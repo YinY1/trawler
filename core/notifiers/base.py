@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from shared.constants import GIT_SHA
 from shared.protocols import NotificationContent
 
 # 各 platform 的 title emoji 和"作者"标签
@@ -36,6 +37,12 @@ def render_markdown(content: NotificationContent) -> tuple[str, str]:
     style = _PLATFORM_STYLE.get(content.platform, {"emoji": "📣", "author_label": "作者"})
     keywords_str = "；".join(content.keywords) if content.keywords else "无"
     url = _build_url(content)
+
+    # 健康告警（issue #55）：简化模板 + 版本 footer
+    # 决策 5 限定：仅 health_alert 分支追加版本号，content/dynamic 不动
+    if content.type == "health_alert":
+        parts = [content.summary or content.title, "", f"(trawler@{GIT_SHA})"]
+        return content.title, "\n".join(parts)
 
     if content.type == "dynamic":
         # 动态：简短格式，无 keywords/comment

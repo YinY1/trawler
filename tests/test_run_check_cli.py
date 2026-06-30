@@ -152,3 +152,28 @@ def test_check_empty_result_prints_warning(populated_store: MessageStore, tmp_pa
         ])
         assert result.exit_code == 0
         assert "没有匹配的消息" in result.output
+
+
+# ── --version (issue #55) ────────────────────────────────────────
+
+
+def test_cli_version_option_outputs_version_display() -> None:
+    """trawler --version 输出 VERSION_DISPLAY 字符串。"""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--version"])
+    assert result.exit_code == 0
+    # VERSION_DISPLAY 形如 `0.1.0+dev (unknown)` 或 `0.1.0+a1b2c3d (...)`
+    from shared.constants import VERSION_DISPLAY
+
+    assert VERSION_DISPLAY in result.output
+    assert "Trawler" in result.output
+
+
+def test_cli_version_option_short_flag_v() -> None:
+    """-V 短 flag 也应工作（Click version_option 默认 -V/--version）。"""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["-V"])
+    assert result.exit_code == 0
+    from shared.constants import VERSION
+
+    assert VERSION in result.output

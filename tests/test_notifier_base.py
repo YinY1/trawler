@@ -229,3 +229,80 @@ def test_render_output_is_plain_text_no_markdown():
     _, msg = render_markdown(c)
     for token in ("**", "---", "##", "> ", "]("):
         assert token not in msg, f"渲染结果含 markdown 标记: {token!r}"
+
+
+# ═══════════════════════════════════════════════════════════
+# Task — health_alert 分支 + 版本 footer (issue #55)
+# ═══════════════════════════════════════════════════════════
+
+
+def test_render_health_alert_has_version_footer():
+    """health_alert 分支应在 message 末尾追加 (trawler@<GIT_SHA>)。"""
+    from shared.constants import GIT_SHA
+
+    c = NotificationContent(
+        platform="system",
+        source_id="health",
+        title="Trawler 检查失败",
+        author="Trawler",
+        summary="check 命令执行失败: KeyError",
+        type="health_alert",
+    )
+    title, msg = render_markdown(c)
+    # title 保留原样（emoji 由调用方在 content.title 里给）
+    assert title == "Trawler 检查失败"
+    # summary 出现在 message 中
+    assert "check 命令执行失败: KeyError" in msg
+    # 版本 footer 在末尾
+    assert f"(trawler@{GIT_SHA})" in msg
+
+
+def test_render_health_alert_no_keywords_section():
+    """health_alert message 结构验证：summary 在首行，footer 在末尾。
+
+    用结构性断言而非 '关键词' / '详情' 子串否定（health_alert 的 summary
+    可能含任意文本，例如 ``KeyError('关键词')``，子串否定会假阳性）。
+    """
+    from shared.constants import GIT_SHA
+
+    c = NotificationContent(
+        platform="system",
+        source_id="health",
+        title="t",
+        author="a",
+        summary="s",
+        type="health_alert",
+    )
+    _, msg = render_markdown(c)
+    # summary 出现在 message 第一行
+    assert msg.startswith("s")
+    # 版本 footer 在 message 末尾
+    assert msg.endswith(f"(trawler@{GIT_SHA})")
+
+
+def test_render_content_type_does_not_get_version_footer():
+    """content 分支不应含版本 footer（决策 5：内容推送不加版本号）。"""
+    c = NotificationContent(
+        platform="bili",
+        source_id="BV1xx",
+        title="t",
+        author="UP",
+        summary="s",
+        type="content",
+    )
+    _, msg = render_markdown(c)
+    assert "trawler@" not in msg
+
+
+def test_render_dynamic_type_does_not_get_version_footer():
+    """dynamic 分支不应含版本 footer。"""
+    c = NotificationContent(
+        platform="bili",
+        source_id="dyn1",
+        title="t",
+        author="UP",
+        summary="s",
+        type="dynamic",
+    )
+    _, msg = render_markdown(c)
+    assert "trawler@" not in msg
