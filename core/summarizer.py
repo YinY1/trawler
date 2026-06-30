@@ -58,12 +58,14 @@ _ANALYSIS_PROMPT_TEMPLATE = """\
 
 # ── 解析层 ───────────────────────────────────────────────────────
 
-# 字段标题 → 输出 key。AI 偶尔会用 # 单井号或全角 ＃，正则统一兼容。
+# Issue #56 场景 B: 放宽标题格式 —— 允许行尾 [:：] 和加粗 **...**。
+# 常见 LLM 不严格输出：'## 摘要：' / '## 摘要:' / '## **摘要**' / '## **摘要**：'。
+# one_line_summary 同时接受 '## 总结' 同义词（向后兼容旧 prompt 的「## 一句话总结」）。
 _SECTION_PATTERNS: dict[str, re.Pattern[str]] = {
-    "summary": re.compile(r"^#{1,3}\s*摘要\s*$", re.MULTILINE),
-    "one_line_summary": re.compile(r"^#{1,3}\s*一句话总结\s*$", re.MULTILINE),
-    "keywords": re.compile(r"^#{1,3}\s*关键词\s*$", re.MULTILINE),
-    "tags": re.compile(r"^#{1,3}\s*标签\s*$", re.MULTILINE),
+    "summary": re.compile(r"^#{1,3}\s*\**摘要\**\s*[:：]?\s*$", re.MULTILINE),
+    "one_line_summary": re.compile(r"^#{1,3}\s*\**(一句话总结|总结)\**\s*[:：]?\s*$", re.MULTILINE),
+    "keywords": re.compile(r"^#{1,3}\s*\**关键词\**\s*[:：]?\s*$", re.MULTILINE),
+    "tags": re.compile(r"^#{1,3}\s*\**标签\**\s*[:：]?\s*$", re.MULTILINE),
 }
 
 
@@ -78,6 +80,9 @@ class AnalysisResult:
     is_ai: bool = False
     source: str = "none"  # provider name | "none" | "empty"
     failed: bool = False  # True 表示 fallback 链全部失败（与 source="empty" 区分）
+    # Issue #56: 原始 LLM 响应文本，用于排查 silent empty（解析为空但 HTTP 200 的情况）。
+    # analyze_content 在调用 parse_markdown_analysis 之前赋值；失败/禁用分支保持 ""。
+    raw: str = ""
 
 
 def _strip_code_fence(text: str) -> str:
@@ -128,6 +133,7 @@ def parse_markdown_analysis(raw: str) -> AnalysisResult:
     - 自动剥离 ```markdown fence
     - 缺失字段填空值
     - 关键词/标签用混合分隔符拆分
+    - Issue #56: 保留原始 raw 文本到 ``result.raw``，供 handler 在解析为空时观测。
     """
     text = _strip_code_fence(raw)
     return AnalysisResult(
@@ -135,6 +141,7 @@ def parse_markdown_analysis(raw: str) -> AnalysisResult:
         one_line_summary=_extract_section(text, _SECTION_PATTERNS["one_line_summary"]),
         keywords=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["keywords"]))[:5],
         tags=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["tags"]))[:3],
+        raw=raw,
     )
 
 
@@ -190,8 +197,33 @@ class OpenAIProvider:
 
         data = response.json()
         try:
-            return data["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError) as e:
+            message = data["choices"][0]["message"]
+            # Issue #56 场景 A: reasoning 模型（如 deepseek-v4-flash）通过 exusiai 网关时，
+            # 长文本场景 content="" / content=null，答案错放到 reasoning_content 字段。
+            # content 非空时优先用 content（保持原有行为），content 为空时 fallback 到 reasoning_content。
+            # 不拼接两者：reasoning_content 通常是思考链，包含大量中间推理，
+            # 与最终答案混在一起会破坏解析。
+            content = message.get("content") or ""
+            if not content:
+                reasoning = message.get("reasoning_content") or ""
+                if reasoning:
+                    logger.debug(
+                        "OpenAI content 为空，fallback 到 reasoning_content (model=%s, len=%d)",
+                        self.model_name,
+                        len(reasoning),
+                    )
+                    content = reasoning
+            # Issue #56: 记录 raw response 截断（%.500s 是 printf-style 截断到 500 字符，
+            # logging 标准用法，避免 % 字段顺序问题）。仅 INFO 看不到，运维设置
+            # LOG_LEVEL=DEBUG 时可见。
+            logger.debug(
+                "LLM raw response (model=%s, content_len=%d): %.500s",
+                self.model_name,
+                len(content),
+                content,
+            )
+            return content.strip()
+        except (KeyError, IndexError, AttributeError, TypeError) as e:
             raise RuntimeError(f"解析 API 响应失败: {e}")
 
 

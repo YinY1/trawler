@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -141,11 +141,7 @@ class TestFallbackChainProvider:
                 await chain.generate("ping")
         # 每个 provider 的失败都要被记录。断言用 r.getMessage()（issue N7），
         # 因为 r.message 是格式化前的模板字符串。
-        fail_logs = [
-            r
-            for r in caplog.records
-            if "provider #" in r.getMessage() or "provider 失败" in r.getMessage()
-        ]
+        fail_logs = [r for r in caplog.records if "provider #" in r.getMessage() or "provider 失败" in r.getMessage()]
         assert len(fail_logs) >= 3
 
     def test_empty_chain_raises_value_error(self) -> None:
@@ -185,6 +181,12 @@ class TestDataModelDefaults:
     def test_analysis_result_has_failed_default_false(self) -> None:
         r = AnalysisResult()
         assert r.failed is False
+
+    def test_analysis_result_has_raw_default_empty_string(self) -> None:
+        """Issue #56: AnalysisResult.raw 记录原始 LLM 响应，便于排查 silent empty。"""
+        r = AnalysisResult()
+        assert r.raw == ""
+        assert isinstance(r.raw, str)
 
     def test_phase_context_has_permanent_error_default_false(self) -> None:
         """Issue 6: PhaseContext.permanent_error 默认 False（保持现有 retry 行为）。"""
@@ -279,6 +281,69 @@ A"""
         result = parse_markdown_analysis(raw)
         assert "**粗体**" in result.summary  # 原样保留，渲染时 plain 端只是显示字面量
 
+    def test_parse_summary_with_colon_suffix(self) -> None:
+        """Issue #56 场景 B: LLM 输出 '## 摘要：'（全角冒号）应能解析。"""
+        raw = """## 摘要：
+这是带冒号的摘要内容
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "带冒号的摘要内容" in result.summary
+
+    def test_parse_summary_with_half_width_colon(self) -> None:
+        """Issue #56: LLM 输出 '## 摘要:'（半角冒号）应能解析。"""
+        raw = """## 摘要:
+半角冒号也行
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "半角冒号也行" in result.summary
+
+    def test_parse_summary_with_bold_title(self) -> None:
+        """Issue #56: LLM 输出 '## **摘要**'（加粗标题）应能解析。"""
+        raw = """## **摘要**
+这是加粗标题下的内容
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "加粗标题下的内容" in result.summary
+
+    def test_parse_summary_with_bold_title_and_colon(self) -> None:
+        """Issue #56: 加粗 + 冒号组合 '## **摘要**：' 应能解析。"""
+        raw = """## **摘要**：
+组合变体内容
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "组合变体内容" in result.summary
+
+    def test_parse_one_line_summary_accepts_summary_synonym(self) -> None:
+        """Issue #56: LLM 输出 '## 总结' 应作为 one_line_summary 解析（同义词兼容）。"""
+        raw = """## 摘要
+摘要正文
+
+## 总结
+这是同义词的一句话总结
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "同义词的一句话总结" in result.one_line_summary
+
+    def test_parse_result_has_raw_field_populated(self) -> None:
+        """Issue #56: parse_markdown_analysis 应把原始输入赋给 result.raw。"""
+        raw = """## 摘要
+内容
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert result.raw == raw
+
 
 class TestAnalyzeContent:
     """Tests for analyze_content — AI orchestration + failure semantics."""
@@ -368,9 +433,7 @@ A；B
         assert result.is_ai is False
 
     @pytest.mark.asyncio
-    async def test_analyze_content_all_providers_fail_sets_failed_true(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_analyze_content_all_providers_fail_sets_failed_true(self, caplog: pytest.LogCaptureFixture) -> None:
         """fallback 链全失败时 result.failed=True（不是空 result）。"""
         config = Config()
         config.analysis.enabled = True
@@ -403,9 +466,7 @@ A；B
         config = Config()
         config.analysis.enabled = True
 
-        result = await analyze_content(
-            source_id="x", title="t", author="a", text="   ", config=config
-        )
+        result = await analyze_content(source_id="x", title="t", author="a", text="   ", config=config)
         assert result.failed is False
         assert result.source == "empty"
 
@@ -414,11 +475,35 @@ A；B
         config = Config()
         config.analysis.enabled = False
 
-        result = await analyze_content(
-            source_id="x", title="t", author="a", text="txt", config=config
-        )
+        result = await analyze_content(source_id="x", title="t", author="a", text="txt", config=config)
         assert result.failed is False
         assert result.source == "none"
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_populates_raw_field(self) -> None:
+        """Issue #56: analyze_content 成功路径应填充 result.raw 供 handler 观测。"""
+        config = Config()
+        config.analysis.enabled = True
+        config.analysis.provider = "openai"
+        config.analysis.api_base = "https://example.com/v1"
+        config.analysis.api_key = "k"
+
+        ai_output = "## 摘要\n这是 raw 字段测试\n\n## 一句话总结\nok"
+
+        with patch("core.summarizer.create_provider") as mock_cp:
+            provider = mock_cp.return_value
+            provider.generate = AsyncMock(return_value=ai_output)
+
+            result = await analyze_content(
+                source_id="bili:BV1",
+                title="T",
+                author="A",
+                text="正文",
+                config=config,
+            )
+
+        assert result.raw == ai_output
+        assert "raw 字段测试" in result.raw
 
 
 class TestLegacyWrappersReturnEmptyOnFailure:
@@ -456,3 +541,134 @@ class TestLegacyWrappersReturnEmptyOnFailure:
             mock_cp.return_value.generate = AsyncMock(side_effect=RuntimeError("fail"))
             kws = await extract_keywords(text="正文", title="t", author="a", config=config)
         assert kws == []
+
+
+class TestOpenAIProviderResponseParsing:
+    """Issue #56 场景 A: reasoning 模型把答案放到 reasoning_content，
+    content="" 时 provider 应 fallback 到 reasoning_content。"""
+
+    @pytest.mark.asyncio
+    async def test_provider_fallback_to_reasoning_content(self) -> None:
+        """content='' 时 fallback 到 reasoning_content，不丢失摘要。"""
+        provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
+        fake_response_json = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "## 摘要\n这是 reasoning 里的答案\n\n## 一句话总结\n一句话",
+                    }
+                }
+            ]
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = fake_response_json
+
+            result = await provider.generate("test prompt")
+
+        assert "reasoning 里的答案" in result
+        assert result.startswith("## 摘要")
+
+    @pytest.mark.asyncio
+    async def test_provider_handles_none_content(self) -> None:
+        """content=null 不应抛 AttributeError，应 fallback 到 reasoning_content 或返回空串。"""
+        provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
+        fake_response_json = {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "reasoning_content": "## 摘要\nfallback 答案",
+                    }
+                }
+            ]
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = fake_response_json
+
+            result = await provider.generate("test prompt")
+
+        assert "fallback 答案" in result
+
+    @pytest.mark.asyncio
+    async def test_provider_normal_content_unaffected(self) -> None:
+        """content 非空时不应触碰 reasoning_content（回归保护）。"""
+        provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="gpt-4o-mini")
+        fake_response_json = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "## 摘要\n正常 content",
+                        "reasoning_content": "## 摘要\n这是 reasoning 不应被使用",
+                    }
+                }
+            ]
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = fake_response_json
+
+            result = await provider.generate("test prompt")
+
+        assert "正常 content" in result
+        assert "不应被使用" not in result
+
+    @pytest.mark.asyncio
+    async def test_provider_empty_content_and_no_reasoning_returns_empty(self) -> None:
+        """content='' 且无 reasoning_content 时返回空串（让上层解析层负责 silent empty 观测）。"""
+        provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
+        fake_response_json = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                    }
+                }
+            ]
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = fake_response_json
+
+            result = await provider.generate("test prompt")
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_provider_missing_choices_field_raises_runtime_error(self) -> None:
+        """choices 字段缺失时抛 RuntimeError（与 KeyError/IndexError/AttributeError/TypeError 统一处理）。"""
+        provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="gpt-4o-mini")
+        fake_response_json = {"error": "internal"}
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = fake_response_json
+
+            with pytest.raises(RuntimeError, match="解析 API 响应失败"):
+                await provider.generate("test prompt")
