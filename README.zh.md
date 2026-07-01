@@ -64,7 +64,6 @@ enabled = true
 
 [bilibili.monitor]
 mode = "rss"
-interval_minutes = 3
 watch_dynamic = true
 
 [xiaohongshu]
@@ -89,6 +88,16 @@ trawler check --platform xhs
 
 # 查看 Token 状态
 trawler token status
+```
+
+### 调度
+
+Trawler 没有内置调度器，检查由外部 cron 通过
+[`cron_run.sh`](cron_run.sh) 驱动。例如：
+
+```bash
+# 每 3 分钟执行一次检查
+*/3 * * * * /path/to/trawler/cron_run.sh >> /path/to/trawler/cron.log 2>&1
 ```
 
 ## 架构
