@@ -310,10 +310,6 @@ class XhsAuthenticator(BaseAuthenticator):
         except Exception as e:
             logger.warning("XHS get_self_info 拿 nickname 失败: %s", e)
 
-        # TEMP DEBUG DUMP: cookie 字符串 + 拿到的 nickname 落盘
-        if DUMP_ENABLED:
-            dump_response("xhs_get_tokens", {"cookie": full_cookie_str, "nickname": nickname})
-
         cookie_dict = parse_cookie_str(full_cookie_str)
         return PlatformTokens(
             platform="xhs",

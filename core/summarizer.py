@@ -252,16 +252,33 @@ class FallbackChainProvider:
     - 空 providers 列表在构造时抛 ``ValueError``。
     """
 
-    def __init__(self, providers: list[LLMProvider]) -> None:
+    def __init__(
+        self,
+        providers: list[LLMProvider],
+        provider_names: list[str] | None = None,
+    ) -> None:
         if not providers:
             raise ValueError("providers 列表不能为空")
         self._providers = providers
+        # 与 providers 一一对应的可读标识（用于 result.source 反映命中节）。
+        # 缺省时用 fallback#{idx}（idx>1）/ "primary"（idx==1）。
+        if provider_names is None:
+            self._provider_names = [
+                "primary" if idx == 1 else f"fallback#{idx}"
+                for idx in range(1, len(providers) + 1)
+            ]
+        else:
+            self._provider_names = provider_names
+        # Issue #61: 记录最后一次 generate 成功命中的 provider 标识（可观测性）。
+        # analyze_content 读取它把 result.source 标成真实命中节而非主 provider。
+        self.last_provider_name: str | None = None
 
     async def generate(self, prompt: str) -> str:
         errors: list[str] = []
         for idx, provider in enumerate(self._providers, start=1):
             try:
                 result = await provider.generate(prompt)
+                self.last_provider_name = self._provider_names[idx - 1]
                 if idx > 1:
                     logger.info("✓ fallback 到第 %d 个 provider 成功", idx)
                 return result
@@ -315,7 +332,10 @@ def create_provider(config: AnalysisConfig) -> LLMProvider:
     if not chain:
         raise ValueError("AI 分析未启用或未配置 provider")
     providers = [_build_single_provider(p) for p in chain]
-    return FallbackChainProvider(providers=providers)
+    # Issue #61: 用 LLMProviderConfig.name 或 provider 字段作为可读标识，
+    # 让 result.source 反映真实命中节（如 "openai" / "ollama" / 自定义 name）。
+    provider_names = [p.name or p.provider for p in chain]
+    return FallbackChainProvider(providers=providers, provider_names=provider_names)
 
 
 async def analyze_content(
@@ -351,7 +371,12 @@ async def analyze_content(
         raw = await provider.generate(prompt)
         result = parse_markdown_analysis(raw)
         result.is_ai = True
-        result.source = config.analysis.provider
+        # Issue #61: fallback 链命中时,反映实际命中的 provider(可观测性),
+        # 而非无脑写主 provider 名。
+        if isinstance(provider, FallbackChainProvider) and provider.last_provider_name:
+            result.source = provider.last_provider_name
+        else:
+            result.source = config.analysis.provider
         logger.info("AI 内容分析成功: %s", source_id)
         return result
     except Exception as e:
