@@ -74,6 +74,24 @@ class RetryableError(TrawlerError):
     """可重试的临时错误（HTTP 403/429/5xx、网络抖动的基类）"""
 
 
+# ── Session 失效检测辅助函数 ──────────────────────────────────────
+
+
+def is_session_expired_error(exc: BaseException) -> bool:
+    """检测异常是否为 XHS -100 session 失效错误。
+
+    XHS 服务端使 session 失效时，底层 xhs 库会抛出 DataFetchError，
+    响应数据形如 ``{"code": -100, "msg": "登录已过期"}``。该异常被
+    ``_wrap_xhs_call`` 转译为 ``DataError`` 后，错误信息中仍保留
+    原始 code 与 msg。
+
+    本函数检查异常类型的字符串表示是否包含特征码 "-100" 或关键词，
+    供 monitor 与 scheduler 判断是否需要写回 ``expires_at=0``。
+    """
+    msg = str(exc)
+    return "-100" in msg or "登录已过期" in msg or "登录失效" in msg
+
+
 # ═══════════════════════════════════════════════════════════
 # 异步重试装饰器
 # ═══════════════════════════════════════════════════════════

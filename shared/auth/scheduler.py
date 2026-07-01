@@ -8,6 +8,7 @@ from typing import Any
 
 from shared.auth.base import BaseAuthenticator, PlatformTokens
 from shared.config import Config, RenewalConfig
+from shared.exceptions import is_session_expired_error
 from shared.protocols import RenewalResult
 
 
@@ -126,6 +127,12 @@ async def check_and_renew_tokens(
         return RenewalResult(platform, "renewed", f"{platform}: token 续期成功")
     except Exception as e:
         logger.warning("%s token 续期失败: %s", platform, e)
+        # XHS -100：服务端明确使 session 失效 → 写回 expires_at=0 同步 Web UI
+        if is_session_expired_error(e):
+            await _mark_platform_expired(platform, config, config_path)
+            logger.warning(
+                "%s 续期失败 (服务端已失效)，已置 expires_at=0", platform
+            )
         return RenewalResult(platform, "expired", f"{platform}: token 续期失败 ({e})")
 
 
@@ -210,6 +217,32 @@ def _get_last_refresh_at(platform: str, config: Config) -> float:
     if platform == "bilibili":
         return config.bilibili.auth.last_refresh_at
     return 0.0
+
+
+async def _mark_platform_expired(platform: str, config: Config, config_path: str) -> None:
+    """将平台 ``expires_at`` 置 0 并写回 cookies.toml。
+
+    更新内存与磁盘双侧状态，确保 Web UI 立刻显示"已失效"。
+    写盘失败仅 warn，不阻塞主流程。
+    """
+    _update_config_memory_expired(platform, config)
+
+    try:
+        from shared.auth import update_auth_section
+
+        await update_auth_section(platform, {"expires_at": 0.0}, config_path=config_path)
+    except Exception as exc:
+        logger.warning("写回 %s expires_at=0 失败: %s", platform, exc)
+
+
+def _update_config_memory_expired(platform: str, config: Config) -> None:
+    """Update in-memory config to mark the platform token as expired (expires_at=0)."""
+    if platform == "bilibili":
+        config.bilibili.auth.expires_at = 0.0
+    elif platform == "weibo":
+        config.weibo.auth.expires_at = 0.0
+    elif platform == "xhs":
+        config.xiaohongshu.auth.expires_at = 0.0
 
 
 async def _update_last_refresh_at(platform: str, config: Config, timestamp: float, config_path: str) -> None:

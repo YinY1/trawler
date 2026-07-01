@@ -47,17 +47,37 @@ def _get_auth_status(config: Config, platform_key: str) -> tuple[str, str, bool]
 
     Returns (status_text, expires_text, has_auth) where has_auth indicates
     whether any auth section is present (controls logout button visibility).
+
+    当 ``expires_at == 0`` 但仍存在 cookie / sessdata 时，判定为
+    "已失效(服务端拒绝,需重新登录)"——区分于从未配置过的"未配置"状态。
     """
     section, _ = CONFIG_AUTH_KEYS[platform_key]
     auth = getattr(config, section).auth
     has_auth = auth.expires_at > 0
     if auth.expires_at <= 0:
+        # 区分"从未登录"与"登录过但服务端已失效"
+        if _has_stale_credentials(platform_key, auth):
+            return "已失效(服务端拒绝,需重新登录)", "", True
         return "未配置", "", has_auth
     elif auth.expires_at < time.time():
         return "已过期", time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)), has_auth
     else:
         remaining = int((auth.expires_at - time.time()) // 86400)
         return f"有效 (剩余 {remaining} 天)", time.strftime("%Y-%m-%d %H:%M", time.localtime(auth.expires_at)), has_auth
+
+
+def _has_stale_credentials(platform_key: str, auth: Any) -> bool:
+    """Check if the auth section has non-empty credential fields despite expires_at==0.
+
+    This distinguishes "never logged in" from "logged in but server-rejected".
+    Uses ``isinstance(val, str)`` to be robust against MagicMock in tests.
+    """
+    if platform_key == "bili":
+        val = getattr(auth, "sessdata", "")
+    else:
+        # xhs / weibo both use .cookie
+        val = getattr(auth, "cookie", "")
+    return isinstance(val, str) and bool(val)
 
 
 # Nickname 缓存：避免每次访问 /auth 都 probe 3 个平台 API

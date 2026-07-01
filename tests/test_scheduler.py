@@ -1,14 +1,16 @@
-"""Tests for shared.auth.scheduler — should_renew decision logic."""
+"""Tests for shared.auth.scheduler — should_renew decision logic + check_and_renew writeback."""
 
 from __future__ import annotations
 
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from shared.auth.base import PlatformTokens
-from shared.auth.scheduler import RenewalDecision, should_renew
-from shared.config import RenewalConfig
+from shared.auth.scheduler import RenewalDecision, check_and_renew_tokens, should_renew
+from shared.config import Config, RenewalConfig
+from shared.exceptions import DataError
 
 # ── Helpers ─────────────────────────────────────────────────────
 
@@ -101,3 +103,114 @@ class TestDifferentPlatforms:
         tokens = _make_tokens(platform=platform, expires_offset=6 * 86400)
         decision = should_renew(tokens, default_config)
         assert decision == RenewalDecision(True, "force_soon")
+
+
+class TestCheckAndRenewSessionExpired:
+    """check_and_renew_tokens: session-expired (-100) 时写回 expires_at=0。"""
+
+    async def test_xhs_minus_100_writes_back_expires_zero(self) -> None:
+        """XHS 服务端返回 -100 → expires_at=0 + 写回 cookies.toml。"""
+        config = Config()
+        config.xiaohongshu.auth.cookie = "fake=1"
+        config.xiaohongshu.auth.expires_at = time.time() + 86400 * 6
+
+        mock_auth = MagicMock()
+        mock_auth.refresh_tokens = AsyncMock(
+            side_effect=DataError("XHS data fetch error: {'code': -100, 'msg': '登录已过期'}")
+        )
+        mock_auth.close = AsyncMock()
+
+        with (
+            patch(
+                "shared.auth.scheduler._get_authenticator_for_platform",
+                return_value=mock_auth,
+            ),
+            patch(
+                "shared.auth.scheduler._build_tokens_from_config",
+                return_value=_make_tokens("xhs", expires_offset=86400 * 6),
+            ),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            result = await check_and_renew_tokens(
+                "xhs", config, config_path="config/config.toml"
+            )
+
+        assert result.action == "expired"
+        assert config.xiaohongshu.auth.expires_at == 0.0
+        mock_update.assert_awaited_once_with(
+            "xhs",
+            {"expires_at": 0.0},
+            config_path="config/config.toml",
+        )
+
+    async def test_generic_error_no_writeback(self) -> None:
+        """非 -100 错误不写回 expires_at=0。"""
+        config = Config()
+        config.xiaohongshu.auth.cookie = "fake=1"
+        config.xiaohongshu.auth.expires_at = time.time() + 86400 * 6
+
+        mock_auth = MagicMock()
+        mock_auth.refresh_tokens = AsyncMock(
+            side_effect=RuntimeError("some random failure")
+        )
+        mock_auth.close = AsyncMock()
+
+        with (
+            patch(
+                "shared.auth.scheduler._get_authenticator_for_platform",
+                return_value=mock_auth,
+            ),
+            patch(
+                "shared.auth.scheduler._build_tokens_from_config",
+                return_value=_make_tokens("xhs", expires_offset=86400 * 6),
+            ),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            result = await check_and_renew_tokens(
+                "xhs", config, config_path="config/config.toml"
+            )
+
+        assert result.action == "expired"
+        # expires_at 未被修改（仍约 6 天后）
+        assert config.xiaohongshu.auth.expires_at > time.time() + 86400 * 5
+        mock_update.assert_not_awaited()
+
+    async def test_bilibili_minus_100_writes_back_expires_zero(self) -> None:
+        """bilibili 平台若抛 -100 DataError（罕见），也应写回 expires_at=0。"""
+        config = Config()
+        config.bilibili.auth.sessdata = "fake"
+        config.bilibili.auth.expires_at = time.time() + 86400 * 6
+
+        mock_auth = MagicMock()
+        mock_auth.refresh_tokens = AsyncMock(
+            side_effect=DataError("XHS data fetch error: {'code': -100, 'msg': '登录已过期'}")
+        )
+        mock_auth.close = AsyncMock()
+
+        with (
+            patch(
+                "shared.auth.scheduler._get_authenticator_for_platform",
+                return_value=mock_auth,
+            ),
+            patch(
+                "shared.auth.scheduler._build_tokens_from_config",
+                return_value=_make_tokens("bilibili", expires_offset=86400 * 6),
+            ),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            result = await check_and_renew_tokens(
+                "bilibili", config, config_path="config/config.toml"
+            )
+
+        assert result.action == "expired"
+        assert config.bilibili.auth.expires_at == 0.0
+        mock_update.assert_awaited_once()
