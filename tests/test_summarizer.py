@@ -673,6 +673,40 @@ A；B
         assert result.is_ai is True
         assert result.source == "openai"
 
+    @pytest.mark.asyncio
+    async def test_analyze_content_single_provider_source_reflects_real_name_via_real_create_provider(
+        self,
+    ) -> None:
+        """端到端: 不 mock create_provider, 验证单 provider 配置下 result.source 是真实 provider 名。
+
+        锁住关键不变量: create_provider 总是传显式 provider_names, 所以单 provider 场景下
+        result.source == "openai" (而非缺省的 "primary")。
+        若未来有人误改 create_provider 删掉 provider_names 参数, 此测试会失败。
+        """
+        config = Config()
+        config.analysis.enabled = True
+        config.analysis.provider = "openai"
+        config.analysis.api_base = "https://example.com/v1"
+        config.analysis.api_key = "test-key"
+
+        ai_output = "## 摘要\n这是真实链路测试\n\n## 一句话总结\nok"
+
+        # 不 mock create_provider，让真实的 FallbackChainProvider（单 provider）跑；
+        # 只 mock 底层 LLM 调用（OpenAIProvider.generate 实例方法），避免真实 HTTP。
+        with patch.object(OpenAIProvider, "generate", AsyncMock(return_value=ai_output)):
+            result = await analyze_content(
+                source_id="test-src",
+                title="t",
+                author="a",
+                text="some text",
+                config=config,
+            )
+
+        assert result.source == "openai"
+        assert result.source != "primary"
+        assert result.source != "none"
+        assert result.is_ai is True
+
 
 class TestLegacyWrappersReturnEmptyOnFailure:
     """generate_summary and extract_keywords must keep their old signatures
