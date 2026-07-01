@@ -329,6 +329,51 @@ class TestEnvOverrides:
         assert cfg.xiaohongshu.auth.cookie == "env-cookie"
         assert cfg.analysis.api_key == "env-key"
 
+    async def test_trawler_bili_jct(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_BILI_JCT", "override-jct")
+        cfg = await load_config(p)
+        assert cfg.bilibili.auth.bili_jct == "override-jct"
+
+    async def test_trawler_bili_buvid3(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_BILI_BUVID3", "override-buvid")
+        cfg = await load_config(p)
+        assert cfg.bilibili.auth.buvid3 == "override-buvid"
+
+    async def test_trawler_bili_dedeuserid(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_BILI_DEDEUSERID", "override-dede")
+        cfg = await load_config(p)
+        assert cfg.bilibili.auth.dedeuserid == "override-dede"
+
+    async def test_trawler_llm_model(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_LLM_MODEL", "gpt-4o")
+        cfg = await load_config(p)
+        assert cfg.analysis.model_name == "gpt-4o"
+
+    async def test_trawler_llm_provider(self, tmp_path, monkeypatch):
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_LLM_PROVIDER", "ollama")
+        cfg = await load_config(p)
+        assert cfg.analysis.provider == "ollama"
+
+    async def test_env_overrides_cover_bili_credentials_and_llm_provider(self, tmp_path, monkeypatch):
+        """B 站三件套 + LLM model/provider 可用 env 覆盖 (#66)。"""
+        p = _write_full_config(tmp_path)
+        monkeypatch.setenv("TRAWLER_BILI_JCT", "test_jct")
+        monkeypatch.setenv("TRAWLER_BILI_BUVID3", "test_buvid")
+        monkeypatch.setenv("TRAWLER_BILI_DEDEUSERID", "test_dede")
+        monkeypatch.setenv("TRAWLER_LLM_MODEL", "gpt-4o")
+        monkeypatch.setenv("TRAWLER_LLM_PROVIDER", "openai")
+        cfg = await load_config(p)
+        assert cfg.bilibili.auth.bili_jct == "test_jct"
+        assert cfg.bilibili.auth.buvid3 == "test_buvid"
+        assert cfg.bilibili.auth.dedeuserid == "test_dede"
+        assert cfg.analysis.model_name == "gpt-4o"
+        assert cfg.analysis.provider == "openai"
+
 
 # ── 6. Dataclass defaults verification ────────────────────────
 

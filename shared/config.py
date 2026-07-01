@@ -376,11 +376,21 @@ def _apply_env_overrides(cfg: Config) -> None:
         cfg.bilibili.auth.sessdata = v
     if v := os.environ.get("TRAWLER_BILI_REFRESH_TOKEN"):
         cfg.bilibili.auth.refresh_token = v
+    if v := os.environ.get("TRAWLER_BILI_JCT"):
+        cfg.bilibili.auth.bili_jct = v
+    if v := os.environ.get("TRAWLER_BILI_BUVID3"):
+        cfg.bilibili.auth.buvid3 = v
+    if v := os.environ.get("TRAWLER_BILI_DEDEUSERID"):
+        cfg.bilibili.auth.dedeuserid = v
     # AI
     if v := os.environ.get("TRAWLER_LLM_API_KEY"):
         cfg.analysis.api_key = v
     if v := os.environ.get("TRAWLER_LLM_API_BASE"):
         cfg.analysis.api_base = v
+    if v := os.environ.get("TRAWLER_LLM_MODEL"):
+        cfg.analysis.model_name = v
+    if v := os.environ.get("TRAWLER_LLM_PROVIDER"):
+        cfg.analysis.provider = v
 
 
 async def load_config(path: str | Path = "config/config.toml") -> Config:
