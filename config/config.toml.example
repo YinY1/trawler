@@ -85,8 +85,6 @@ model_name = ""
 [bilibili.monitor]
 # 监控模式：rss（通过 RSSHub）或 dynamic（通过动态 API）
 mode = "rss"
-# 检查间隔（分钟）
-interval_minutes = 3
 # 是否同时监控动态（图文/短视频）
 watch_dynamic = true
 # 单次检查最多拉取的视频数
@@ -112,8 +110,6 @@ enabled = false
 [xiaohongshu.monitor]
 # 监控模式：api / rss
 mode = "api"
-# 检查间隔（分钟）
-interval_minutes = 10
 
 # ══════════════════════════════════════════════════════════════════
 # 微博（Weibo）配置
@@ -129,8 +125,6 @@ enabled = false
 [weibo.monitor]
 # 监控模式：api / rss
 mode = "api"
-# 检查间隔（分钟）
-interval_minutes = 10
 
 # ── Gotify 推送端点 ─────────────────────────────────────────────
 # 端点全局定义，订阅中通过 notify_endpoints = ["name"] 引用

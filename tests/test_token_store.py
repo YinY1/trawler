@@ -22,7 +22,6 @@ SAMPLE_TOML = textwrap.dedent("""\
 
     [bilibili.monitor]
     mode = "rss"
-    interval_minutes = 3
 
     [xiaohongshu.auth]
     cookie = "old_xhs_cookie"

@@ -87,7 +87,6 @@ class TranscribeConfig:
 @dataclass
 class BilibiliMonitorConfig:
     mode: str = "rss"
-    interval_minutes: int = 3
     watch_dynamic: bool = True
     max_videos_per_check: int = 10
     rsshub_instances: list[str] = field(
@@ -102,13 +101,11 @@ class BilibiliMonitorConfig:
 @dataclass
 class XhsMonitorConfig:
     mode: str = "api"
-    interval_minutes: int = 10
 
 
 @dataclass
 class WeiboMonitorConfig:
     mode: str = "api"
-    interval_minutes: int = 10
 
 
 # ── AI 分析配置 ───────────────────────────────────────────────

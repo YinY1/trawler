@@ -64,7 +64,6 @@ enabled = true
 
 [bilibili.monitor]
 mode = "rss"
-interval_minutes = 3
 watch_dynamic = true
 
 [xiaohongshu]
@@ -89,6 +88,16 @@ trawler check --platform xhs
 
 # Check token status
 trawler token status
+```
+
+### Scheduling
+
+Trawler has no built-in scheduler — checks are driven by an external cron via
+[`cron_run.sh`](cron_run.sh). For example:
+
+```bash
+# Run a check every 3 minutes
+*/3 * * * * /path/to/trawler/cron_run.sh >> /path/to/trawler/cron.log 2>&1
 ```
 
 ## Architecture

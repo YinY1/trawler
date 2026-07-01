@@ -60,7 +60,6 @@ model_name = "gpt-4"
 
 [bilibili.monitor]
 mode = "api"
-interval_minutes = 5
 watch_dynamic = false
 max_videos_per_check = 20
 rsshub_instances = ["https://custom.rsshub.local"]
@@ -70,14 +69,12 @@ enabled = true
 
 [xiaohongshu.monitor]
 mode = "rss"
-interval_minutes = 15
 
 [weibo]
 enabled = true
 
 [weibo.monitor]
 mode = "api"
-interval_minutes = 8
 """
 
 COOKIES_TOML = """
@@ -227,7 +224,6 @@ class TestFullToml:
         p = _write_full_config(tmp_path)
         cfg = await load_config(p)
         assert cfg.bilibili.monitor.mode == "api"
-        assert cfg.bilibili.monitor.interval_minutes == 5
         assert cfg.bilibili.monitor.watch_dynamic is False
         assert cfg.bilibili.monitor.max_videos_per_check == 20
         assert cfg.bilibili.monitor.rsshub_instances == ["https://custom.rsshub.local"]
@@ -246,7 +242,6 @@ class TestFullToml:
         assert cfg.xiaohongshu.auth.cookie == "xhs_cookie_val"
         assert cfg.xiaohongshu.auth.expires_at == 1735689600.0
         assert cfg.xiaohongshu.monitor.mode == "rss"
-        assert cfg.xiaohongshu.monitor.interval_minutes == 15
         assert len(cfg.xiaohongshu.subscriptions) == 1
         assert cfg.xiaohongshu.subscriptions[0] == UserSubscription(user_id="xhs_user1", name="博主A")
 
@@ -257,7 +252,6 @@ class TestFullToml:
         assert cfg.weibo.auth.cookie == "weibo_cookie_val"
         assert cfg.weibo.auth.expires_at == 1735689600.0
         assert cfg.weibo.monitor.mode == "api"
-        assert cfg.weibo.monitor.interval_minutes == 8
         assert len(cfg.weibo.subscriptions) == 1
         assert cfg.weibo.subscriptions[0] == UserSubscription(user_id="weibo_user1", name="博主B")
 
@@ -386,7 +380,6 @@ class TestDataclassDefaults:
     def test_bilibili_monitor_config_defaults(self):
         m = BilibiliMonitorConfig()
         assert m.mode == "rss"
-        assert m.interval_minutes == 3
         assert m.watch_dynamic is True
         assert m.max_videos_per_check == 10
         assert m.rsshub_instances == [
@@ -398,12 +391,10 @@ class TestDataclassDefaults:
     def test_xhs_monitor_config_defaults(self):
         m = XhsMonitorConfig()
         assert m.mode == "api"
-        assert m.interval_minutes == 10
 
     def test_weibo_monitor_config_defaults(self):
         m = WeiboMonitorConfig()
         assert m.mode == "api"
-        assert m.interval_minutes == 10
 
     def test_analysis_config_defaults(self):
         a = AnalysisConfig()
