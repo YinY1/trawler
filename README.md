@@ -209,7 +209,12 @@ Config
 |---|---|
 | `TRAWLER_BILI_SESSDATA` | Bilibili session cookie |
 | `TRAWLER_BILI_REFRESH_TOKEN` | Bilibili refresh token |
+| `TRAWLER_BILI_JCT` | Bilibili CSRF token (bili_jct) |
+| `TRAWLER_BILI_BUVID3` | Bilibili device id (buvid3) |
+| `TRAWLER_BILI_DEDEUSERID` | Bilibili user id (DedeUserID) |
 | `TRAWLER_XHS_COOKIE` | Xiaohongshu cookie |
 | `TRAWLER_WEIBO_COOKIE` | Weibo cookie |
 | `TRAWLER_LLM_API_KEY` | LLM API key |
 | `TRAWLER_LLM_API_BASE` | LLM API base URL |
+| `TRAWLER_LLM_MODEL` | LLM model name |
+| `TRAWLER_LLM_PROVIDER` | LLM provider (openai / ollama) |

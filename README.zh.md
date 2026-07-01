@@ -209,7 +209,12 @@ Config
 |---|---|
 | `TRAWLER_BILI_SESSDATA` | B站登录态 |
 | `TRAWLER_BILI_REFRESH_TOKEN` | B站续期 Token |
+| `TRAWLER_BILI_JCT` | B站 CSRF Token (bili_jct) |
+| `TRAWLER_BILI_BUVID3` | B站设备标识 (buvid3) |
+| `TRAWLER_BILI_DEDEUSERID` | B站用户 ID (DedeUserID) |
 | `TRAWLER_XHS_COOKIE` | 小红书 Cookie |
 | `TRAWLER_WEIBO_COOKIE` | 微博 Cookie |
 | `TRAWLER_LLM_API_KEY` | LLM API 密钥 |
 | `TRAWLER_LLM_API_BASE` | LLM API 地址 |
+| `TRAWLER_LLM_MODEL` | LLM 模型名称 |
+| `TRAWLER_LLM_PROVIDER` | LLM 服务方 (openai / ollama) |
