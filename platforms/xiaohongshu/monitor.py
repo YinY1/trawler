@@ -9,6 +9,7 @@ from typing import Any
 from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from platforms.xiaohongshu.auth import get_xhs_cookie
 from shared.config import Config
+from shared.exceptions import DataError, is_session_expired_error
 from shared.protocols import NoteInfo
 
 logger = logging.getLogger("trawler.xiaohongshu.monitor")
@@ -116,6 +117,12 @@ async def _fetch_notes_via_api(
         data = await client.get_user_notes(user_id, cursor=cursor)
         notes = data.get("notes", [])
         return notes if isinstance(notes, list) else []
+    except DataError as e:
+        # -100 / 登录已过期：服务端明确拒绝 session → 重新抛出供上层写回
+        if is_session_expired_error(e):
+            raise
+        logger.warning(f"小红书笔记列表 API 请求异常: {e}")
+        return []
     except Exception as e:
         logger.warning(f"小红书笔记列表 API 请求异常: {e}")
         return []
@@ -127,15 +134,19 @@ async def fetch_user_notes(
     user_id: str,
     name: str,
     config: Config,
+    config_path: str = "config/config.toml",
 ) -> list[NoteInfo]:
     """获取指定用户的笔记列表。
 
-    获取用户笔记列表，返回全部笔记。
+    当 XHS 服务端返回 -100（登录已过期）时，同步将
+    ``config.xiaohongshu.auth.expires_at`` 置为 ``0.0`` 并写回
+    ``cookies.toml``，使 Web UI 状态与真实服务端状态一致。
 
     Args:
         user_id: 小红书用户 ID
         name: 用户名称（用于日志）
         config: 全局配置
+        config_path: config.toml 路径，用于派生 cookies.toml 写入位置
 
     Returns:
         NoteInfo 列表（按发布时间降序）
@@ -150,6 +161,10 @@ async def fetch_user_notes(
     try:
         raw_notes = await _fetch_notes_via_api(user_id, cookie)
         logger.debug(f"[{name}] 签名 API 获取到 {len(raw_notes)} 条笔记")
+    except DataError as e:
+        # XHS -100 session 失效 → 写回 expires_at=0 以同步 Web UI 状态
+        logger.warning("XHS 登录已失效 (%s)，请重新登录", e)
+        await _mark_xhs_expired(config, config_path)
     except Exception as e:
         logger.warning(f"[{name}] 签名 API 请求失败: {e}")
 
@@ -170,3 +185,26 @@ async def fetch_user_notes(
 
     logger.info(f"[{name}] 获取到 {len(notes)} 条笔记")
     return notes
+
+
+async def _mark_xhs_expired(config: Config, config_path: str) -> None:
+    """将 XHS expires_at 置 0 并写回 cookies.toml。
+
+    更新内存（config dataclass）与磁盘（cookies.toml）双侧状态，
+    确保 Web UI 立刻显示"已失效"。写盘失败仅 warn，不阻塞主流程。
+    """
+    # 更新内存
+    config.xiaohongshu.auth.expires_at = 0.0
+
+    # 写回磁盘
+    try:
+        from shared.auth import update_auth_section
+
+        await update_auth_section(
+            "xhs",
+            {"expires_at": 0.0},
+            config_path=config_path,
+        )
+        logger.info("已将 XHS expires_at=0 写回 cookies.toml")
+    except Exception as exc:
+        logger.warning("写回 XHS expires_at=0 失败: %s", exc)

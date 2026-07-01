@@ -438,3 +438,87 @@ class TestAuthNicknamesEndpoint:
         assert resp2.status_code == 200
         assert resp2.json() == {"bili": "缓存测试", "xhs": "缓存测试", "weibo": "缓存测试"}
         assert mock_auth.get_user_nickname.await_count == first_call_count  # 无新增调用
+
+
+# ── _get_auth_status 失效态文案（#74）────────────────────────────
+
+
+class TestGetAuthStatusStale:
+    """_get_auth_status: expires_at=0 + cookie 非空 → '已失效(服务端拒绝)'。"""
+
+    def test_xhs_stale_cookie_shows_server_rejected(self) -> None:
+        """XHS: expires_at=0 但 cookie 非空 → '已失效(服务端拒绝,需重新登录)'。"""
+        from web.routes.auth import _get_auth_status
+
+        config = MagicMock()
+        config.xiaohongshu.auth.expires_at = 0.0
+        config.xiaohongshu.auth.cookie = "stale_cookie=1"
+
+        status, _expires, has_auth = _get_auth_status(config, "xhs")
+        assert status == "已失效(服务端拒绝,需重新登录)"
+        assert has_auth is True
+
+    def test_xhs_never_configured_shows_unconfigured(self) -> None:
+        """XHS: expires_at=0 且 cookie 空 → '未配置'。"""
+        from web.routes.auth import _get_auth_status
+
+        config = MagicMock()
+        config.xiaohongshu.auth.expires_at = 0.0
+        config.xiaohongshu.auth.cookie = ""
+
+        status, _expires, has_auth = _get_auth_status(config, "xhs")
+        assert status == "未配置"
+        assert has_auth is False
+
+    def test_bili_stale_sessdata_shows_server_rejected(self) -> None:
+        """bilibili: expires_at=0 但 sessdata 非空 → '已失效(服务端拒绝)'。"""
+        from web.routes.auth import _get_auth_status
+
+        config = MagicMock()
+        config.bilibili.auth.expires_at = 0.0
+        config.bilibili.auth.sessdata = "stale_sessdata"
+
+        status, _expires, has_auth = _get_auth_status(config, "bili")
+        assert status == "已失效(服务端拒绝,需重新登录)"
+        assert has_auth is True
+
+    def test_weibo_stale_cookie_shows_server_rejected(self) -> None:
+        """weibo: expires_at=0 但 cookie 非空 → '已失效(服务端拒绝)'。"""
+        from web.routes.auth import _get_auth_status
+
+        config = MagicMock()
+        config.weibo.auth.expires_at = 0.0
+        config.weibo.auth.cookie = "SUB=stale"
+
+        status, _expires, has_auth = _get_auth_status(config, "weibo")
+        assert status == "已失效(服务端拒绝,需重新登录)"
+        assert has_auth is True
+
+    def test_valid_token_still_shows_valid(self) -> None:
+        """有效 token 仍显示 '有效 (剩余 N 天)'。"""
+        import time
+
+        from web.routes.auth import _get_auth_status
+
+        config = MagicMock()
+        config.xiaohongshu.auth.expires_at = time.time() + 86400 * 30
+        config.xiaohongshu.auth.cookie = "valid_cookie=1"
+
+        status, _expires, has_auth = _get_auth_status(config, "xhs")
+        assert "有效" in status
+        assert "剩余" in status
+        assert has_auth is True
+
+    def test_expired_token_shows_expired(self) -> None:
+        """已过期但仍残留 cookie → 显示'已过期'（expires_at > 0 走独立分支）。"""
+        import time
+
+        from web.routes.auth import _get_auth_status
+
+        config = MagicMock()
+        config.xiaohongshu.auth.expires_at = time.time() - 86400  # 昨天
+        config.xiaohongshu.auth.cookie = "old_cookie=1"
+
+        status, _expires, has_auth = _get_auth_status(config, "xhs")
+        assert status == "已过期"
+        assert has_auth is True

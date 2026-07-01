@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from platforms.xiaohongshu.monitor import _fetch_notes_via_api
+import pytest
+
+from platforms.xiaohongshu.monitor import _fetch_notes_via_api, fetch_user_notes
+from shared.config import Config
+from shared.exceptions import DataError
 
 
 class TestFetchNotesViaApi:
@@ -71,3 +75,117 @@ class TestFetchNotesViaApi:
             await _fetch_notes_via_api("u1", "cookie")
 
         mock_client.close.assert_awaited_once()
+
+
+class TestFetchNotesViaApiSessionExpired:
+    """_fetch_notes_via_api: XHS -100 (session expired) 应重新抛出 DataError。"""
+
+    async def test_reraises_data_error_for_code_minus_100(self) -> None:
+        """DataError 含 -100 → 重新抛出，不降级为空 list。"""
+        mock_client = MagicMock()
+        mock_client.get_user_notes = AsyncMock(
+            side_effect=DataError("XHS data fetch error: {'code': -100, 'msg': '登录已过期'}")
+        )
+        mock_client.close = AsyncMock()
+
+        with patch(
+            "platforms.xiaohongshu.monitor.AsyncXhsClient", return_value=mock_client
+        ):
+            with pytest.raises(DataError, match="-100"):
+                await _fetch_notes_via_api("u1", "cookie")
+
+    async def test_non_session_data_error_returns_empty(self) -> None:
+        """DataError 不含 -100 → 降级返回空 list（其他 data error 不触发写回）。"""
+        mock_client = MagicMock()
+        mock_client.get_user_notes = AsyncMock(
+            side_effect=DataError("XHS data fetch error: {'code': -2, 'msg': '其它错误'}")
+        )
+        mock_client.close = AsyncMock()
+
+        with patch(
+            "platforms.xiaohongshu.monitor.AsyncXhsClient", return_value=mock_client
+        ):
+            result = await _fetch_notes_via_api("u1", "cookie")
+
+        assert result == []
+
+
+class TestFetchUserNotesWriteback:
+    """fetch_user_notes: XHS -100 触发时写回 expires_at=0。"""
+
+    async def test_marks_expires_at_zero_on_session_expired(self) -> None:
+        """DataError(-100) 时 config.xiaohongshu.auth.expires_at 被置 0。"""
+        config = Config()
+        config.xiaohongshu.auth.cookie = "fake_cookie=1"
+        config.xiaohongshu.auth.expires_at = 9999999999.0
+
+        mock_client = MagicMock()
+        mock_client.get_user_notes = AsyncMock(
+            side_effect=DataError("XHS data fetch error: {'code': -100, 'msg': '登录已过期'}")
+        )
+        mock_client.close = AsyncMock()
+
+        with (
+            patch("platforms.xiaohongshu.monitor.AsyncXhsClient", return_value=mock_client),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            result = await fetch_user_notes("u1", "测试用户", config)
+
+        assert result == []
+        assert config.xiaohongshu.auth.expires_at == 0.0
+        mock_update.assert_awaited_once_with(
+            "xhs",
+            {"expires_at": 0.0},
+            config_path="config/config.toml",
+        )
+
+    async def test_no_writeback_on_generic_error(self) -> None:
+        """非 -100 错误（如 RuntimeError）不触发 expires_at 写回。"""
+        config = Config()
+        config.xiaohongshu.auth.cookie = "fake_cookie=1"
+        config.xiaohongshu.auth.expires_at = 9999999999.0
+
+        with (
+            patch(
+                "platforms.xiaohongshu.monitor._fetch_notes_via_api",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("network boom"),
+            ),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            result = await fetch_user_notes("u1", "测试用户", config)
+
+        assert result == []
+        assert config.xiaohongshu.auth.expires_at == 9999999999.0
+        mock_update.assert_not_awaited()
+
+    async def test_writeback_failure_does_not_block(self) -> None:
+        """磁盘写回失败时 fetch_user_notes 仍返回空 list，不抛异常。"""
+        config = Config()
+        config.xiaohongshu.auth.cookie = "fake_cookie=1"
+        config.xiaohongshu.auth.expires_at = 9999999999.0
+
+        mock_client = MagicMock()
+        mock_client.get_user_notes = AsyncMock(
+            side_effect=DataError("XHS data fetch error: {'code': -100, 'msg': '登录已过期'}")
+        )
+        mock_client.close = AsyncMock()
+
+        with (
+            patch("platforms.xiaohongshu.monitor.AsyncXhsClient", return_value=mock_client),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+                side_effect=PermissionError("read-only fs"),
+            ),
+        ):
+            result = await fetch_user_notes("u1", "测试用户", config)
+
+        assert result == []
+        assert config.xiaohongshu.auth.expires_at == 0.0
