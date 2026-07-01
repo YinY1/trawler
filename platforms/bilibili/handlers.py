@@ -325,12 +325,17 @@ async def bili_push(ctx: PhaseContext) -> bool:
         logger.info("订阅 %s 未配置 endpoints，跳过通知", ctx.msg.msg_id)
         return True
 
+    # TEXT 类型(纯文字动态)不走 SUMMARIZED 阶段, ctx.summary_text 恒空;
+    # 此时 fallback 到 ctx.content_text(detector/download 已填充的正文原文),
+    # 让通知正文不再丢失 (issue #80)。
+    # 复用 summary 字段承载:VIDEO 类型 = AI 摘要;TEXT 类型 = 正文原文。
+    summary_text = ctx.summary_text or ctx.content_text
     content = NotificationContent(
         platform="bili",
         source_id=source_id,
         title=ctx.msg.title,
         author=ctx.msg.author,
-        summary=ctx.summary_text,
+        summary=summary_text,
         keywords=ctx.keywords,
         comment_highlights=ctx.comment_highlights or "",
         url=(f"https://t.bilibili.com/{source_id}" if is_dynamic else f"https://www.bilibili.com/video/{source_id}"),
