@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # pyright: basic
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -84,6 +85,11 @@ def _parse_dynamic(item: dict, uid: int) -> DynamicInfo | None:
     desc_text = dynamic_module.get("desc")
     if desc_text is None:
         desc_text = ""
+    elif isinstance(desc_text, dict):
+        # rich-text dict: 取 text 字段;缺失则 JSON dump 保留信息
+        desc_text = desc_text.get("text", "") or json.dumps(desc_text, ensure_ascii=False)
+    elif not isinstance(desc_text, str):
+        desc_text = str(desc_text)
     major = dynamic_module.get("major") or {}
 
     title = ""

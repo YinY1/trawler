@@ -63,3 +63,44 @@ def test_parse_dynamic_type_draw_has_video_false() -> None:
     assert dyn is not None
     assert dyn.has_video is False
     assert dyn.linked_bvid == ""
+
+
+def test_parse_dynamic_handles_dict_desc() -> None:
+    """B 站 FORWARD 类型动态 desc 是 rich-text dict,不应 crash (#75)。"""
+    item = {
+        "id_str": "123456",
+        "type": "DYNAMIC_TYPE_FORWARD",
+        "modules": {
+            "module_author": {"name": "tester", "pub_ts": 1717200000},
+            "module_dynamic": {
+                "desc": {
+                    "rich_text_nodes": [{"text": "转发视频内容"}],
+                    "text": "转发视频内容",
+                },
+                "major": {},
+            },
+        },
+    }
+    dyn = _parse_dynamic(item, uid=1)
+    assert dyn is not None
+    assert isinstance(dyn.content, str)
+    assert "转发视频内容" in dyn.content
+
+
+def test_parse_dynamic_handles_dict_desc_without_text_field() -> None:
+    """desc dict 缺少 text 字段时,JSON dump 保留信息 (#75)。"""
+    item = {
+        "id_str": "789",
+        "type": "DYNAMIC_TYPE_FORWARD",
+        "modules": {
+            "module_author": {"name": "tester", "pub_ts": 1717200000},
+            "module_dynamic": {
+                "desc": {"rich_text_nodes": [{"text": "fallback"}]},
+                "major": {},
+            },
+        },
+    }
+    dyn = _parse_dynamic(item, uid=1)
+    assert dyn is not None
+    assert isinstance(dyn.content, str)
+    assert "fallback" in dyn.content
