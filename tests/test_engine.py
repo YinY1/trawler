@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -854,3 +855,160 @@ async def test_text_message_never_reaches_transcribe_phase(
     updated = store.get_message("bili_dyn:t1")
     assert updated is not None
     assert updated.phase == Phase.PUSHED
+
+
+# ── pipeline crash → mark_error (Issue #72) ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_platform_handler_exception_marks_message_error(
+    config: Config, tmp_path: Path
+) -> None:
+    """Issue #72: handler 抛 RuntimeError 时 ``_safe_process_message`` 必须强制
+    ``mark_error``，错误文本含 "pipeline crash" + 异常类型名，且后续消息继续处理。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register_detector("test_platform")
+    async def detector(cfg: Config, st: MessageStore) -> None:
+        st.add_new("test:001", "test_platform", ContentType.TEXT, 2000000000, "Boom", "A")
+        st.add_new("test:002", "test_platform", ContentType.TEXT, 2000000000, "Ok", "A")
+
+    processed: list[str] = []
+
+    @PipelineEngine.register("test_platform", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        processed.append(ctx.msg.msg_id)
+        if ctx.msg.msg_id == "test:001":
+            raise RuntimeError("handler boom")
+        return True
+
+    @PipelineEngine.register("test_platform", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    config.general.data_dir = str(tmp_path)
+    await PipelineEngine.run_platform(config, "test_platform")
+
+    # 关键：两条消息都被尝试处理（异常未中断循环）
+    assert processed == ["test:001", "test:002"]
+
+    store2 = MessageStore(tmp_path)
+    crashed = store2.get_message("test:001")
+    assert crashed is not None
+    assert "pipeline crash" in crashed.error
+    assert "RuntimeError" in crashed.error
+    assert not crashed.permanent_error  # permanent=False，便于手动重试
+
+    # 后续消息仍正常推进到 PUSHED
+    ok_msg = store2.get_message("test:002")
+    assert ok_msg is not None
+    assert ok_msg.phase == Phase.PUSHED
+    assert ok_msg.error == ""
+
+
+@pytest.mark.asyncio
+async def test_run_platform_handler_cancelled_error_marks_and_reraises(
+    config: Config, tmp_path: Path
+) -> None:
+    """Issue #72: ``asyncio.CancelledError`` 必须标记 "任务取消" 后 re-raise
+    （取消信号必须向上传播，不能被吞成普通错误）。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    @PipelineEngine.register_detector("test_platform")
+    async def detector(cfg: Config, st: MessageStore) -> None:
+        st.add_new("test:001", "test_platform", ContentType.TEXT, 2000000000, "T", "A")
+
+    @PipelineEngine.register("test_platform", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        raise asyncio.CancelledError()
+
+    @PipelineEngine.register("test_platform", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        pytest.fail("PUSHED 不应被调用")
+
+    config.general.data_dir = str(tmp_path)
+    with pytest.raises(asyncio.CancelledError):
+        await PipelineEngine.run_platform(config, "test_platform")
+
+    store2 = MessageStore(tmp_path)
+    msg = store2.get_message("test:001")
+    assert msg is not None
+    assert msg.error == "任务取消"
+    assert not msg.permanent_error
+
+
+@pytest.mark.asyncio
+async def test_run_platform_handler_exception_preserves_existing_error(
+    config: Config, store: MessageStore
+) -> None:
+    """Issue #72: ``_safe_process_message`` 不覆盖 ``msg`` 上已存在的 error。
+
+    ``run_platform`` 的 ``if msg.error: continue`` 会跳过有 error 的消息，所以
+    这里直接调用 ``_safe_process_message``，模拟 ``run_specific_messages`` 之类的
+    调用方传入「本地 msg.error 已被填充」的场景（如 handler 前置校验失败），
+    验证崩溃兜底分支不会用 "pipeline crash" 文案覆盖原有 error。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    msg = store.add_new("test:001", "test_platform", ContentType.TEXT, 2000000000, "T", "A")
+    assert msg is not None
+    # 预置已有 error（模拟上层已标记的失败原因，便于诊断真实问题）
+    # 用 store.mark_error 写入持久层，并重新读取让本地 msg 同步带 error
+    store.mark_error("test:001", "用户标记的原始错误", permanent=True)
+    msg = store.get_message("test:001")
+    assert msg is not None
+    assert msg.error == "用户标记的原始错误"
+
+    @PipelineEngine.register("test_platform", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        raise RuntimeError("boom")
+
+    @PipelineEngine.register("test_platform", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    await PipelineEngine._safe_process_message(msg, config, store)
+
+    updated = store.get_message("test:001")
+    assert updated is not None
+    # 关键：原始 error 被保留，未被 "pipeline crash" 覆盖
+    assert updated.error == "用户标记的原始错误"
+    assert updated.permanent_error is True
+
+
+@pytest.mark.asyncio
+async def test_run_platform_detector_crash_continues_processing(
+    config: Config, tmp_path: Path
+) -> None:
+    """Issue #72: detector 抛 ``BaseException`` 时 ``run_platform`` 记录日志后继续
+    执行 process loop —— detector 已写入的消息仍正常到达 PUSHED，未被吞掉。"""
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    # detector 先写入一条消息再崩溃，模拟 detector 中途异常的真实场景
+    @PipelineEngine.register_detector("test_platform")
+    async def detector(cfg: Config, st: MessageStore) -> None:
+        st.add_new("test:001", "test_platform", ContentType.TEXT, 2000000000, "T", "A")
+        raise AttributeError("'NoneType' object has no attribute 'content'")
+
+    @PipelineEngine.register("test_platform", Phase.DOWNLOADED)
+    async def dl(ctx: PhaseContext) -> bool:
+        return True
+
+    @PipelineEngine.register("test_platform", Phase.PUSHED)
+    async def ps(ctx: PhaseContext) -> bool:
+        return True
+
+    config.general.data_dir = str(tmp_path)
+
+    # 关键：detector 崩溃未被传播（run_platform 正常返回）
+    await PipelineEngine.run_platform(config, "test_platform")
+
+    # detector 已写入的消息仍被处理并到达 PUSHED
+    store2 = MessageStore(tmp_path)
+    msg = store2.get_message("test:001")
+    assert msg is not None
+    assert msg.phase == Phase.PUSHED
+    assert msg.error == ""
