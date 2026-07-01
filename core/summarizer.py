@@ -135,47 +135,6 @@ def _parse_list_field(body: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-# CoT 泄露检测：reasoning 模型可能把思考过程写进 summary。
-# 检测元话语模式，从首次出现处截断（前半部分通常是真正的答案）。
-# 注意：列表项含正则元字符（如 "不够.*字"）的会被 re.search 当作模式使用。
-_COT_PATTERNS: list[str] = [
-    "我重新组织",
-    "总字数",
-    "需要扩充",
-    "需要增加",
-    "我们可以",
-    "不如忽略",
-    "字数不够",
-    "不够400",
-    "不够.*字",
-    "让我分析",
-    "我们来",
-    "重新调整",
-]
-
-
-def _strip_cot_leakage(summary: str) -> str:
-    """检测并截断 CoT 泄露（思考过程混入摘要）。
-
-    在 summary 中按 _COT_PATTERNS 顺序搜索首个命中的元话语，
-    从命中处截断，保留前半部分（通常是真正的答案）。
-    若整段都是 CoT（截断后为空），保留原样让上游 warning 可见。
-    """
-    for pattern in _COT_PATTERNS:
-        match = re.search(pattern, summary)
-        if match:
-            truncated = summary[: match.start()].rstrip()
-            if truncated:
-                logger.warning(
-                    "AI 摘要疑似 CoT 泄露,已截断 (pattern=%r, 原长度=%d, 截断后=%d)",
-                    pattern,
-                    len(summary),
-                    len(truncated),
-                )
-                return truncated
-    return summary
-
-
 def parse_markdown_analysis(raw: str) -> AnalysisResult:
     """将 AI 输出的 Markdown 解析为 ``AnalysisResult``。
 
@@ -186,9 +145,8 @@ def parse_markdown_analysis(raw: str) -> AnalysisResult:
     - Issue #56: 保留原始 raw 文本到 ``result.raw``，供 handler 在解析为空时观测。
     """
     text = _strip_code_fence(raw)
-    summary = _strip_cot_leakage(_extract_section(text, _SECTION_PATTERNS["summary"]))
     return AnalysisResult(
-        summary=summary,
+        summary=_extract_section(text, _SECTION_PATTERNS["summary"]),
         one_line_summary=_extract_section(text, _SECTION_PATTERNS["one_line_summary"]),
         keywords=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["keywords"]))[:5],
         tags=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["tags"]))[:3],
@@ -338,7 +296,7 @@ def _build_single_provider(p_cfg: AnalysisConfig | LLMProviderConfig) -> LLMProv
 
     # max_tokens 从 AnalysisConfig（透传到 LLMProviderConfig）传给 provider。
     # LLMProviderConfig 和 AnalysisConfig 都有此字段（默认 8192）。
-    max_tokens = getattr(p_cfg, "max_tokens", 8192)
+    max_tokens = p_cfg.max_tokens
 
     if provider_name == "openai":
         if not p_cfg.api_base:
