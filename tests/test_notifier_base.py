@@ -347,3 +347,113 @@ def test_short_summary_not_truncated():
     _, msg = render_markdown(c)
     assert short_summary in msg
     assert "..." not in msg
+
+
+# ═══════════════════════════════════════════════════════════
+# #69 — push handler 共享 helper: find_subscription_by_ref + log_fanout_results
+# ═══════════════════════════════════════════════════════════
+
+
+def test_find_subscription_by_ref_bili_matches_uid_as_str():
+    """bili 订阅 uid 是 int, subscription_ref 是 str, 用 str() 比对。"""
+    from shared.config import BiliSubscription, Config
+    from shared.protocols import find_subscription_by_ref
+
+    config = Config()
+    sub1 = BiliSubscription(uid=100, name="UP1", notify_endpoints=["ep1"])
+    sub2 = BiliSubscription(uid=200, name="UP2", notify_endpoints=["ep2"])
+    config.bilibili.subscriptions = [sub1, sub2]
+
+    assert find_subscription_by_ref(config, "bili", "200") is sub2
+    assert find_subscription_by_ref(config, "bili", "100") is sub1
+
+
+def test_find_subscription_by_ref_bili_not_found_returns_none():
+    from shared.config import BiliSubscription, Config
+    from shared.protocols import find_subscription_by_ref
+
+    config = Config()
+    config.bilibili.subscriptions = [BiliSubscription(uid=100, name="UP1")]
+    assert find_subscription_by_ref(config, "bili", "999") is None
+
+
+def test_find_subscription_by_ref_xhs_matches_user_id():
+    """xhs 订阅 user_id 是 str, 直接比对。"""
+    from shared.config import Config, UserSubscription
+    from shared.protocols import find_subscription_by_ref
+
+    config = Config()
+    sub = UserSubscription(user_id="abc123", name="X", notify_endpoints=["ep1"])
+    config.xiaohongshu.subscriptions = [sub]
+
+    assert find_subscription_by_ref(config, "xhs", "abc123") is sub
+    assert find_subscription_by_ref(config, "xhs", "nope") is None
+
+
+def test_find_subscription_by_ref_weibo_matches_user_id():
+    from shared.config import Config, UserSubscription
+    from shared.protocols import find_subscription_by_ref
+
+    config = Config()
+    sub = UserSubscription(user_id="wb42", name="W", notify_endpoints=["ep1"])
+    config.weibo.subscriptions = [sub]
+
+    assert find_subscription_by_ref(config, "weibo", "wb42") is sub
+    assert find_subscription_by_ref(config, "weibo", "missing") is None
+
+
+def test_find_subscription_by_ref_isolates_platform_lists():
+    """bili 的 ref 不应命中 xhs/weibo 列表，反之亦然。"""
+    from shared.config import BiliSubscription, Config, UserSubscription
+    from shared.protocols import find_subscription_by_ref
+
+    config = Config()
+    config.bilibili.subscriptions = [BiliSubscription(uid=100, name="UP1")]
+    config.xiaohongshu.subscriptions = [UserSubscription(user_id="100", name="X")]
+    # ref="100" 在 bili 命中 uid=100；不应误命中 xhs（虽然 xhs 也有 user_id="100"）
+    assert find_subscription_by_ref(config, "bili", "100").uid == 100  # type: ignore[union-attr]
+
+
+def test_find_subscription_by_ref_unknown_platform_returns_none():
+    from shared.config import Config
+    from shared.protocols import find_subscription_by_ref
+
+    config = Config()
+    assert find_subscription_by_ref(config, "tiktok", "any") is None
+
+
+def test_log_fanout_results_logs_count(caplog):
+    """fan-out 日志格式: 通知推送完成 (ok/total) — 与原各 handler 内联实现一致。"""
+    import logging
+
+    from core.notifiers import log_fanout_results
+
+    results = [
+        SendResult(endpoint_name="a", success=True),
+        SendResult(endpoint_name="b", success=False, error="boom"),
+        SendResult(endpoint_name="c", success=True),
+    ]
+    with caplog.at_level(logging.INFO, logger="core.notifiers"):
+        log_fanout_results(results)
+    # 2/3 成功
+    assert any("通知推送完成 (2/3)" in r.message for r in caplog.records)
+
+
+def test_log_fanout_results_platform_prefix(caplog):
+    """platform 非空时日志加 [platform] 前缀。"""
+    import logging
+
+    from core.notifiers import log_fanout_results
+
+    results = [SendResult(endpoint_name="a", success=True)]
+    with caplog.at_level(logging.INFO, logger="core.notifiers"):
+        log_fanout_results(results, platform="bili")
+    assert any("[bili] 通知推送完成 (1/1)" in r.message for r in caplog.records)
+
+
+def test_log_fanout_results_empty():
+    """空列表不崩，记录 (0/0)。"""
+    from core.notifiers import log_fanout_results
+
+    # 不抛异常即可
+    log_fanout_results([])

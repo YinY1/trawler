@@ -11,14 +11,20 @@ import logging
 
 from core.engine import PipelineEngine
 from core.formatter import format_comment_highlights
-from core.notifiers import send_to_subscription
+from core.notifiers import log_fanout_results, send_to_subscription
 from core.summarizer import analyze_content
 from core.transcriber import cleanup_media, transcribe_file_async
 from platforms.bilibili.comments import fetch_comment_highlights
 from platforms.bilibili.monitor import fetch_user_videos
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import ContentType, NotificationContent, Phase, PhaseContext
+from shared.protocols import (
+    ContentType,
+    NotificationContent,
+    Phase,
+    PhaseContext,
+    find_subscription_by_ref,
+)
 
 logger = logging.getLogger("trawler.bilibili.handlers")
 
@@ -312,11 +318,7 @@ async def bili_push(ctx: PhaseContext) -> bool:
     source_id = ctx.msg.msg_id.replace("bili_dyn:" if is_dynamic else "bili:", "")
 
     # 通过 subscription_ref 精确匹配订阅
-    matched = None
-    for sub in ctx.config.bilibili.subscriptions:
-        if str(sub.uid) == ctx.msg.subscription_ref:
-            matched = sub
-            break
+    matched = find_subscription_by_ref(ctx.config, "bili", ctx.msg.subscription_ref)
     if matched is None:
         logger.warning("未找到 subscription_ref=%s 对应的订阅，跳过通知", ctx.msg.subscription_ref)
         return True
@@ -349,8 +351,7 @@ async def bili_push(ctx: PhaseContext) -> bool:
         matched.notify_endpoints,
         content,
     )
-    ok = sum(1 for r in results if r.success)
-    logger.info("通知推送完成 (%d/%d)", ok, len(results))
+    log_fanout_results(results)
 
     # plan D6: 媒体清理条件改为 downloaded_filepath is not None
     # (改造后 TEXT 类型无视频文件,filepath 始终 None,条件自然不成立)
