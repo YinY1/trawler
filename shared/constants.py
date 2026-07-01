@@ -3,26 +3,128 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import tomllib
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
+from pathlib import Path
 
 # ═══════════════════════════════════════════════════════════
-# 版本信息（issue #55）
+# 版本信息（issue #55 + #73 dev fallback 链）
 #
-# - VERSION: dist metadata 读取（pyproject.toml [project].version），构建期不变
-#   未安装（直接跑源码）时 fallback '0.0.0+unknown'，避免 PackageNotFoundError
-# - GIT_SHA / BUILD_DATE: Docker 构建 ARG 注入 ENV，本地 dev fallback 'dev'/'unknown'
-#   不调用 git 子进程，避免引入 git 依赖 + 非 git 环境报错
-# - VERSION_DISPLAY: 统一展示字符串，形如 `0.1.0+a1b2c3d (2026-06-30T14:29:00Z)`
+# Fallback 优先级：
+#   1. Env vars（Docker 构建 ARG 注入：TRAWLER_GIT_SHA / TRAWLER_BUILD_DATE）
+#   2. importlib.metadata（已 ``uv pip install -e .``）
+#   3. pyproject.toml + git 子进程 推断 dev 版本串
+#      （形如 ``0.1.0+dev.abc1234``）
+#   4. ``"0.0.0+dev"`` / ``"dev"`` / ``"unknown"`` 最终兜底
+#
+# VERSION_DISPLAY: 统一展示字符串，形如 `0.1.0+dev.abc1234 (2026-06-30 14:29:00 +0800)`
 # ═══════════════════════════════════════════════════════════
-try:
-    _dist_ver = _dist_version("trawler")
-except PackageNotFoundError:
-    _dist_ver = "0.0.0+unknown"
-VERSION: str = _dist_ver
-GIT_SHA: str = os.environ.get("TRAWLER_GIT_SHA") or "dev"
-BUILD_DATE: str = os.environ.get("TRAWLER_BUILD_DATE") or "unknown"
-VERSION_DISPLAY: str = f"{VERSION}+{GIT_SHA} ({BUILD_DATE})"
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_git(*args: str) -> str | None:
+    """跑 ``git`` 子进程，失败/超时/不存在返回 ``None``。
+
+    timeout=2s 避免 git 卡死拖慢模块导入；捕获 ``FileNotFoundError``
+    让无 git 环境（如 Docker 镜像仅含 python）也能正常降级。
+    """
+    try:
+        proc = subprocess.run(
+            ("git", *args),
+            cwd=_PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.strip()
+    return out or None
+
+
+def _read_pyproject_version() -> str:
+    """从 ``pyproject.toml`` 直读 ``project.version``，缺失/非法返回 ``"0.0.0"``。"""
+    pyproject = _PROJECT_ROOT / "pyproject.toml"
+    if not pyproject.exists():
+        return "0.0.0"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except Exception:
+        return "0.0.0"
+    ver = data.get("project", {}).get("version")
+    return ver if isinstance(ver, str) and ver else "0.0.0"
+
+
+# 模块级 short-sha cache：import 时只跑一次 ``git rev-parse``，后续访问零开销。
+# 测试可通过 ``monkeypatch.setattr(constants, "_short_sha_resolved", False)`` 重置，
+# 或直接 patch ``_get_short_sha``。
+_short_sha_cache: str | None = None
+_short_sha_resolved = False
+
+
+def _get_short_sha() -> str | None:
+    """返回缓存的 git short sha（失败/无 git 返回 ``None``）。
+
+    模块级 cache 保证 ``_get_version`` / ``_get_git_sha`` 共用同一份结果，
+    避免 ``git rev-parse`` 重复调用。
+    """
+    global _short_sha_cache, _short_sha_resolved
+    if not _short_sha_resolved:
+        _short_sha_cache = _run_git("rev-parse", "--short", "HEAD")
+        _short_sha_resolved = True
+    return _short_sha_cache
+
+
+def _get_version() -> str:
+    """按优先级返回 VERSION：env → dist metadata → pyproject+git → dev 兜底。"""
+    if env_v := os.environ.get("TRAWLER_VERSION"):
+        return env_v
+    try:
+        return _dist_version("trawler")
+    except PackageNotFoundError:
+        pass
+    pkg_ver = _read_pyproject_version()
+    short_sha = _get_short_sha()
+    if short_sha:
+        return f"{pkg_ver}+dev.{short_sha}"
+    return f"{pkg_ver}+dev"
+
+
+def _get_git_sha() -> str:
+    """按优先级返回 GIT_SHA：env → git short sha → 'dev' 兜底。"""
+    if sha := os.environ.get("TRAWLER_GIT_SHA"):
+        return sha
+    return _get_short_sha() or "dev"
+
+
+def _get_build_date() -> str:
+    """按优先级返回 BUILD_DATE：env → 最近一次 commit 时间 → 'unknown' 兜底。
+
+    使用 ``%cI``（严格 ISO 8601）而非 ``%ci``，与 Docker env 注入的
+    ``2026-06-30T14:29:00Z`` 格式统一。
+    """
+    if d := os.environ.get("TRAWLER_BUILD_DATE"):
+        return d
+    return _run_git("log", "-1", "--format=%cI") or "unknown"
+
+
+VERSION: str = _get_version()
+GIT_SHA: str = _get_git_sha()
+BUILD_DATE: str = _get_build_date()
+# dev 分支 VERSION 已含 ``+dev.<sha>`` local segment，不再重复拼 GIT_SHA；
+# 正式构建 VERSION 是纯 PEP 440，用 GIT_SHA 注入 local segment。
+# 两种情况都保证 VERSION_DISPLAY 只含至多一个 ``+``。
+VERSION_DISPLAY: str = (
+    f"{VERSION} ({BUILD_DATE})"
+    if "+" in VERSION
+    else f"{VERSION}+{GIT_SHA} ({BUILD_DATE})"
+)
 
 # 超时（秒）
 DOWNLOAD_TIMEOUT = 600  # yt-dlp 下载超时
