@@ -125,6 +125,37 @@ class TestFallbackChainProvider:
         secondary.generate.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_last_provider_name_reflects_hit(self) -> None:
+        """Issue #61: generate 成功后 last_provider_name 反映命中的 provider 标识。"""
+        from core.summarizer import FallbackChainProvider
+
+        primary = AsyncMock()
+        primary.generate = AsyncMock(side_effect=RuntimeError("401"))
+        secondary = AsyncMock()
+        secondary.generate = AsyncMock(return_value="ok")
+
+        chain = FallbackChainProvider(
+            providers=[primary, secondary],
+            provider_names=["openai", "ollama"],
+        )
+        # 初始 None
+        assert chain.last_provider_name is None
+        await chain.generate("ping")
+        # 命中第二个 → 名字反映第二个
+        assert chain.last_provider_name == "ollama"
+
+    @pytest.mark.asyncio
+    async def test_last_provider_name_default_fallback_idx(self) -> None:
+        """Issue #61: 未传 provider_names 时,缺省标识为 primary / fallback#N。"""
+        from core.summarizer import FallbackChainProvider
+
+        primary = AsyncMock()
+        primary.generate = AsyncMock(return_value="ok")
+        chain = FallbackChainProvider(providers=[primary])
+        await chain.generate("ping")
+        assert chain.last_provider_name == "primary"
+
+    @pytest.mark.asyncio
     async def test_all_fail_raises_runtime_error(self, caplog: pytest.LogCaptureFixture) -> None:
         from core.summarizer import FallbackChainProvider
 
@@ -573,6 +604,74 @@ A；B
 
         assert result.raw == ai_output
         assert "raw 字段测试" in result.raw
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_fallback_hit_reflects_in_source(self) -> None:
+        """Issue #61: fallback 链第一个失败、第二个命中时,result.source 应反映命中的 provider,
+        而非主 provider 名（避免可观测性误导）。"""
+        from core.summarizer import FallbackChainProvider
+
+        config = Config()
+        config.analysis.enabled = True
+        config.analysis.provider = "openai"
+        config.analysis.api_base = "https://example.com/v1"
+        config.analysis.api_key = "k"
+
+        primary = AsyncMock()
+        primary.generate = AsyncMock(side_effect=RuntimeError("401 unauthorized"))
+        secondary = AsyncMock()
+        secondary.generate = AsyncMock(return_value="## 摘要\nfallback 答案")
+
+        chain = FallbackChainProvider(
+            providers=[primary, secondary],
+            provider_names=["openai", "ollama"],
+        )
+
+        with patch("core.summarizer.create_provider", return_value=chain):
+            result = await analyze_content(
+                source_id="bili:BV1",
+                title="T",
+                author="A",
+                text="正文",
+                config=config,
+            )
+
+        assert result.is_ai is True
+        # 命中 ollama（第二个）,不是主 provider openai
+        assert result.source == "ollama"
+        assert result.source != config.analysis.provider
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_primary_hit_source_is_primary_name(self) -> None:
+        """Issue #61 回归保护: 第一个 provider 直接命中时,source 仍反映主 provider 名。
+        （覆盖 isinstance 分支的 last_provider_name 为 truthy 的路径,验证不破坏单 provider 场景）"""
+        from core.summarizer import FallbackChainProvider
+
+        config = Config()
+        config.analysis.enabled = True
+        config.analysis.provider = "openai"
+        config.analysis.api_base = "https://example.com/v1"
+        config.analysis.api_key = "k"
+
+        primary = AsyncMock()
+        primary.generate = AsyncMock(return_value="## 摘要\n主 provider 答案")
+
+        chain = FallbackChainProvider(
+            providers=[primary],
+            provider_names=["openai"],
+        )
+
+        with patch("core.summarizer.create_provider", return_value=chain):
+            result = await analyze_content(
+                source_id="bili:BV1",
+                title="T",
+                author="A",
+                text="正文",
+                config=config,
+            )
+
+        assert result.is_ai is True
+        assert result.source == "openai"
 
 
 class TestLegacyWrappersReturnEmptyOnFailure:
