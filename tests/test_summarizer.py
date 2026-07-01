@@ -746,19 +746,20 @@ class TestLegacyWrappersReturnEmptyOnFailure:
 
 
 class TestOpenAIProviderResponseParsing:
-    """Issue #56 场景 A: reasoning 模型把答案放到 reasoning_content，
-    content="" 时 provider 应 fallback 到 reasoning_content。"""
+    """CoT 泄露修复: reasoning_content 是思考链,不是答案。
+    content 为空时不再 fallback 到 reasoning_content,而是返回空串让上游可观测。
+    """
 
     @pytest.mark.asyncio
-    async def test_provider_fallback_to_reasoning_content(self) -> None:
-        """content='' 时 fallback 到 reasoning_content，不丢失摘要。"""
+    async def test_openai_provider_no_fallback_to_reasoning_content(self) -> None:
+        """content='' 且 reasoning_content 非空时,generate 返回 ''(不再用思考链当答案)。"""
         provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
         fake_response_json = {
             "choices": [
                 {
                     "message": {
                         "content": "",
-                        "reasoning_content": "## 摘要\n这是 reasoning 里的答案\n\n## 一句话总结\n一句话",
+                        "reasoning_content": "这样5点,每条字数约...总约300字,不够400。所以需要每条扩充...",
                     }
                 }
             ]
@@ -774,19 +775,21 @@ class TestOpenAIProviderResponseParsing:
 
             result = await provider.generate("test prompt")
 
-        assert "reasoning 里的答案" in result
-        assert result.startswith("## 摘要")
+        # 不再用 reasoning_content 填充答案
+        assert result == ""
+        assert "不够400" not in result
+        assert "需要每条扩充" not in result
 
     @pytest.mark.asyncio
-    async def test_provider_handles_none_content(self) -> None:
-        """content=null 不应抛 AttributeError，应 fallback 到 reasoning_content 或返回空串。"""
+    async def test_provider_handles_none_content_no_fallback(self) -> None:
+        """content=null 且 reasoning_content 非空时也不 fallback,返回空串。"""
         provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
         fake_response_json = {
             "choices": [
                 {
                     "message": {
                         "content": None,
-                        "reasoning_content": "## 摘要\nfallback 答案",
+                        "reasoning_content": "## 摘要\n这是思考链不应被使用",
                     }
                 }
             ]
@@ -802,19 +805,19 @@ class TestOpenAIProviderResponseParsing:
 
             result = await provider.generate("test prompt")
 
-        assert "fallback 答案" in result
+        assert result == ""
+        assert "不应被使用" not in result
 
     @pytest.mark.asyncio
-    async def test_provider_whitespace_only_content_falls_back_to_reasoning(self) -> None:
-        """Issue #56: whitespace-only content（'   ' / '\\n'）是 truthy 字符串，
-        仅判 falsy 会漏过最终 silent empty。判 .strip() 让空白 content fallback 到 reasoning_content。"""
+    async def test_provider_whitespace_only_content_no_fallback(self) -> None:
+        """whitespace-only content 同样不 fallback 到 reasoning_content。"""
         provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
         fake_response_json = {
             "choices": [
                 {
                     "message": {
                         "content": "   \n  ",
-                        "reasoning_content": "## 摘要\n空白 content fallback 答案",
+                        "reasoning_content": "## 摘要\n思考链",
                     }
                 }
             ]
@@ -830,7 +833,7 @@ class TestOpenAIProviderResponseParsing:
 
             result = await provider.generate("test prompt")
 
-        assert "空白 content fallback 答案" in result
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_provider_normal_content_unaffected(self) -> None:
@@ -862,7 +865,7 @@ class TestOpenAIProviderResponseParsing:
 
     @pytest.mark.asyncio
     async def test_provider_empty_content_and_no_reasoning_returns_empty(self) -> None:
-        """content='' 且无 reasoning_content 时返回空串（让上层解析层负责 silent empty 观测）。"""
+        """content='' 且无 reasoning_content 时返回空串。"""
         provider = OpenAIProvider(api_base="https://example.com/v1", api_key="k", model_name="deepseek-v4")
         fake_response_json = {
             "choices": [
@@ -905,22 +908,39 @@ class TestOpenAIProviderResponseParsing:
 
 
 class TestPromptTemplateConstraints:
-    """Issue #54: _ANALYSIS_PROMPT_TEMPLATE 必须含字数下限 + 要点数量下限 + 序号格式硬约束，
-    让 LLM 不再过度压缩长视频/长文摘要。
+    """CoT 泄露修复后, _ANALYSIS_PROMPT_TEMPLATE 必须含:
+    - 禁止输出思考过程的最高优先级规则
+    - 元话语黑名单(让 LLM 识别并停止 CoT 泄露)
+    - 字数上限(防止 max_tokens 截断),但不再有 400 字下限(凑字数注水元凶)
+    - 要点数量按信息量自然决定(2-3 / 5-8),不强制 3-8
+    - 序号格式 + 每条含具体信息
 
-    注意：本类测试只验证 prompt 文本字面量，不验证 LLM 实际遵守。
-    issue #54 的字数下限验收依赖手动跑 check + trawler.log 对照。
+    注意：本类测试只验证 prompt 文本字面量,不验证 LLM 实际遵守。
     """
 
-    def test_prompt_contains_word_count_lower_bound(self) -> None:
-        """prompt 模板必须包含「400 字」字数下限约束。
-
-        断言强化（issue #54 review N4）：原 `assert "字" in TEMPLATE` 是 dead assertion
-        （模板里「字」出现几十次永远 PASS），改成紧邻字面量「400 字」。
-        """
+    def test_prompt_template_forbids_cot_output(self) -> None:
+        """prompt 必须含「禁止输出任何思考过程」+ 列出元话语黑名单。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        assert "400 字" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须含「400 字」字数下限紧邻字面量"
+        assert "禁止输出任何思考过程" in _ANALYSIS_PROMPT_TEMPLATE, (
+            "prompt 必须明令禁止输出思考过程(CoT 泄露根因)"
+        )
+        # 元话语黑名单至少含几个关键模式(覆盖线上泄露样本)
+        for meta_phrase in ("我重新组织", "总字数", "需要扩充", "不如忽略"):
+            assert meta_phrase in _ANALYSIS_PROMPT_TEMPLATE, (
+                f"prompt 必须把元话语 {meta_phrase!r} 列入黑名单"
+            )
+
+    def test_prompt_does_not_have_word_count_lower_bound(self) -> None:
+        """CoT 修复: prompt 必须不再含「400 字」下限(凑字数注水元凶)。"""
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        assert "400 字" not in _ANALYSIS_PROMPT_TEMPLATE, (
+            "prompt 不应再含「400 字」字数下限(促使 LLM 输出凑字数 CoT)"
+        )
+        assert "字数下限" not in _ANALYSIS_PROMPT_TEMPLATE, (
+            "prompt 不应再有「字数下限」措辞(改为「无硬性下限」)"
+        )
 
     def test_prompt_contains_word_count_upper_bound(self) -> None:
         """prompt 模板必须包含「1200 字」上限（避免 LLM 输出过长触发 max_tokens 截断）。"""
@@ -928,44 +948,34 @@ class TestPromptTemplateConstraints:
 
         assert "1200" in _ANALYSIS_PROMPT_TEMPLATE
 
-    def test_prompt_contains_keypoints_count_lower_bound(self) -> None:
-        """prompt 必须含「3-8 条要点」数量约束。
-
-        断言强化（issue #54 review）：去掉宽松 OR 后半段（`"3" in ... and "8" in ...`，
-        模板里 3 和 8 任意出处都会假 PASS），只接受紧邻的「3-8」字面约束。
-        """
+    def test_prompt_does_not_force_min_keypoints_count(self) -> None:
+        """CoT 修复: prompt 不再强制「3-8 条」下限,改为按信息量自然决定(2-3 / 5-8)。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        assert "3-8" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须含「3-8 条要点」数量约束"
+        # 不应再有「3-8」这种硬性范围(导致信息不足时硬凑要点)
+        assert "3-8" not in _ANALYSIS_PROMPT_TEMPLATE, (
+            "prompt 不应再有「3-8 条」硬性范围(改为按信息量 2-3 / 5-8)"
+        )
+        # 应该有按信息量分档的描述
+        assert "2-3" in _ANALYSIS_PROMPT_TEMPLATE
+        assert "5-8" in _ANALYSIS_PROMPT_TEMPLATE
 
     def test_prompt_requires_numbered_list_format(self) -> None:
-        """prompt 必须要求用「1. 」「2. 」中文序号格式表达要点。
-
-        断言强化（issue #54 review）：不能只看模板任意位置是否有 "1."，
-        要定位到 `## 摘要` 段说明区（## 摘要 之后、## 一句话总结 之前），
-        断言该子串同时含「1. 」和「3. 」序号约束。
-        """
+        """prompt 必须要求用「1. 」「2. 」中文序号格式表达要点。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        # 定位 `## 摘要\n` 之后到 `## 一句话总结\n` 之前的子串
-        # （两个 find 都带 \n，避免匹配到 prompt 第一段说明区的标题引用）
         summary_start = _ANALYSIS_PROMPT_TEMPLATE.find("## 摘要\n")
         next_section = _ANALYSIS_PROMPT_TEMPLATE.find("## 一句话总结\n")
         assert summary_start != -1, "prompt 必须含 `## 摘要` 段标题"
         assert next_section != -1, "prompt 必须含 `## 一句话总结` 段标题"
         summary_block = _ANALYSIS_PROMPT_TEMPLATE[summary_start:next_section]
         assert "1. " in summary_block, "## 摘要 段必须含「1. 」序号约束"
-        assert "3. " in summary_block, "## 摘要 段必须含「3. 」序号约束（要求至少 3 条要点）"
+        assert "3. " in summary_block, "## 摘要 段必须含「3. 」序号样例"
 
     def test_prompt_requires_concrete_info_per_point(self) -> None:
-        """prompt 必须要求每条要点含具体信息（数据/案例/时间/论据），不只复述标题。
-
-        断言强化（issue #54 review B3）：原 `any(... 6 选 1)` 过弱，
-        模板偶然出现一个关键词就 PASS。改成锁两个核心关键词（数据 + 论据）。
-        """
+        """prompt 必须要求每条要点含具体信息（数据/案例/时间/论据），不只复述标题。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        # 锁两个核心关键词（数据 / 论据），不是 any 6 选 1
         assert "数据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「数据」类具体信息"
         assert "论据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「论据」类具体信息"
 
@@ -993,26 +1003,164 @@ class TestPromptTemplateConstraints:
         assert "A" in rendered
         assert "正文" in rendered
 
-    def test_prompt_constraints_arithmetically_feasible(self) -> None:
-        """Issue #54 review B3: prompt 字数约束必须算术可达。
 
-        防止再次写出「字数下限 vs 条数下限 × 每条上限」的不可达约束组合：
-        例如旧 prompt「3 条 × 每条 100 字 = 300 字 < 400 字下限」LLM 无法同时满足。
+class TestStripCotLeakage:
+    """CoT 泄露修复: parse_markdown_analysis 解析后对 summary 做 CoT 截断。"""
 
-        断言：最少条数 × 每条字数上限 ≥ 字数下限。
+    def test_strip_cot_leakage_truncates_at_meta_speech(self) -> None:
+        """summary 含「我重新组织:...」时,从该处截断保留前半部分(真正答案)。"""
+        from core.summarizer import _strip_cot_leakage
 
-        注意：如果 prompt 改了约束数字，同步改本测试的三个常量。
-        （不真的正则解析 prompt —— 过度工程；硬编码常量 + docstring 同步提示足够。）
-        """
-        # 与 _ANALYSIS_PROMPT_TEMPLATE 中「## 摘要」段的约束数字保持一致
-        min_words = 400          # 「字数下限 400 字」
-        min_points = 3           # 「3-8 条要点」的下限
-        max_per_point = 150      # 「每条 30-150 字」的上限
-
-        # 最少条数场景（min_points 条）下，每条都顶到 max_per_point 字，
-        # 总字数必须 ≥ min_words，否则 LLM 永远无法满足下限约束。
-        assert min_points * max_per_point >= min_words, (
-            f"prompt 约束算术不可达：{min_points} 条 × {max_per_point} 字/条 "
-            f"= {min_points * max_per_point} 字 < {min_words} 字下限。"
-            "请调高 max_per_point 或调低 min_words/min_points。"
+        # 模拟线上泄露样本:前半是真正摘要,后半是模型自言自语
+        cot_summary = (
+            "1. 视频讲的是短视频起号方法论。\n"
+            "2. 关键点是稳定输出。\n"
+            "我重新组织:这样5点,每条字数约...总约300字,不够400。"
+            "所以需要每条扩充..."
         )
+        result = _strip_cot_leakage(cot_summary)
+        # 截断在「我重新组织」之前
+        assert "我重新组织" not in result
+        assert "不够400" not in result
+        # 前半部分保留
+        assert "短视频起号方法论" in result
+        assert "稳定输出" in result
+
+    def test_strip_cot_leakage_preserves_clean_summary(self) -> None:
+        """正常 summary 不含元话语,不应被截断。"""
+        from core.summarizer import _strip_cot_leakage
+
+        clean_summary = (
+            "1. 视频开篇引用 2024 年数据。\n"
+            "2. 作者分析了算法机制。\n"
+            "3. 最后给出三个开放性问题。"
+        )
+        result = _strip_cot_leakage(clean_summary)
+        assert result == clean_summary
+
+    def test_strip_cot_leakage_detects_various_patterns(self) -> None:
+        """多种元话语模式都能被检测截断。"""
+        from core.summarizer import _strip_cot_leakage
+
+        # 「需要扩充」
+        assert "需要扩充" not in _strip_cot_leakage("真正答案。需要扩充:再来一点")
+        # 「不如忽略」
+        assert "不如忽略" not in _strip_cot_leakage("要点 A。不如忽略这个话题")
+        # 「总字数」
+        assert "总字数" not in _strip_cot_leakage("要点。总字数还差 100")
+
+    def test_strip_cot_leakage_keeps_original_if_truncated_empty(self) -> None:
+        """当元话语在 summary 起始处,截断后为空,且无其他 pattern 命中时,保留原样让上游 warning 可见。
+
+        helper 逻辑:遇到「截断后为空」的 pattern 会跳过该 pattern 继续尝试下一个;
+        若所有命中 pattern 都只能截断到空(或无 pattern 命中)则原样返回。
+        """
+        from core.summarizer import _strip_cot_leakage
+
+        # 以「我重新组织」开头(第一个 pattern),截断后为空;后续无其他 pattern 命中
+        pure_cot_at_start = "我重新组织一下内容"
+        result = _strip_cot_leakage(pure_cot_at_start)
+        assert result == pure_cot_at_start
+
+    def test_strip_cot_leakage_clean_text_unchanged(self) -> None:
+        """不含任何元话语的 summary 原样返回。"""
+        from core.summarizer import _strip_cot_leakage
+
+        clean = "1. 要点。2. 另一个要点。"
+        assert _strip_cot_leakage(clean) == clean
+
+    def test_parse_markdown_analysis_applies_cot_strip(self) -> None:
+        """parse_markdown_analysis 解析出的 summary 已经过 CoT 截断。"""
+        raw = """## 摘要
+1. 真正的要点。
+
+我重新组织:这里开始是思考过程,总字数不够。
+
+## 一句话总结
+一句话
+
+## 关键词
+A"""
+        result = parse_markdown_analysis(raw)
+        assert "我重新组织" not in result.summary
+        assert "真正的要点" in result.summary
+
+    def test_cot_patterns_covers_online_leakage_sample(self) -> None:
+        """回归保护: _COT_PATTERNS 必须覆盖线上泄露样本的关键元话语。"""
+        from core.summarizer import _COT_PATTERNS
+
+        # 线上泄露样本观察到的关键短语
+        must_cover = ["我重新组织", "总字数", "需要扩充"]
+        for phrase in must_cover:
+            assert phrase in _COT_PATTERNS, f"_COT_PATTERNS 必须覆盖线上泄露短语 {phrase!r}"
+
+
+class TestMaxTokensConfigurable:
+    """max_tokens 可配: AnalysisConfig.max_tokens → OpenAIProvider payload。"""
+
+    def test_analysis_config_has_max_tokens_default_8192(self) -> None:
+        """AnalysisConfig 新增 max_tokens 字段,默认 8192(防长内容截断)。"""
+        cfg = AnalysisConfig()
+        assert cfg.max_tokens == 8192
+
+    def test_openai_provider_default_max_tokens_8192(self) -> None:
+        """OpenAIProvider 不传 max_tokens 时默认 8192(不再是硬编码 4096)。"""
+        provider = OpenAIProvider(api_base="https://x", api_key="k")
+        assert provider._max_tokens == 8192
+
+    def test_openai_provider_accepts_custom_max_tokens(self) -> None:
+        """OpenAIProvider 构造函数接受 max_tokens 参数。"""
+        provider = OpenAIProvider(api_base="https://x", api_key="k", max_tokens=16384)
+        assert provider._max_tokens == 16384
+
+    def test_max_tokens_configurable_via_analysis_config(self) -> None:
+        """AnalysisConfig 设 max_tokens=16384 → create_provider 构建的 provider 用该值。"""
+        config = AnalysisConfig(
+            provider="openai",
+            api_base="https://example.com/v1",
+            api_key="k",
+            model_name="gpt-4o-mini",
+            max_tokens=16384,
+        )
+        chain = create_provider(config)
+        # 主 provider 是 OpenAIProvider
+        provider = chain._providers[0]
+        assert isinstance(provider, OpenAIProvider)
+        assert provider._max_tokens == 16384
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_appears_in_payload(self) -> None:
+        """generate 调用时 payload 的 max_tokens 字段使用配置值(非硬编码 4096)。"""
+        import json
+
+        provider = OpenAIProvider(
+            api_base="https://example.com/v1", api_key="k", max_tokens=2048
+        )
+        captured_payload: dict = {}
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_response = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_response.status_code = 200
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = {
+                "choices": [{"message": {"content": "## 摘要\nok"}}]
+            }
+
+            # 捕获 post 调用的 payload
+            def capture_post(url, json=None, headers=None, timeout=None):  # type: ignore[no-untyped-def]
+                captured_payload.update(json or {})
+                # 返回一个 awaitable-ish 的 MagicMock(实际通过 return_value 配置)
+                return mock_response
+
+            mock_client.post.side_effect = capture_post
+
+            await provider.generate("test prompt")
+
+        assert captured_payload.get("max_tokens") == 2048, (
+            f"payload max_tokens 应为 2048,实际 {captured_payload.get('max_tokens')!r}"
+        )
+        # 回归保护: 不再是旧的硬编码 4096
+        _ = json  # silence unused import warning if any
+        assert captured_payload.get("max_tokens") != 4096

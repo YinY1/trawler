@@ -127,6 +127,9 @@ class LLMProviderConfig:
     api_base: str = ""
     api_key: str = ""
     model_name: str = ""
+    # LLM 单次响应最大 token 数（默认 8192，防长内容被 max_tokens 截断）。
+    # 主 provider 的 max_tokens 从 AnalysisConfig 透传过来；extra_providers 各自配置。
+    max_tokens: int = 8192
 
 
 @dataclass
@@ -146,6 +149,8 @@ class AnalysisConfig:
     api_base: str = ""
     api_key: str = ""
     model_name: str = ""
+    # LLM 单次响应最大 token 数（防长内容被 max_tokens 截断导致解析失败）。
+    max_tokens: int = 8192
     # fallback 链（按序尝试，前一个失败才用下一个）
     extra_providers: list[LLMProviderConfig] = field(default_factory=list)
 
@@ -172,6 +177,7 @@ class AnalysisConfig:
                     api_base=self.api_base,
                     api_key=self.api_key,
                     model_name=self.model_name,
+                    max_tokens=self.max_tokens,
                 )
             )
         chain.extend(self.extra_providers)
@@ -393,6 +399,11 @@ def _apply_env_overrides(cfg: Config) -> None:
         cfg.analysis.model_name = v
     if v := os.environ.get("TRAWLER_LLM_PROVIDER"):
         cfg.analysis.provider = v
+    if v := os.environ.get("TRAWLER_LLM_MAX_TOKENS"):
+        try:
+            cfg.analysis.max_tokens = int(v)
+        except ValueError:
+            logger.warning("TRAWLER_LLM_MAX_TOKENS=%r 不是合法整数,使用默认值 %d", v, cfg.analysis.max_tokens)
 
 
 async def load_config(path: str | Path = "config/config.toml") -> Config:

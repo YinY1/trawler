@@ -25,22 +25,26 @@ logger = logging.getLogger(__name__)
 
 _ANALYSIS_PROMPT_TEMPLATE = """\
 你是内容分析助手。请阅读以下内容，严格按下面的 Markdown 格式输出分析结果，\
-不要输出任何额外说明或前后缀。每个字段必须以指定标题开头（## 摘要 / ## 一句话总结 / \
-## 关键词 / ## 标签）。如果某字段无法填写，输出该标题并留空内容。
+不要输出任何额外说明或前后缀。
 
-重要：字段标题（## 摘要 等）仅作为分隔符，用于解析。字段内容必须是纯文本，\
+【最高优先级规则——违反即视为失败】
+1. 直接输出最终分析结果，禁止输出任何思考过程、推理步骤、自我对话、草稿、\
+字数计算或调整说明。包括但不限于："让我分析"、"我重新组织"、"总字数"、\
+"需要扩充"、"我们可以"、"不如忽略"等元话语。如果你发现自己的输出包含这类内容，\
+立即停止并只输出最终答案。
+2. 字段标题（## 摘要 等）仅作为分隔符用于解析，字段内容必须是纯文本，\
 禁止使用任何 Markdown 语法（不要使用 **粗体**、*斜体*、[链接](url)、`代码`、```代码块```、\
-> 引用 等标记）。摘要部分必须用「1. 」「2. 」这样的中文序号表达要点，\
+> 引用 等标记）。
+3. 摘要部分必须用「1. 」「2. 」中文序号表达要点，\
 不要使用「- 」开头的 markdown 列表。
 
 输出格式（必须严格遵循）：
 
 ## 摘要
-（详细总结，覆盖所有重要观点。字数下限 400 字、上限 1200 字。\
-按「1. 」「2. 」「3. 」中文序号列出 3-8 条要点，按重要性排序；\
-每条 30-150 字；每条必须含具体信息（数据、案例、时间、地点、人名、引用、论据），\
-不要只复述标题。如视频/正文较长且信息密度高，应优先覆盖更多要点而非压缩每条字数。\
-如内容确实不足 400 字（如短动态、短评论），按实际信息量输出但必须穷尽要点。）
+（覆盖所有重要观点的总结。按「1. 」「2. 」「3. 」中文序号列出要点，\
+按重要性排序；每条含具体信息（数据、案例、时间、地点、人名、引用、论据），\
+不要只复述标题。要点数量按信息量自然决定：信息少则 2-3 条，信息多则 5-8 条，\
+不要为凑数量或字数注水。每条字数按内容自然展开，无硬性下限。总字数上限 1200 字。）
 
 ## 一句话总结
 （单句概括，不超过 40 字）
@@ -131,6 +135,47 @@ def _parse_list_field(body: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+# CoT 泄露检测：reasoning 模型可能把思考过程写进 summary。
+# 检测元话语模式，从首次出现处截断（前半部分通常是真正的答案）。
+# 注意：列表项含正则元字符（如 "不够.*字"）的会被 re.search 当作模式使用。
+_COT_PATTERNS: list[str] = [
+    "我重新组织",
+    "总字数",
+    "需要扩充",
+    "需要增加",
+    "我们可以",
+    "不如忽略",
+    "字数不够",
+    "不够400",
+    "不够.*字",
+    "让我分析",
+    "我们来",
+    "重新调整",
+]
+
+
+def _strip_cot_leakage(summary: str) -> str:
+    """检测并截断 CoT 泄露（思考过程混入摘要）。
+
+    在 summary 中按 _COT_PATTERNS 顺序搜索首个命中的元话语，
+    从命中处截断，保留前半部分（通常是真正的答案）。
+    若整段都是 CoT（截断后为空），保留原样让上游 warning 可见。
+    """
+    for pattern in _COT_PATTERNS:
+        match = re.search(pattern, summary)
+        if match:
+            truncated = summary[: match.start()].rstrip()
+            if truncated:
+                logger.warning(
+                    "AI 摘要疑似 CoT 泄露,已截断 (pattern=%r, 原长度=%d, 截断后=%d)",
+                    pattern,
+                    len(summary),
+                    len(truncated),
+                )
+                return truncated
+    return summary
+
+
 def parse_markdown_analysis(raw: str) -> AnalysisResult:
     """将 AI 输出的 Markdown 解析为 ``AnalysisResult``。
 
@@ -141,8 +186,9 @@ def parse_markdown_analysis(raw: str) -> AnalysisResult:
     - Issue #56: 保留原始 raw 文本到 ``result.raw``，供 handler 在解析为空时观测。
     """
     text = _strip_code_fence(raw)
+    summary = _strip_cot_leakage(_extract_section(text, _SECTION_PATTERNS["summary"]))
     return AnalysisResult(
-        summary=_extract_section(text, _SECTION_PATTERNS["summary"]),
+        summary=summary,
         one_line_summary=_extract_section(text, _SECTION_PATTERNS["one_line_summary"]),
         keywords=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["keywords"]))[:5],
         tags=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["tags"]))[:3],
@@ -165,10 +211,12 @@ class OpenAIProvider:
         api_base: str,
         api_key: str = "",
         model_name: str = "gpt-4o-mini",
+        max_tokens: int = 8192,
     ) -> None:
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.model_name = model_name
+        self._max_tokens = max_tokens
 
     async def generate(self, prompt: str) -> str:
         import httpx
@@ -182,7 +230,7 @@ class OpenAIProvider:
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
-            "max_tokens": 4096,
+            "max_tokens": self._max_tokens,
         }
 
         logger.debug("调用 OpenAI 兼容 API (model=%s)...", self.model_name)
@@ -203,27 +251,18 @@ class OpenAIProvider:
         data = response.json()
         try:
             message = data["choices"][0]["message"]
-            # Issue #56 场景 A: reasoning 模型（如 deepseek-v4-flash）通过 exusiai 网关时，
-            # 长文本场景 content="" / content=null，答案错放到 reasoning_content 字段。
-            # content 非空时优先用 content（保持原有行为），content 为空时 fallback 到 reasoning_content。
-            # 不拼接两者：reasoning_content 通常是思考链，包含大量中间推理，
-            # 与最终答案混在一起会破坏解析。
+            # 不再 fallback 到 reasoning_content:那是思考链(CoT),不是最终答案。
+            # content 为空时返回空字符串,让上游 analyze_content 标记 source="empty",
+            # 运维可见,而非用推理流水账静默填充摘要。
             content = message.get("content") or ""
-            # Issue #56: whitespace-only content（'   ' / '\n'）是 truthy 字符串，
-            # 仅判 falsy 会漏过，最终 .strip() == "" 再次 silent empty。
-            # 改为判 .strip()，让空白 content 同样 fallback 到 reasoning_content。
-            if not content.strip():
-                reasoning = message.get("reasoning_content") or ""
-                if reasoning:
-                    logger.debug(
-                        "OpenAI content 为空，fallback 到 reasoning_content (model=%s, len=%d)",
-                        self.model_name,
-                        len(reasoning),
-                    )
-                    content = reasoning
-            # Issue #56: 记录 raw response 截断（%.500s 是 printf-style 截断到 500 字符，
-            # logging 标准用法，避免 % 字段顺序问题）。仅 INFO 看不到，运维设置
-            # LOG_LEVEL=DEBUG 时可见。
+            if not content.strip() and message.get("reasoning_content"):
+                logger.warning(
+                    "OpenAI content 为空但 reasoning_content 非空 (model=%s),"
+                    "拒绝 fallback 到思考链,返回空",
+                    self.model_name,
+                )
+            # 记录 raw response 截断（%.500s 是 printf-style 截断到 500 字符）。
+            # 仅 INFO 看不到,运维设置 LOG_LEVEL=DEBUG 时可见。
             logger.debug(
                 "LLM raw response (model=%s, content_len=%d): %.500s",
                 self.model_name,
@@ -297,6 +336,10 @@ def _build_single_provider(p_cfg: AnalysisConfig | LLMProviderConfig) -> LLMProv
     """
     provider_name = p_cfg.provider.lower().strip()
 
+    # max_tokens 从 AnalysisConfig（透传到 LLMProviderConfig）传给 provider。
+    # LLMProviderConfig 和 AnalysisConfig 都有此字段（默认 8192）。
+    max_tokens = getattr(p_cfg, "max_tokens", 8192)
+
     if provider_name == "openai":
         if not p_cfg.api_base:
             raise ValueError("OpenAI provider 需要配置 api_base")
@@ -304,12 +347,14 @@ def _build_single_provider(p_cfg: AnalysisConfig | LLMProviderConfig) -> LLMProv
             api_base=p_cfg.api_base,
             api_key=p_cfg.api_key,
             model_name=p_cfg.model_name or "gpt-4o-mini",
+            max_tokens=max_tokens,
         )
     elif provider_name == "ollama":
         return OpenAIProvider(
             api_base=p_cfg.api_base or "http://localhost:11434/v1",
             api_key=p_cfg.api_key or "ollama",
             model_name=p_cfg.model_name or "qwen2.5:7b",
+            max_tokens=max_tokens,
         )
     else:
         raise ValueError(f"不支持的 provider: {p_cfg.provider}")
