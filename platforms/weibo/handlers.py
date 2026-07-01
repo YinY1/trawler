@@ -202,12 +202,17 @@ async def weibo_push(ctx: PhaseContext) -> bool:
         logger.info("订阅未配置 endpoints")
         return True
 
+    # TEXT 类型(无视频)不走 SUMMARIZED 阶段, ctx.summary_text 恒空;
+    # 此时 fallback 到 ctx.content_text(download handler 已填充的正文原文),
+    # 让通知正文不再丢失 (issue #70)。
+    # 复用 summary 字段承载:VIDEO 类型 = AI 摘要;TEXT 类型 = 正文原文。
+    summary_text = ctx.summary_text or ctx.content_text
     content = NotificationContent(
         platform="weibo",
         source_id=post_id,
         title=ctx.msg.title,
         author=ctx.msg.author,
-        summary=ctx.summary_text,
+        summary=summary_text,
         keywords=ctx.keywords,
         comment_highlights=ctx.comment_highlights or "",
     )
