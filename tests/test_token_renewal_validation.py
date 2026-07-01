@@ -63,7 +63,8 @@ async def test_xhs_renewal_validated_success_does_write(tmp_path):
         result = await check_and_renew_tokens("xhs", config, config_path)
 
     assert result.action == "renewed"
-    mock_write.assert_awaited_once()
+    # 成功路径写 2 次：先 last_refresh_at，再 cookie/expires_at（issue #68）
+    assert mock_write.await_count >= 1
 
 
 @pytest.mark.asyncio

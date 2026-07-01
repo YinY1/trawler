@@ -46,6 +46,7 @@ class XhsAuth:
     cookie: str = ""
     expires_at: float = 0.0
     nickname: str = ""
+    last_refresh_at: float = 0.0  # 上次成功刷新的时间戳；运行时状态，无需手动配置
 
 
 @dataclass
@@ -53,6 +54,7 @@ class WeiboAuth:
     cookie: str = ""
     expires_at: float = 0.0
     nickname: str = ""
+    last_refresh_at: float = 0.0  # 上次成功刷新的时间戳；运行时状态，无需手动配置
 
 
 # ── 下载配置 ──────────────────────────────────────────────────

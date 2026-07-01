@@ -214,3 +214,151 @@ class TestCheckAndRenewSessionExpired:
         assert result.action == "expired"
         assert config.bilibili.auth.expires_at == 0.0
         mock_update.assert_awaited_once()
+
+
+# ── Issue #68: max_interval_hours 对 xhs/weibo 生效 ──────────────
+
+
+class TestMaxIntervalAllPlatforms:
+    """max_interval_hours 决策对三平台统一生效（不再只对 bilibili 有效）。
+
+    构造场景：token 还很新（剩余 30 天，远超 min_interval=24h 与 force_before=7d），
+    此时 should_renew 唯一可能触发的分支是 max_interval_exceeded。
+    """
+
+    EXPIRES_OFFSET = 30 * 86400  # 30 天后过期，避开 force_soon / within_interval
+
+    def test_bilibili_max_interval_still_works(self) -> None:
+        """回归：bilibili 的 max_interval 仍生效。"""
+        config = RenewalConfig(max_interval_hours=24)
+        tokens = _make_tokens("bilibili", expires_offset=self.EXPIRES_OFFSET)
+        # last_refresh_at 在 48h 前 → 超过 max_interval=24h
+        stale = time.time() - 48 * 3600
+        decision = should_renew(tokens, config, last_refresh_at=stale)
+        assert decision == RenewalDecision(True, "max_interval_exceeded")
+
+    def test_xhs_max_interval_triggers_renew_when_stale(self) -> None:
+        """xhs: last_refresh_at 超过 max_interval_hours → should_renew=True。"""
+        config = RenewalConfig(max_interval_hours=24)
+        tokens = _make_tokens("xhs", expires_offset=self.EXPIRES_OFFSET)
+        stale = time.time() - 48 * 3600
+        decision = should_renew(tokens, config, last_refresh_at=stale)
+        assert decision == RenewalDecision(True, "max_interval_exceeded")
+
+    def test_weibo_max_interval_triggers_renew_when_stale(self) -> None:
+        """weibo: last_refresh_at 超过 max_interval_hours → should_renew=True。"""
+        config = RenewalConfig(max_interval_hours=24)
+        tokens = _make_tokens("weibo", expires_offset=self.EXPIRES_OFFSET)
+        stale = time.time() - 48 * 3600
+        decision = should_renew(tokens, config, last_refresh_at=stale)
+        assert decision == RenewalDecision(True, "max_interval_exceeded")
+
+    def test_max_interval_not_triggered_when_fresh(self) -> None:
+        """last_refresh_at 在 max_interval 内 → not_needed。"""
+        config = RenewalConfig(max_interval_hours=24)
+        tokens = _make_tokens("xhs", expires_offset=self.EXPIRES_OFFSET)
+        fresh = time.time() - 6 * 3600  # 6h 前，未超 24h
+        decision = should_renew(tokens, config, last_refresh_at=fresh)
+        assert decision == RenewalDecision(False, "not_needed")
+
+
+class TestGetLastRefreshAtAllPlatforms:
+    """_get_last_refresh_at 对三平台都能读出 auth.last_refresh_at。"""
+
+    def test_bilibili(self) -> None:
+        from shared.auth.scheduler import _get_last_refresh_at
+
+        config = Config()
+        ts = 1700000000.0
+        config.bilibili.auth.last_refresh_at = ts
+        assert _get_last_refresh_at("bilibili", config) == ts
+
+    def test_xhs(self) -> None:
+        from shared.auth.scheduler import _get_last_refresh_at
+
+        config = Config()
+        ts = 1700000000.0
+        config.xiaohongshu.auth.last_refresh_at = ts
+        assert _get_last_refresh_at("xhs", config) == ts
+
+    def test_weibo(self) -> None:
+        from shared.auth.scheduler import _get_last_refresh_at
+
+        config = Config()
+        ts = 1700000000.0
+        config.weibo.auth.last_refresh_at = ts
+        assert _get_last_refresh_at("weibo", config) == ts
+
+
+class TestUpdateLastRefreshAtWritesTimestamp:
+    """续期成功后 last_refresh_at 被更新（内存 + 写盘），三平台一致。"""
+
+    async def _run_renew_success(self, platform: str, config: Config) -> None:
+        """Helper: 触发一次续期成功路径，断言 last_refresh_at 被写回。
+
+        旧 token 处于 force_soon 区间（剩余 6 天 < force_before=7d）以触发续期；
+        refresh_tokens 返回 obtained_at 更新的新 token，validate_tokens 通过。
+        """
+        now = time.time()
+        new_tokens = PlatformTokens(
+            platform=platform,
+            cookies={"k": "v"},
+            obtained_at=now,  # > 旧 tokens.obtained_at，触发"真的刷新了"
+            expires_at=now + 30 * 86400,
+        )
+        mock_auth = MagicMock()
+        mock_auth.refresh_tokens = AsyncMock(return_value=new_tokens)
+        mock_auth.validate_tokens = AsyncMock(return_value=True)
+        mock_auth.close = AsyncMock()
+
+        with (
+            patch(
+                "shared.auth.scheduler._get_authenticator_for_platform",
+                return_value=mock_auth,
+            ),
+            patch(
+                "shared.auth.scheduler._build_tokens_from_config",
+                return_value=_make_tokens(platform, expires_offset=6 * 86400),
+            ),
+            patch(
+                "shared.auth.update_auth_section",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            result = await check_and_renew_tokens(
+                platform, config, config_path="config/config.toml"
+            )
+
+        assert result.action == "renewed"
+
+        # 内存被更新（_update_last_refresh_at 与 update_auth_section 两次调用都会经过 mock）
+        # 至少一次 update_auth_section 带 last_refresh_at
+        last_refresh_calls = [
+            c for c in mock_update.await_args_list
+            if c.args and len(c.args) >= 2 and "last_refresh_at" in (c.args[1] or {})
+        ]
+        assert last_refresh_calls, (
+            f"{platform}: 期望至少一次 update_auth_section 带 last_refresh_at"
+        )
+
+    async def test_xhs_renew_updates_last_refresh_at(self) -> None:
+        config = Config()
+        config.xiaohongshu.auth.cookie = "fake=1"
+        config.xiaohongshu.auth.expires_at = time.time() + 30 * 86400
+        await self._run_renew_success("xhs", config)
+        assert config.xiaohongshu.auth.last_refresh_at > 0
+
+    async def test_weibo_renew_updates_last_refresh_at(self) -> None:
+        config = Config()
+        config.weibo.auth.cookie = "fake=1"
+        config.weibo.auth.expires_at = time.time() + 30 * 86400
+        await self._run_renew_success("weibo", config)
+        assert config.weibo.auth.last_refresh_at > 0
+
+    async def test_bilibili_renew_updates_last_refresh_at(self) -> None:
+        """回归：bilibili 续期后仍写回 last_refresh_at。"""
+        config = Config()
+        config.bilibili.auth.sessdata = "fake"
+        config.bilibili.auth.expires_at = time.time() + 30 * 86400
+        await self._run_renew_success("bilibili", config)
+        assert config.bilibili.auth.last_refresh_at > 0

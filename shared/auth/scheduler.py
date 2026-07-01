@@ -213,9 +213,13 @@ def _update_config_memory(platform: str, config: Config, tokens: PlatformTokens,
 
 
 def _get_last_refresh_at(platform: str, config: Config) -> float:
-    """获取上次刷新尝试的时间戳。"""
+    """获取平台上次成功刷新 token 的时间戳。"""
     if platform == "bilibili":
         return config.bilibili.auth.last_refresh_at
+    if platform == "xhs":
+        return config.xiaohongshu.auth.last_refresh_at
+    if platform == "weibo":
+        return config.weibo.auth.last_refresh_at
     return 0.0
 
 
@@ -246,9 +250,16 @@ def _update_config_memory_expired(platform: str, config: Config) -> None:
 
 
 async def _update_last_refresh_at(platform: str, config: Config, timestamp: float, config_path: str) -> None:
-    """更新上次刷新尝试时间到配置文件和内存。"""
+    """更新上次成功刷新时间到配置文件和内存（三平台统一）。"""
     from shared.auth import update_auth_section
 
     if platform == "bilibili":
         config.bilibili.auth.last_refresh_at = timestamp
-        await update_auth_section(platform, {"last_refresh_at": timestamp}, config_path=config_path)
+    elif platform == "xhs":
+        config.xiaohongshu.auth.last_refresh_at = timestamp
+    elif platform == "weibo":
+        config.weibo.auth.last_refresh_at = timestamp
+    else:
+        return
+
+    await update_auth_section(platform, {"last_refresh_at": timestamp}, config_path=config_path)
