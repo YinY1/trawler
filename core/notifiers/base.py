@@ -5,6 +5,18 @@ from __future__ import annotations
 from shared.constants import GIT_SHA
 from shared.protocols import NotificationContent
 
+# 通知正文最大长度（字符数）。TEXT 类型 summary 承载原文，可能数千字，
+# 超长会导致 Telegram 4096 上限 400 错误或刷屏。1000 字符兼顾可读性与通道限制。
+MAX_NOTIFICATION_SUMMARY_LENGTH = 1000
+
+
+def _truncate_summary(text: str, max_len: int = MAX_NOTIFICATION_SUMMARY_LENGTH) -> str:
+    """截断超长通知正文，加 ... 后缀。短文本不受影响。"""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+
+
 # 各 platform 的 title emoji 和"作者"标签
 _PLATFORM_STYLE: dict[str, dict[str, str]] = {
     "bili": {"emoji": "📹", "author_label": "UP主"},
@@ -41,7 +53,7 @@ def render_markdown(content: NotificationContent) -> tuple[str, str]:
     # 健康告警（issue #55）：简化模板 + 版本 footer
     # 决策 5 限定：仅 health_alert 分支追加版本号，content/dynamic 不动
     if content.type == "health_alert":
-        parts = [content.summary or content.title, "", f"(trawler@{GIT_SHA[:7]})"]
+        parts = [_truncate_summary(content.summary or content.title), "", f"(trawler@{GIT_SHA[:7]})"]
         return content.title, "\n".join(parts)
 
     if content.type == "dynamic":
@@ -49,7 +61,7 @@ def render_markdown(content: NotificationContent) -> tuple[str, str]:
         parts: list[str] = [f"{style['author_label']}: {content.author}"]
         if url:
             parts.append(f"链接: {content.source_id} {url}")
-        parts.extend(["", content.summary or content.title])
+        parts.extend(["", _truncate_summary(content.summary or content.title)])
         return f"📢 {content.author} 的动态", "\n".join(parts)
 
     # 默认：完整内容模板
@@ -59,7 +71,7 @@ def render_markdown(content: NotificationContent) -> tuple[str, str]:
         f"关键词: {keywords_str}",
         "",
         "详情:",
-        content.summary,
+        _truncate_summary(content.summary),
     ]
     if content.comment_highlights:
         parts.extend(["", "评论区补充:", content.comment_highlights])
