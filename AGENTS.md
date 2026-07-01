@@ -1,11 +1,11 @@
 # Trawler Project Rules
 
-Python 3.12 trawler project. Overrides global rules where they conflict.
+Python 3.14 trawler project. Overrides global rules where they conflict.
 
 ## Commands
 
 ```bash
-uv venv --python 3.12                             # 创建虚拟环境（首次）
+uv venv --python 3.14                             # 创建虚拟环境（首次）
 uv pip install -e ".[dev]"                        # 安装依赖（含 dev，不含 xhs 和 transcribe）
 uv pip install -e ".[transcribe]"                 # 额外安装语音转写依赖（可选）
 uv run ruff check .                              # lint
@@ -55,7 +55,7 @@ platforms/       平台适配层: bilibili/, xiaohongshu/
 ### 修改配置结构
 - 改 `shared/config.py` 的 dataclass
 - 保持 `_apply_env_overrides()` 同步更新
-- `config.yaml.example` 同步更新
+- `config.toml.example` / `cookies.toml.example` / `subscriptions.toml.example` 同步更新
 
 ## Gotchas
 
