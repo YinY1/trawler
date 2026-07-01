@@ -10,14 +10,21 @@ from __future__ import annotations
 import logging
 
 from core.engine import PipelineEngine
-from core.notifiers import send_to_subscription
+from core.notifiers import log_fanout_results, send_to_subscription
 from core.transcriber import cleanup_media
 from platforms.xiaohongshu.downloader import download_note
 from platforms.xiaohongshu.monitor import fetch_user_notes
 from platforms.xiaohongshu.parser import parse_note_content
 from shared.config import Config
 from shared.message_store import MessageStore
-from shared.protocols import ContentType, NoteInfo, NotificationContent, Phase, PhaseContext
+from shared.protocols import (
+    ContentType,
+    NoteInfo,
+    NotificationContent,
+    Phase,
+    PhaseContext,
+    find_subscription_by_ref,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,11 +136,7 @@ async def xhs_push(ctx: PhaseContext) -> bool:
 
     note_id = ctx.msg.msg_id.replace("xhs:", "")
 
-    matched = None
-    for sub in ctx.config.xiaohongshu.subscriptions:
-        if sub.user_id == ctx.msg.subscription_ref:
-            matched = sub
-            break
+    matched = find_subscription_by_ref(ctx.config, "xhs", ctx.msg.subscription_ref)
     if matched is None:
         logger.warning("未找到 subscription_ref=%s 对应的订阅", ctx.msg.subscription_ref)
         return True
@@ -157,8 +160,7 @@ async def xhs_push(ctx: PhaseContext) -> bool:
     )
     logger.info("推送 %s 到 %d 个端点...", ctx.msg.msg_id, len(matched.notify_endpoints))
     results = await send_to_subscription(ctx.config, "xhs", matched.notify_endpoints, content)
-    ok = sum(1 for r in results if r.success)
-    logger.info("通知推送完成 (%d/%d)", ok, len(results))
+    log_fanout_results(results)
 
     if ctx.config.transcribe.delete_after_transcribe and ctx.downloaded_filepath is not None:
         try:

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from shared.config import Config
+    from shared.config import BiliSubscription, Config, UserSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -384,3 +384,43 @@ class Notifier(Protocol):
     async def send(self, content: NotificationContent) -> SendResult:
         """渲染并推送一条通知。返回 SendResult（不抛异常，失败时填 error）。"""
         ...
+
+
+# ═══════════════════════════════════════════════════════════
+# push handler 共享 helper — 三平台 fan-out 反查订阅 + 日志去重 (#69)
+# ═══════════════════════════════════════════════════════════
+
+
+def find_subscription_by_ref(
+    config: Config, platform: str, subscription_ref: str
+) -> BiliSubscription | UserSubscription | None:
+    """按 subscription_ref 精确反查订阅对象（三平台 push handler 共用）。
+
+    不同平台 Subscription 子类的标识字段名不同（bili: ``uid`` / xhs·weibo:
+    ``user_id``），通过 platform 路由到对应子配置列表，再统一用 ``str()``
+    比对 ``subscription_ref``（detector 注入时也是 str）。
+
+    platform 取值: "bili" | "xhs" | "weibo"。
+    """
+    from shared.config import BiliSubscription, UserSubscription
+
+    if platform == "bili":
+        subs = config.bilibili.subscriptions
+        for sub in subs:
+            assert isinstance(sub, BiliSubscription)
+            if str(sub.uid) == subscription_ref:
+                return sub
+        return None
+
+    if platform == "xhs":
+        subs = config.xiaohongshu.subscriptions
+    elif platform == "weibo":
+        subs = config.weibo.subscriptions
+    else:
+        return None
+
+    for sub in subs:
+        assert isinstance(sub, UserSubscription)
+        if sub.user_id == subscription_ref:
+            return sub
+    return None

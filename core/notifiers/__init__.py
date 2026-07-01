@@ -25,6 +25,7 @@ __all__ = [
     "EmailNotifier",
     "get_notifiers_for_subscription",
     "send_to_subscription",
+    "log_fanout_results",
 ]
 
 
@@ -91,3 +92,14 @@ async def send_to_subscription(
             r = SendResult(endpoint_name=n.name, success=False, error=str(e))
         results.append(r)
     return results
+
+
+def log_fanout_results(results: list[SendResult], platform: str = "") -> None:
+    """记录 fan-out 推送结果日志（三平台 push handler 共用, #69）。
+
+    格式与原各 handler 内联实现保持一致: ``通知推送完成 (ok/total)``。
+    platform 非空时加前缀,便于多平台并发场景区分来源。
+    """
+    ok = sum(1 for r in results if r.success)
+    prefix = f"[{platform}] " if platform else ""
+    logger.info("%s通知推送完成 (%d/%d)", prefix, ok, len(results))
