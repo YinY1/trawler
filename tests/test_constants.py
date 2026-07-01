@@ -130,6 +130,9 @@ def test_no_env_no_git_falls_back_to_zero_and_unknown(monkeypatch, tmp_path):
     monkeypatch.delenv("TRAWLER_GIT_SHA", raising=False)
     monkeypatch.delenv("TRAWLER_BUILD_DATE", raising=False)
     monkeypatch.setattr(constants_mod, "_PROJECT_ROOT", tmp_path)
+    # short-sha cache 是模块级，import 时已 resolve，必须 reset 才能让 mock 生效
+    monkeypatch.setattr(constants_mod, "_short_sha_resolved", False)
+    monkeypatch.setattr(constants_mod, "_short_sha_cache", None)
 
     with (
         _patch_fn.object(constants_mod, "_run_git", return_value=None) as mock_git,
@@ -142,8 +145,9 @@ def test_no_env_no_git_falls_back_to_zero_and_unknown(monkeypatch, tmp_path):
         assert ver.endswith("+dev")
         assert sha == "dev"
         assert date == "unknown"
-        # _run_git 被调用 3 次：VERSION sha、GIT_SHA sha、BUILD_DATE log
-        assert mock_git.call_count == 3
+        # _run_git 调用 2 次：_get_version/_get_git_sha 共用 _get_short_sha（cache 后 1 次）
+        # + _get_build_date 的 git log（1 次）
+        assert mock_git.call_count == 2
 
 
 # ═══════════════════════════════════════════════════════════
@@ -161,6 +165,9 @@ def test_local_git_repo_version_includes_pyproject_and_sha(monkeypatch):
     monkeypatch.delenv("TRAWLER_VERSION", raising=False)
     monkeypatch.delenv("TRAWLER_GIT_SHA", raising=False)
     monkeypatch.delenv("TRAWLER_BUILD_DATE", raising=False)
+    # short-sha cache 是模块级，import 时已 resolve，必须 reset 才能让 mock 生效
+    monkeypatch.setattr(constants_mod, "_short_sha_resolved", False)
+    monkeypatch.setattr(constants_mod, "_short_sha_cache", None)
     with (
         _patch_fn.object(constants_mod, "_run_git", return_value="abc1234"),
         _force_package_not_found(),
@@ -210,6 +217,9 @@ def test_env_empty_string_falls_back(monkeypatch):
     monkeypatch.setenv("TRAWLER_GIT_SHA", "")
     monkeypatch.setenv("TRAWLER_BUILD_DATE", "")
     monkeypatch.setenv("TRAWLER_VERSION", "")
+    # short-sha cache 是模块级，import 时已 resolve，必须 reset 才能让 mock 生效
+    monkeypatch.setattr(constants_mod, "_short_sha_resolved", False)
+    monkeypatch.setattr(constants_mod, "_short_sha_cache", None)
     with _patch_fn.object(constants_mod, "_run_git", return_value="fakesha"):
         assert constants_mod._get_git_sha() == "fakesha"
 
@@ -221,6 +231,7 @@ def test_env_empty_string_falls_back(monkeypatch):
 
 def test_version_display_format_contains_all_parts(monkeypatch):
     """VERSION_DISPLAY 形如 ``<version>+<git_sha> (<build_date>)``。"""
+    monkeypatch.setenv("TRAWLER_VERSION", "0.1.0")
     monkeypatch.setenv("TRAWLER_GIT_SHA", "abc7def")
     monkeypatch.setenv("TRAWLER_BUILD_DATE", "2026-06-30T14:29:00Z")
     import importlib
@@ -231,6 +242,43 @@ def test_version_display_format_contains_all_parts(monkeypatch):
     assert "2026-06-30T14:29:00Z" in vd
     assert "+" in vd
     assert "(" in vd and ")" in vd
+    # 守卫：畸形串（双 + 号 / sha 重复）必须被捕获
+    assert vd.count("+") == 1, f"VERSION_DISPLAY 含多个 +：{vd!r}"
+    assert "abc7defabc7def" not in vd, f"sha 重复：{vd!r}"
+
+
+def test_version_display_no_duplicate_sha_in_dev(monkeypatch):
+    """dev 分支 VERSION 已含 ``+dev.<sha>`` 时，VERSION_DISPLAY 不再拼 GIT_SHA。
+
+    回归 PR #77 review：原 ``f"{VERSION}+{GIT_SHA} ..."`` 在 dev 分支会生成
+    畸形串 ``0.1.0+dev.abc1234+abc1234 (...)``（双 + 号 + sha 重复）。
+    """
+    monkeypatch.setenv("TRAWLER_VERSION", "0.1.0+dev.abc1234")
+    monkeypatch.setenv("TRAWLER_GIT_SHA", "abc1234")
+    monkeypatch.setenv("TRAWLER_BUILD_DATE", "2026-07-01T00:00:00Z")
+    import importlib
+
+    mod = importlib.reload(__import__("shared.constants", fromlist=[""]))
+    vd = mod.VERSION_DISPLAY
+    # 只能有一个 + 号（VERSION 自带的那个）
+    assert vd.count("+") <= 1, f"VERSION_DISPLAY 含多个 +：{vd!r}"
+    # sha 不得重复
+    assert "abc1234abc1234" not in vd, f"sha 重复：{vd!r}"
+    # 期望格式：VERSION (BUILD_DATE)
+    assert vd == "0.1.0+dev.abc1234 (2026-07-01T00:00:00Z)"
+
+
+def test_version_display_pure_version_includes_sha(monkeypatch):
+    """正式构建 VERSION 是纯 PEP 440（无 ``+``）时，VERSION_DISPLAY 用 GIT_SHA 注入 local segment。"""
+    monkeypatch.setenv("TRAWLER_VERSION", "0.1.0")
+    monkeypatch.setenv("TRAWLER_GIT_SHA", "abc1234")
+    monkeypatch.setenv("TRAWLER_BUILD_DATE", "2026-07-01T00:00:00Z")
+    import importlib
+
+    mod = importlib.reload(__import__("shared.constants", fromlist=[""]))
+    vd = mod.VERSION_DISPLAY
+    assert vd == "0.1.0+abc1234 (2026-07-01T00:00:00Z)"
+    assert vd.count("+") == 1
 
 
 def test_version_display_dev_renderable(monkeypatch):
