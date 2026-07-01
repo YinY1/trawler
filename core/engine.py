@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 from collections.abc import Awaitable, Callable
@@ -206,6 +207,48 @@ class PipelineEngine:
             store.save()
 
     @classmethod
+    async def _safe_process_message(
+        cls,
+        msg: Any,  # MessageRecord
+        config: Config,
+        store: MessageStore,
+    ) -> None:
+        """包裹 ``process_message``，pipeline crash 时强制 ``mark_error``。
+
+        Issue #72: detector / handler 抛 ``BaseException``（AttributeError、
+        KeyboardInterrupt 等）时，原 ``run_platform`` / ``run_specific_messages``
+        调用 ``process_message`` 没有 try/except，异常会冒泡中断整条消息处理循环，
+        消息状态停在崩溃前的 phase，``error`` 字段为空 → dashboard 不显示 error。
+
+        本方法保证：
+        - ``asyncio.CancelledError``：标记 ``"任务取消"`` 后 **re-raise**（取消信号必须传播）
+        - 其他 ``BaseException``：``mark_error(permanent=False)`` + log，**不 re-raise**
+          （让后续消息继续处理；permanent=False 因为这是崩溃不是确定性失败，
+          用户手动重试时可能恢复）
+        - 已有 ``msg.error`` 不被覆盖（保留原始失败原因，便于诊断）
+
+        Note: ``BaseException`` 而非 ``Exception`` —— 同步捕获 KeyboardInterrupt /
+        SystemExit，避免任务被硬中断后消息仍停留在中间状态。
+        """
+        try:
+            await cls.process_message(msg, config, store)
+        except asyncio.CancelledError:
+            if not msg.error:
+                store.mark_error(msg.msg_id, "任务取消", permanent=False)
+                store.save()
+            raise
+        except BaseException as e:  # noqa: BLE001 — 顶层 crash guard 必须兜底
+            if not msg.error:
+                store.mark_error(
+                    msg.msg_id,
+                    f"pipeline crash: {type(e).__name__}: {e}",
+                    permanent=False,
+                )
+                store.save()
+            logger.exception("process_message crash for msg %s", msg.msg_id)
+            # 不 re-raise：让后续消息继续处理
+
+    @classmethod
     async def run_platform(
         cls,
         config: Config,
@@ -258,7 +301,14 @@ class PipelineEngine:
         for key in matching_keys:
             detector = cls._detectors.get(key)
             if detector is not None:
-                await detector(config, store)
+                # Issue #72: detector crash 不应阻断后续 process loop。
+                # CancelledError 单独 re-raise（任务取消信号），其他异常 log + 继续。
+                try:
+                    await detector(config, store)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException:  # noqa: BLE001 — detector 顶层兜底
+                    logger.exception("detector %s crash (platform=%s)", key, platform)
 
         # 消息处理：仍使用原始 platform 字符串
         # （MessageRecord.platform 统一为 "bili"，不区分 video/dynamic）
@@ -270,7 +320,7 @@ class PipelineEngine:
                 # 跳过已有错误的消息，避免永久失败的消息无限重试
                 logger.info("⏭ 跳过错误消息: %s (%s)", msg.title, msg.error)
                 continue
-            await cls.process_message(msg, config, store)
+            await cls._safe_process_message(msg, config, store)
 
         if log_callback:
             log_callback("done", f"✅ {platform} 检查完成")
@@ -337,6 +387,6 @@ class PipelineEngine:
                 continue
             # 通过临时属性透传 skip_push 到 PhaseContext（避免污染 MessageRecord schema）
             setattr(msg, "_skip_push", skip_push)
-            await cls.process_message(msg, config, store)
+            await cls._safe_process_message(msg, config, store)
 
         store.save()
