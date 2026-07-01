@@ -306,3 +306,44 @@ def test_render_dynamic_type_does_not_get_version_footer():
     )
     _, msg = render_markdown(c)
     assert "trawler@" not in msg
+
+
+# ═══════════════════════════════════════════════════════════
+# issue #83 — 通知正文长度截断防超长
+# ═══════════════════════════════════════════════════════════
+
+
+def test_long_summary_is_truncated():
+    """超长 summary（5000 字）应在渲染后被截断到 ≤ 1000 + '...' 后缀。"""
+    from core.notifiers.base import MAX_NOTIFICATION_SUMMARY_LENGTH
+
+    long_summary = "a" * 5000
+    c = NotificationContent(
+        platform="bili",
+        source_id="BV1xx",
+        title="t",
+        author="UP",
+        summary=long_summary,
+        keywords=["k"],
+    )
+    _, msg = render_markdown(c)
+    # 截断后正文本身恰好 MAX_NOTIFICATION_SUMMARY_LENGTH + 3 ('...')
+    assert ("a" * MAX_NOTIFICATION_SUMMARY_LENGTH + "...") in msg
+    # 原文 5000 字不得整体出现
+    assert long_summary not in msg
+
+
+def test_short_summary_not_truncated():
+    """短 summary（500 字）应原样输出，不附 '...'。"""
+    short_summary = "b" * 500
+    c = NotificationContent(
+        platform="bili",
+        source_id="BV1xx",
+        title="t",
+        author="UP",
+        summary=short_summary,
+        keywords=["k"],
+    )
+    _, msg = render_markdown(c)
+    assert short_summary in msg
+    assert "..." not in msg
