@@ -26,6 +26,8 @@ expires_at = 0
 cookie = ""
 # 账号昵称（登录成功后自动填充）
 nickname = ""
+# 上次成功刷新的时间戳（运行时状态，0 表示未刷新过，无需手动配置）
+last_refresh_at = 0
 # Cookie 过期时间（Unix 时间戳，0 表示未知）
 expires_at = 0
 
@@ -36,5 +38,7 @@ expires_at = 0
 cookie = ""
 # 账号昵称（登录成功后自动填充，微博实际由 get_user_nickname 实时获取）
 nickname = ""
+# 上次成功刷新的时间戳（运行时状态，0 表示未刷新过，无需手动配置）
+last_refresh_at = 0
 # Cookie 过期时间（Unix 时间戳，0 表示未知）
 expires_at = 0
