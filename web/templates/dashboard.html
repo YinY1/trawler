@@ -220,6 +220,9 @@
     <table class="w-full text-sm">
       <thead>
         <tr class="text-[var(--text-secondary)] text-xs uppercase tracking-wider">
+          <th class="text-left px-5 py-3 font-medium w-10">
+            <input type="checkbox" id="select-all" class="w-4 h-4 rounded" aria-label="全选">
+          </th>
           <th class="text-left px-5 py-3 font-medium">处理时间</th>
           <th class="text-left px-5 py-3 font-medium">发布时间</th>
           <th class="text-left px-5 py-3 font-medium">平台</th>
@@ -232,6 +235,9 @@
       <tbody>
         {% for msg in recent_messages %}
         <tr class="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+          <td class="px-5 py-3">
+            <input type="checkbox" name="msg_id" value="{{ msg.msg_id }}" class="row-checkbox w-4 h-4 rounded" aria-label="选择 {{ msg.title }}">
+          </td>
           <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.updated_at | timeago }}</td>
           <td class="px-5 py-3 whitespace-nowrap text-[var(--text-secondary)]">{{ msg.pubdate | timeago }}</td>
           <td class="px-5 py-3">{{ platform_tag(msg.platform) }}</td>
@@ -256,6 +262,39 @@
       </tbody>
     </table>
   </div>
+  {# Batch reprocess bar (issue #71): multi-select + rerun selected #}
+  <div class="px-5 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+    <span class="text-xs text-[var(--text-tertiary)]">
+      选中 <span id="selected-count">0</span> 条
+    </span>
+    <form id="batch-reprocess-form"
+          onsubmit="return prepareBatchSubmit(this);">
+      <input type="hidden" name="msg_ids" id="batch-msg-ids">
+      <label class="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+        <span class="text-[var(--text-tertiary)]">起始阶段</span>
+        <select name="reset_phase" class="px-2 py-1 rounded-[6px] bg-[var(--card-bg)] border border-[var(--card-border)] text-xs">
+          <option value="summarized">摘要</option>
+          <option value="downloaded">下载</option>
+          <option value="transcribed">转写</option>
+          <option value="discovered">发现</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer">
+        <input type="checkbox" name="skip_push" checked class="w-3.5 h-3.5 rounded">
+        <span>跳过推送</span>
+      </label>
+      <button type="submit"
+              class="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/20 cursor-pointer transition-colors duration-200"
+              aria-label="重跑选中的消息">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        重跑选中
+      </button>
+    </form>
+  </div>
   {# Per-row click-toggled detail panels (rendered once per message, below the table).
      Pure-frontend toggle avoids the table+absolute CSS pitfall and works on touch. #}
   {% for msg in recent_messages %}
@@ -265,4 +304,75 @@
   <div class="p-8 text-center text-[var(--text-secondary)]">暂无消息</div>
   {% endif %}
 </div>
+
+<script>
+  /* ── Batch multi-select (issue #71) ── */
+  (function() {
+    var selectAll = document.getElementById('select-all');
+    var checkboxes = document.querySelectorAll('.row-checkbox');
+    var countEl = document.getElementById('selected-count');
+
+    function updateCount() {
+      var checked = document.querySelectorAll('.row-checkbox:checked');
+      countEl.textContent = checked.length;
+    }
+
+    if (selectAll) {
+      selectAll.addEventListener('change', function() {
+        checkboxes.forEach(function(cb) { cb.checked = selectAll.checked; });
+        updateCount();
+      });
+    }
+    checkboxes.forEach(function(cb) { cb.addEventListener('change', updateCount); });
+  })();
+
+  /* 提交批量表单前，把选中的 msg_id 收集成逗号分隔字符串。
+     用 fetch POST 而非默认表单提交，手动处理 JSON 响应（HTMX 对 JSON 不友好，
+     原先 hx-post + JSON 端点用户无 UI 反馈）。 */
+  function prepareBatchSubmit(form) {
+    var checked = document.querySelectorAll('.row-checkbox:checked');
+    if (checked.length === 0) {
+      showToast('请先选择消息', 'warning');
+      return false;
+    }
+    var ids = Array.prototype.map.call(checked, function(cb) { return cb.value; });
+    var msgIds = ids.join(',');
+    document.getElementById('batch-msg-ids').value = msgIds;
+    // 从表单读取 reset_phase / skip_push（与 check.html 对称，不再硬编码）
+    var resetPhase = form.elements.reset_phase.value;
+    var skipPush = form.elements.skip_push.checked ? 'on' : '';
+    // 用 fetch POST 而非默认表单提交，手动处理 JSON 响应
+    fetch('/messages/batch-reprocess', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'msg_ids=' + encodeURIComponent(msgIds) +
+          '&reset_phase=' + encodeURIComponent(resetPhase) +
+          '&skip_push=' + skipPush
+    }).then(function(r) {
+       // 4xx（400 空列表 / 409 撞锁）由 FastAPI HTTPException 返回 {detail:...}，
+       // 不是 {status:...}；先判 HTTP status 再 parse body，避免 toast 显示 undefined。
+       if (!r.ok) {
+         return r.json().then(function(err) {
+           showToast(err.detail || ('请求失败: HTTP ' + r.status), 'error');
+         }, function() {
+           showToast('请求失败: HTTP ' + r.status, 'error');
+         });
+       }
+       return r.json();
+     })
+     .then(function(data) {
+       if (!data) return;  // 上一个 then 已处理错误
+       if (data.status === 'started') {
+         showToast('批量重跑已启动，跳转查看进度', 'success');
+         window.location.href = '/check';
+       } else if (data.status === 'already_running') {
+         showToast('已有检查任务在运行', 'warning');
+       } else {
+         showToast('启动失败: ' + (data.status || '未知'), 'error');
+       }
+     })
+     .catch(function(err) { showToast('请求失败: ' + err.message, 'error'); });
+    return false;  // 阻止默认表单提交
+  }
+</script>
 {% endblock %}

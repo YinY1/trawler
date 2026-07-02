@@ -270,9 +270,7 @@ class TestBatchReprocess:
             assert resp.status_code == 302
             assert "/login" in resp.headers["location"]
 
-    async def test_batch_reprocess_invalid_phase_returns_400(
-        self, client: tuple[AsyncClient, Path]
-    ) -> None:
+    async def test_batch_reprocess_invalid_phase_returns_400(self, client: tuple[AsyncClient, Path]) -> None:
         """非法 reset_phase → 400（与 /check/run 同步 fast-fail 对齐）。"""
         c, _ = client
         resp = await c.post(
@@ -284,9 +282,7 @@ class TestBatchReprocess:
         assert resp.status_code == 400
         assert "NONEXISTENT" in resp.text
 
-    async def test_batch_reprocess_returns_409_when_already_running(
-        self, client: tuple[AsyncClient, Path]
-    ) -> None:
+    async def test_batch_reprocess_returns_409_when_already_running(self, client: tuple[AsyncClient, Path]) -> None:
         """已有检查在跑（state.check_running=True）→ 409。
 
         通过先发一次合法请求占锁（background task 持有锁），立即第二次发请求，
@@ -320,3 +316,31 @@ class TestBatchReprocess:
 
             # 等待第一次的 background task 完成，释放锁
             await asyncio.sleep(0.5)
+
+
+class TestBatchReprocessCheckboxRendered:
+    """Dashboard 消息表格渲染 checkbox 多选 + 批量按钮（issue #71 smoke）。
+
+    验证：
+    1. 每行 checkbox name="msg_id" value="{msg_id}"。
+    2. 表头全选 checkbox id="select-all"。
+    3. 批量按钮"重跑选中"渲染。
+    4. form action 指向 /messages/batch-reprocess。
+    """
+
+    async def test_dashboard_renders_batch_select_ui(self, client: tuple[AsyncClient, Path]) -> None:
+        c, _ = client
+        with patch("web.routes.dashboard.list_subscriptions", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = {"bilibili": [{"uid": 1, "name": "t"}]}
+            resp = await c.get("/")
+        assert resp.status_code == 200
+        # 每行 checkbox name="msg_id" value="{MSG_ID}"
+        assert 'name="msg_id"' in resp.text
+        assert f'value="{MSG_ID}"' in resp.text
+        # 表头全选 checkbox
+        assert 'id="select-all"' in resp.text
+        # 行 checkbox class
+        assert "row-checkbox" in resp.text
+        # 批量按钮 + form action
+        assert "重跑选中" in resp.text
+        assert "/messages/batch-reprocess" in resp.text
