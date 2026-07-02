@@ -26,14 +26,73 @@
     <button id="run-btn"
       class="px-5 py-2 rounded-[10px] text-sm font-medium transition-all duration-200 {% if running %}bg-orange-500 text-white cursor-not-allowed{% else %}bg-apple-blue text-white hover:bg-blue-600{% endif %}"
       {% if running %}disabled{% endif %}
-      onclick="startCheck()">
+      onclick="startCheck(false)">
       {% if running %}运行中…{% else %}开始检查{% endif %}
     </button>
   </div>
 </div>
 
+<!-- Manual filter form (issue #71) -->
+<div id="filter-panel" class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-5 shadow-card border border-[var(--card-border)] mb-4">
+  <details class="group">
+    <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium select-none">
+      <svg class="w-4 h-4 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+      手动筛选重跑（按条件筛选历史消息重跑流水线）
+    </summary>
+    <form id="manual-filter-form" class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-[var(--text-tertiary)] mb-1">时间范围</label>
+        <select name="since" class="w-full px-3 py-2 rounded-[8px] bg-[var(--card-bg)] border border-[var(--card-border)] text-sm">
+          <option value="">不限</option>
+          <option value="24h">最近 24 小时</option>
+          <option value="7d">最近 7 天</option>
+          <option value="30d">最近 30 天</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-[var(--text-tertiary)] mb-1">标题包含</label>
+        <input type="text" name="title" placeholder="关键词" class="w-full px-3 py-2 rounded-[8px] bg-[var(--card-bg)] border border-[var(--card-border)] text-sm">
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-[var(--text-tertiary)] mb-1">作者包含</label>
+        <input type="text" name="author" placeholder="作者名" class="w-full px-3 py-2 rounded-[8px] bg-[var(--card-bg)] border border-[var(--card-border)] text-sm">
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-[var(--text-tertiary)] mb-1">平台</label>
+        <select name="platform" class="w-full px-3 py-2 rounded-[8px] bg-[var(--card-bg)] border border-[var(--card-border)] text-sm">
+          <option value="">全部</option>
+          <option value="bili">B站</option>
+          <option value="xhs">小红书</option>
+          <option value="weibo">微博</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-[var(--text-tertiary)] mb-1">重跑起始阶段</label>
+        <select name="reset_phase" class="w-full px-3 py-2 rounded-[8px] bg-[var(--card-bg)] border border-[var(--card-border)] text-sm">
+          <option value="summarized">摘要（重新生成 AI 摘要）</option>
+          <option value="downloaded">下载（重新抓取正文）</option>
+          <option value="transcribed">转写（视频重新转写）</option>
+          <option value="discovered">发现（重跑全流水线）</option>
+        </select>
+      </div>
+      <div class="flex items-end">
+        <label class="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+          <input type="checkbox" name="skip_push" checked class="w-4 h-4 rounded">
+          跳过推送
+        </label>
+      </div>
+      <div class="flex items-end md:col-span-2">
+        <button type="button" id="manual-run-btn"
+          class="px-4 py-2 rounded-[10px] text-sm font-medium bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/20 transition-colors duration-200">
+          按筛选条件重跑
+        </button>
+      </div>
+    </form>
+  </details>
+</div>
+
 <!-- Platform progress cards -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+<div id="platform-cards" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
   <!-- bili -->
   <div id="card-bili" data-platform="bili"
        class="relative bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] p-4 pl-5 shadow-card border border-[var(--card-border)] overflow-hidden">
@@ -177,16 +236,30 @@
     return null;
   }
 
-  function startCheck() {
+  function startCheck(isManual) {
     var btn = document.getElementById('run-btn');
     if (btn.disabled) return;
-    fetch('/check/run', { method: 'POST' })
+    var body;
+    if (isManual) {
+      // 手动模式：收集筛选表单
+      var form = document.getElementById('manual-filter-form');
+      body = new FormData(form);
+      // fetch 的 body 直接传 FormData 会自动 multipart/form-data
+      // 注意：skip_push checkbox 未勾选时 FormData 不含该字段，后端 default False 正确处理
+    } else {
+      body = new FormData();
+    }
+    fetch('/check/run', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: body })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (data.status === 'started') { initSSE(); }
+        if (data.status === 'started') {
+          initSSE(isManual);  // 传 mode 决定是否隐藏平台卡片
+        }
         else if (data.status === 'already_running') {
-          // 已有运行中的任务：重连 SSE，先回放历史再续流，让用户看到日志
           restoreFromStatus().then(function() { connectSSE(); });
+        }
+        else if (data.status === 'error') {
+          showToast('启动失败: ' + (data.message || '未知错误'), 'error');
         }
         else { showToast('启动失败: ' + (data.status || '未知'), 'error'); }
       })
@@ -195,16 +268,26 @@
 
   /* 全新开始检查：清零、重置进度条、重设 startTime、切到 running 态、连接 SSE */
   var doneHandled = false;  // 幂等标志：一次 run 生命周期内 done 只处理一次
-  function initSSE() {
+  var currentMode = 'full';  // 'full' | 'manual'
+  function initSSE(isManual) {
     if (evtSource) { evtSource.close(); evtSource = null; }
     doneHandled = false;
+    currentMode = isManual ? 'manual' : 'full';
     startTime = Date.now();
     processedCount = 0;
-    updateStatus('running', '运行中');
+    updateStatus('running', isManual ? '手动重跑中' : '运行中');
     setRunButtonState('running');
 
-    // Reset platform cards
-    PLATFORMS.forEach(function(p) { setPlatformStatus(p, 'idle'); });
+    // 手动模式隐藏平台进度卡片（不跑 detector，卡片无数据），全量模式恢复显示
+    var cardsGrid = document.getElementById('platform-cards');
+    if (cardsGrid) {
+      cardsGrid.style.display = isManual ? 'none' : '';
+    }
+
+    // Reset platform cards (全量模式才需要)
+    if (!isManual) {
+      PLATFORMS.forEach(function(p) { setPlatformStatus(p, 'idle'); });
+    }
 
     // Reset log
     var logEl = document.getElementById('log-output');
@@ -245,15 +328,21 @@
       if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
       updateStatus('done', '已完成');
       setRunButtonState('done');
-      // 平台仍在跑的卡片在收到各平台 done 事件时已逐个转绿；
-      // 这里兜底：把所有未完成的卡片（如本次未触发某平台）标为完成，
-      // 避免卡片永久停在"运行中"。
-      PLATFORMS.forEach(function(p) {
-        var card = document.getElementById('status-' + p);
-        if (card && card.textContent.indexOf('完成') === -1) {
-          setPlatformStatus(p, 'done');
-        }
-      });
+      // 手动模式收尾：恢复平台卡片显示（initSSE 隐藏过），重置 currentMode。
+      // 手动模式不跑 detector，平台卡片无数据，下面的 PLATFORMS 兜底也跳过。
+      if (currentMode === 'manual') {
+        var cardsGrid = document.getElementById('platform-cards');
+        if (cardsGrid) { cardsGrid.style.display = ''; }
+      } else {
+        // 全量模式兜底：把所有未完成的卡片（如本次未触发某平台）标为完成，
+        // 避免卡片永久停在"运行中"。各平台 done 事件已逐个转绿。
+        PLATFORMS.forEach(function(p) {
+          var card = document.getElementById('status-' + p);
+          if (card && card.textContent.indexOf('完成') === -1) {
+            setPlatformStatus(p, 'done');
+          }
+        });
+      }
       document.querySelector('.live-indicator').classList.add('hidden');
       appendLog({ type: 'ok', message: '── 检查完成 ──', time: formatTimeStr() });
       // 同步最终累计计数（后端 processed_count 为权威值）
@@ -470,6 +559,11 @@
       var logEl = document.getElementById('log-output');
       logEl.scrollTop = logEl.scrollHeight;
     });
+  });
+
+  /* 手动重跑按钮绑定（issue #71）— 放在 script 末尾确保 DOM 已渲染 + startCheck 已定义 */
+  document.getElementById('manual-run-btn').addEventListener('click', function() {
+    startCheck(true);
   });
 </script>
 {% endblock %}
