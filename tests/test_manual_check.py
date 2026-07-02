@@ -241,3 +241,76 @@ async def test_weibo_push_skips_when_skip_push_true(tmp_path: Path) -> None:
         assert not mock_send.called
 
 
+# ── run_specific_messages log_callback 参数 (issue #71) ──────────
+
+
+async def test_run_specific_messages_invokes_log_callback(
+    mock_store: MessageStore, tmp_path: Path
+) -> None:
+    """run_specific_messages 应在 reset 前后通过 log_callback 发日志事件。"""
+    config = MagicMock()
+    config.general.data_dir = str(tmp_path)
+
+    events: list[tuple[str, str]] = []
+
+    def cb(event_type: str, message: str) -> None:
+        events.append((event_type, message))
+
+    with patch.object(PipelineEngine, "process_message", new=AsyncMock()):
+        await PipelineEngine.run_specific_messages(
+            msg_ids=["bili:BV1"],
+            from_phase=Phase.SUMMARIZED,
+            skip_push=True,
+            config=config,
+            store=mock_store,
+            log_callback=cb,
+        )
+    # 至少触发了 log 事件（reset 开始 / 每条消息 / 完成）
+    assert len(events) > 0
+    # 所有事件类型应为 "log" 或 "done"
+    assert all(et in ("log", "done") for et, _ in events)
+    # 完成事件应包含 done 类型
+    assert any(et == "done" for et, _ in events)
+
+
+async def test_run_specific_messages_log_callback_none_default(
+    mock_store: MessageStore, tmp_path: Path
+) -> None:
+    """log_callback=None（默认）应不报错（向后兼容现有 CLI 调用）。"""
+    config = MagicMock()
+    config.general.data_dir = str(tmp_path)
+
+    with patch.object(PipelineEngine, "process_message", new=AsyncMock()):
+        # 不传 log_callback，应正常完成（默认 None）
+        await PipelineEngine.run_specific_messages(
+            msg_ids=["bili:BV1"],
+            from_phase=Phase.SUMMARIZED,
+            skip_push=True,
+            config=config,
+            store=mock_store,
+        )
+
+
+async def test_run_specific_messages_empty_list_with_callback(
+    mock_store: MessageStore, tmp_path: Path
+) -> None:
+    """空 msg_ids 且有 callback：reset_specific 返回 0 时早退，仍发 done 事件。"""
+    config = MagicMock()
+    config.general.data_dir = str(tmp_path)
+
+    events: list[tuple[str, str]] = []
+    cb = lambda et, m: events.append((et, m))  # noqa: E731
+
+    with patch.object(PipelineEngine, "process_message", new=AsyncMock()) as mock_proc:
+        await PipelineEngine.run_specific_messages(
+            msg_ids=[],
+            from_phase=Phase.SUMMARIZED,
+            skip_push=True,
+            config=config,
+            store=mock_store,
+            log_callback=cb,
+        )
+        assert not mock_proc.called
+    # 空列表也应发 done（让前端 SSE 能收到结束信号）
+    assert any(et == "done" for et, _ in events)
+

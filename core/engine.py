@@ -335,6 +335,7 @@ class PipelineEngine:
         skip_push: bool,
         config: Config,
         store: MessageStore,
+        log_callback: Callable[[str, str], None] | None = None,
     ) -> None:
         """手动重跑指定消息的流水线（plan 2026-06-28-manual-content-check）。
 
@@ -342,6 +343,7 @@ class PipelineEngine:
         - 不跑 detector（只对已存在的消息重跑）
         - 不调 cleanup（D6：避免误删超 24h 的历史消息）
         - 支持 skip_push 标志（D4：默认禁止重新推送）
+        - 支持 log_callback（issue #71：Web UI SSE 接入，与 run_platform 签名对齐）
 
         Args:
             msg_ids: 要重跑的消息 ID 列表
@@ -349,6 +351,8 @@ class PipelineEngine:
             skip_push: True 时 push handler 跳过通知
             config: 全局配置
             store: MessageStore 实例（共享调用方创建的）
+            log_callback: 可选，``(event_type, message)`` 回调，用于流式日志输出。
+                事件类型仅 "log" / "done"。无 callback 时静默（CLI 默认）。
 
         ⚠️ 并发安全：此方法不持有文件锁。避免与 cron ``run_check_once`` 同时运行，
         否则两个进程的 MessageStore 内存快照会互相覆盖（D10）。
@@ -359,10 +363,19 @@ class PipelineEngine:
         ``--reset-phase summarized`` 对 VIDEO 消息实际会从 download 阶段重新跑全流水线。
         这是已知行为，不是 bug。
         """
+        if log_callback:
+            log_callback("log", f"▶ 手动重跑 {len(msg_ids)} 条消息（from {from_phase.name}, skip_push={skip_push}）")
+
         count = store.reset_specific(msg_ids, from_phase)
         if count == 0:
             logger.info("⏭ 无消息需要 reset（msg_ids=%s, target=%s）", msg_ids, from_phase.name)
+            if log_callback:
+                log_callback("log", "⚠️ 没有消息需要重跑")
+                log_callback("done", "✅ 手动重跑完成（无操作）")
             return
+
+        if log_callback:
+            log_callback("log", f"📋 实际 reset {count} 条消息")
 
         logger.info("▶ 手动重跑 %d 条消息（from %s, skip_push=%s）", count, from_phase.name, skip_push)
 
@@ -384,9 +397,18 @@ class PipelineEngine:
                     "⏭ 跳过 %s：%s 类型消息的阶段流不含 %s",
                     msg_id, msg.content_type.name, from_phase.name,
                 )
+                if log_callback:
+                    log_callback(
+                        "log",
+                        f"⏭ 跳过 {msg.title[:30]}：类型 {msg.content_type.name} 不支持 {from_phase.name}",
+                    )
                 continue
+            if log_callback:
+                log_callback("log", f"▶ 处理 {msg.platform}:{msg.msg_id} ({msg.title})")
             # 通过临时属性透传 skip_push 到 PhaseContext（避免污染 MessageRecord schema）
             setattr(msg, "_skip_push", skip_push)
             await cls._safe_process_message(msg, config, store)
 
         store.save()
+        if log_callback:
+            log_callback("done", "✅ 手动重跑完成")
