@@ -104,3 +104,95 @@ def test_parse_dynamic_handles_dict_desc_without_text_field() -> None:
     assert dyn is not None
     assert isinstance(dyn.content, str)
     assert "fallback" in dyn.content
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DRAW 动态的两种渲染协议: MAJOR_TYPE_DRAW (旧) / MAJOR_TYPE_OPUS (新)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_parse_draw_opus_protocol() -> None:
+    """新协议 MAJOR_TYPE_OPUS: 正文在 opus.summary.text, 图片在 opus.pics。
+
+    B站新版图文动态 desc=null、major.draw=null, 全部内容搬到 major.opus。
+    """
+    item = {
+        "id_str": "1220452611194355721",
+        "type": "DYNAMIC_TYPE_DRAW",
+        "modules": {
+            "module_author": {"name": "BOSS墨", "pub_ts": 1700000000},
+            "module_dynamic": {
+                "desc": None,  # opus 协议 desc 为空
+                "major": {
+                    "type": "MAJOR_TYPE_OPUS",
+                    "opus": {
+                        "title": "行情暂时选择向上",
+                        "summary": {"text": "那以再次突破之前4096小分水为标准..."},
+                        "pics": [
+                            {"url": "https://example.com/1.jpg"},
+                            {"url": "https://example.com/2.jpg"},
+                        ],
+                    },
+                },
+            },
+        },
+    }
+    dyn = _parse_dynamic(item, uid=1)
+    assert dyn is not None
+    assert dyn.title == "行情暂时选择向上"
+    assert dyn.content == "那以再次突破之前4096小分水为标准..."
+    assert dyn.image_urls == ["https://example.com/1.jpg", "https://example.com/2.jpg"]
+    assert dyn.has_video is False
+
+
+def test_parse_draw_legacy_protocol() -> None:
+    """旧协议 MAJOR_TYPE_DRAW: title 在 draw.title, 图片在 draw.items[].src。"""
+    item = {
+        "id_str": "999000",
+        "type": "DYNAMIC_TYPE_DRAW",
+        "modules": {
+            "module_author": {"name": "tester", "pub_ts": 1700000000},
+            "module_dynamic": {
+                "desc": "",
+                "major": {
+                    "type": "MAJOR_TYPE_DRAW",
+                    "draw": {
+                        "title": "draw title",
+                        "items": [
+                            {"src": "https://example.com/legacy1.jpg"},
+                            {"src": "https://example.com/legacy2.jpg"},
+                        ],
+                    },
+                },
+            },
+        },
+    }
+    dyn = _parse_dynamic(item, uid=1)
+    assert dyn is not None
+    assert dyn.title == "draw title"
+    assert dyn.image_urls == [
+        "https://example.com/legacy1.jpg",
+        "https://example.com/legacy2.jpg",
+    ]
+    assert dyn.has_video is False
+
+
+def test_parse_draw_opus_fallback_to_desc() -> None:
+    """opus 和 draw 都缺失但 desc 有内容时, content 兜底取 desc_text。"""
+    item = {
+        "id_str": "111222",
+        "type": "DYNAMIC_TYPE_DRAW",
+        "modules": {
+            "module_author": {"name": "tester", "pub_ts": 1700000000},
+            "module_dynamic": {
+                "desc": "正文兜底内容",
+                "major": {},  # 既无 opus 也无 draw
+            },
+        },
+    }
+    dyn = _parse_dynamic(item, uid=1)
+    assert dyn is not None
+    assert dyn.content == "正文兜底内容"
+    # 无 title 时, 截取 content 前 50 字符作为 title
+    assert dyn.title.startswith("正文兜底内容")
+    assert dyn.image_urls == []
