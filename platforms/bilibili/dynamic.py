@@ -112,15 +112,29 @@ def _parse_dynamic(item: dict, uid: int) -> DynamicInfo | None:
         content = desc_text
 
     # 类型 2: 图文
+    # NOTE: B站新 DRAW 动态用 MAJOR_TYPE_OPUS 渲染协议 (opus.summary.text /
+    # opus.pics), 旧的 MAJOR_TYPE_DRAW 用 major.draw (title/items)。
+    # 先试 opus, 再 fallback draw, 最后 desc_text 兜底。
     elif dynamic_type == 2:
-        draw = major.get("draw", {})
+        opus = major.get("opus") or {}
+        if opus:
+            title = opus.get("title", "") or ""
+            summary = opus.get("summary") or {}
+            if isinstance(summary, dict):
+                content = summary.get("text", "") or ""
+            pics = opus.get("pics") or []
+            image_urls = [
+                (p.get("url") or p.get("src", ""))
+                for p in pics
+                if isinstance(p, dict) and (p.get("url") or p.get("src"))
+            ]
+        draw = major.get("draw") or {}
         if draw:
-            title = draw.get("title", "")
-            if not title:
-                title = draw.get("desc", "")
-            items_list = draw.get("items", [])
-            image_urls = [img.get("src", "") for img in items_list if img.get("src")]
-        content = desc_text
+            title = title or draw.get("title", "") or draw.get("desc", "")
+            if not image_urls:
+                items_list = draw.get("items", [])
+                image_urls = [img.get("src", "") for img in items_list if img.get("src")]
+        content = content or desc_text
 
     # 类型 1: 转发
     elif dynamic_type == 1:
