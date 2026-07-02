@@ -6,8 +6,11 @@ from shared.constants import GIT_SHA
 from shared.protocols import NotificationContent
 
 # 通知正文最大长度（字符数）。TEXT 类型 summary 承载原文，可能数千字，
-# 超长会导致 Telegram 4096 上限 400 错误或刷屏。1000 字符兼顾可读性与通道限制。
-MAX_NOTIFICATION_SUMMARY_LENGTH = 1000
+# 超长会导致 Telegram 4096 上限 400 错误或刷屏。
+# 金融观点提炼 prompt 后，VIDEO 类型 summary_text 拼接 核心观点+论据+关键数据+风险提示，
+# 论据段上限 1200 字，加其他字段后总长可能 1500+，故阈值提高到 2000。
+# 2000 字符兼顾可读性与通道限制（Telegram 4096 上限仍留足 keywords/comment/footer 空间）。
+MAX_NOTIFICATION_SUMMARY_LENGTH = 2000
 
 
 def _truncate_summary(text: str, max_len: int = MAX_NOTIFICATION_SUMMARY_LENGTH) -> str:

@@ -242,9 +242,18 @@ class TestParseMarkdownAnalysis:
     """Tests for parse_markdown_analysis — robust parsing of AI output."""
 
     def test_parse_well_formed(self) -> None:
-        raw = """## 摘要
+        raw = """## 核心观点
+作者看多 A 股，目标 3500 点
+
+## 论据与逻辑
 1. 第一点
 2. 第二点
+
+## 关键数据
+上证指数：3200 点
+
+## 风险提示
+外部环境不确定
 
 ## 一句话总结
 这是个测试视频
@@ -255,15 +264,18 @@ Python；异步；测试
 ## 标签
 教程, 评测"""
         result = parse_markdown_analysis(raw)
-        assert "第一点" in result.summary
-        assert "第二点" in result.summary
+        assert "看多" in result.summary
+        assert "第一点" in result.arguments
+        assert "第二点" in result.arguments
+        assert "上证指数" in result.key_data
+        assert "外部环境" in result.risk
         assert result.one_line_summary == "这是个测试视频"
         assert result.keywords == ["Python", "异步", "测试"]
         assert result.tags == ["教程", "评测"]
 
     def test_parse_strips_markdown_code_fence(self) -> None:
         raw = """```markdown
-## 摘要
+## 核心观点
 内容
 
 ## 一句话总结
@@ -280,19 +292,22 @@ A；B
         assert result.tags == []
 
     def test_parse_missing_section_returns_empty(self) -> None:
-        raw = """## 摘要
-只有摘要
+        raw = """## 核心观点
+只有核心观点
 
 ## 关键词
 A"""
         result = parse_markdown_analysis(raw)
-        assert "只有摘要" in result.summary
+        assert "只有核心观点" in result.summary
+        assert result.arguments == ""
+        assert result.key_data == ""
+        assert result.risk == ""
         assert result.one_line_summary == ""
         assert result.keywords == ["A"]
         assert result.tags == []
 
     def test_parse_keywords_with_mixed_separators(self) -> None:
-        raw = """## 摘要
+        raw = """## 核心观点
 x
 
 ## 关键词
@@ -304,7 +319,7 @@ A；B,C；D
     def test_parse_preserves_bold_inside_summary(self) -> None:
         """LLM 偶尔不遵守 plain 约束返回 **bold**，解析层应容忍并原样保留。
         渲染层（plain text）将原样透传，不再尝试去除 markdown。"""
-        raw = """## 摘要
+        raw = """## 核心观点
 这是 **粗体** 测试
 
 ## 关键词
@@ -313,18 +328,18 @@ A"""
         assert "**粗体**" in result.summary  # 原样保留，渲染时 plain 端只是显示字面量
 
     def test_parse_summary_with_colon_suffix(self) -> None:
-        """Issue #56 场景 B: LLM 输出 '## 摘要：'（全角冒号）应能解析。"""
-        raw = """## 摘要：
-这是带冒号的摘要内容
+        """Issue #56 场景 B: LLM 输出 '## 核心观点：'（全角冒号）应能解析。"""
+        raw = """## 核心观点：
+这是带冒号的核心观点内容
 
 ## 关键词
 A"""
         result = parse_markdown_analysis(raw)
-        assert "带冒号的摘要内容" in result.summary
+        assert "带冒号的核心观点内容" in result.summary
 
     def test_parse_summary_with_half_width_colon(self) -> None:
-        """Issue #56: LLM 输出 '## 摘要:'（半角冒号）应能解析。"""
-        raw = """## 摘要:
+        """Issue #56: LLM 输出 '## 核心观点:'（半角冒号）应能解析。"""
+        raw = """## 核心观点:
 半角冒号也行
 
 ## 关键词
@@ -333,8 +348,8 @@ A"""
         assert "半角冒号也行" in result.summary
 
     def test_parse_summary_with_bold_title(self) -> None:
-        """Issue #56: LLM 输出 '## **摘要**'（加粗标题）应能解析。"""
-        raw = """## **摘要**
+        """Issue #56: LLM 输出 '## **核心观点**'（加粗标题）应能解析。"""
+        raw = """## **核心观点**
 这是加粗标题下的内容
 
 ## 关键词
@@ -343,8 +358,8 @@ A"""
         assert "加粗标题下的内容" in result.summary
 
     def test_parse_summary_with_bold_title_and_colon(self) -> None:
-        """Issue #56: 加粗 + 冒号组合 '## **摘要**：' 应能解析。"""
-        raw = """## **摘要**：
+        """Issue #56: 加粗 + 冒号组合 '## **核心观点**：' 应能解析。"""
+        raw = """## **核心观点**：
 组合变体内容
 
 ## 关键词
@@ -354,8 +369,8 @@ A"""
 
     def test_parse_one_line_summary_accepts_summary_synonym(self) -> None:
         """Issue #56: LLM 输出 '## 总结' 应作为 one_line_summary 解析（同义词兼容）。"""
-        raw = """## 摘要
-摘要正文
+        raw = """## 核心观点
+核心观点正文
 
 ## 总结
 这是同义词的一句话总结
@@ -367,7 +382,7 @@ A"""
 
     def test_parse_result_has_raw_field_populated(self) -> None:
         """Issue #56: parse_markdown_analysis 应把原始输入赋给 result.raw。"""
-        raw = """## 摘要
+        raw = """## 核心观点
 内容
 
 ## 关键词
@@ -376,13 +391,16 @@ A"""
         assert result.raw == raw
 
     def test_parse_long_summary_with_numbered_keypoints(self) -> None:
-        """Issue #54 回归: prompt 改完后 LLM 输出 400+ 字 + 3-8 条序号要点，
-        解析层必须完整保留，不被「## 关键词」提前截断或被「1. 2. 」序号干扰。"""
-        # 构造一个 400+ 字、5 条要点的摘要（模拟新 prompt 输出）
-        long_summary = (
+        """Issue #54 回归: prompt 改完后 LLM 输出 400+ 字 + 序号要点，
+        解析层必须完整保留，不被下一个 ## 标题提前截断或被「1. 2. 」序号干扰。
+
+        金融观点提炼 prompt 后，长内容落在「## 论据与逻辑」(arguments) 段。
+        """
+        # 构造一个 400+ 字、5 条要点的论据段（模拟新 prompt 输出）
+        long_arguments = (
             "1. 视频开篇作者引用了一组关键数据：2024 年中国短视频用户规模达到 9.8 亿，"
             "占总网民的 87.5%，相比 2022 年增长了 12 个百分点。"
-            "这组数据来源于中国互联网络信息中心发布的第 53 次统计报告，"
+            "这组数据来源于中国互联网络发展统计报告，"
             "作者特别强调下沉市场（三线及以下城市）贡献了增量的 68%。\n"
             "2. 第二个论点围绕算法推荐机制展开，作者以抖音的协同过滤为例，"
             "解释了「信息茧房」效应如何在 6 个月内形成。"
@@ -401,13 +419,22 @@ A"""
             "他呼吁平台方公开推荐权重的可解释性指标，"
             "同时建议创作者建立独立邮件列表降低对算法分发的依赖。"
         )
-        assert len(long_summary) > 400  # 满足新 prompt 的字数下限
+        assert len(long_arguments) > 400
 
-        raw = f"""## 摘要
-{long_summary}
+        raw = f"""## 核心观点
+作者认为算法推荐已经改变了内容创作的底层逻辑
+
+## 论据与逻辑
+{long_arguments}
+
+## 关键数据
+短视频用户：9.8 亿
+
+## 风险提示
+样本偏差可能导致结论不普适
 
 ## 一句话总结
-新 prompt 下产出的长摘要解析回归测试
+新 prompt 下产出的长论据解析回归测试
 
 ## 关键词
 短视频；算法推荐；信息茧房
@@ -417,22 +444,30 @@ A"""
 
         result = parse_markdown_analysis(raw)
 
-        # 全部 5 条要点必须完整保留（不被截断）
-        assert "9.8 亿" in result.summary
-        assert "协同过滤" in result.summary
-        assert "三线城市 UP 主" in result.summary
-        assert "2023Q1" in result.summary
-        assert "《注意力经济》" in result.summary
+        # 全部 5 条要点必须完整保留（不被截断）在 arguments 段
+        assert "9.8 亿" in result.arguments
+        assert "协同过滤" in result.arguments
+        assert "三线城市 UP 主" in result.arguments
+        assert "2023Q1" in result.arguments
+        assert "《注意力经济》" in result.arguments
         # 序号格式保留
-        assert "1." in result.summary
-        assert "5." in result.summary
+        assert "1." in result.arguments
+        assert "5." in result.arguments
         # 总长度仍 > 400（未被截断）
-        assert len(result.summary) > 400
+        assert len(result.arguments) > 400
+        # 核心观点段独立提取，不含论据细节
+        assert "底层逻辑" in result.summary
+        # 关键数据/风险提示也独立提取
+        assert "9.8 亿" in result.key_data
+        assert "样本偏差" in result.risk
 
     def test_parse_summary_with_bold_numbered_keypoints_pr54(self) -> None:
         """Issue #54 回归: LLM 偶尔会用「**1.** **要点标题**：内容」格式，
-        解析层（PR-1 已放宽正则兼容加粗标题）必须原样保留字段内容。"""
-        raw = """## 摘要
+        解析层（PR-1 已放宽正则兼容加粗标题）必须原样保留字段内容。
+
+        金融观点提炼 prompt 后，该场景落在「## 论据与逻辑」段。
+        """
+        raw = """## 论据与逻辑
 **1.** **核心观点**：作者认为算法推荐已经改变了内容创作的底层逻辑
 **2.** **关键数据**：调研样本量 N=12000，置信度 95%
 
@@ -440,9 +475,73 @@ A"""
 算法"""
         result = parse_markdown_analysis(raw)
         # 决策 7：字段内 **粗体** 原样保留（不剥离）
-        assert "**核心观点**" in result.summary
-        assert "**关键数据**" in result.summary
-        assert "N=12000" in result.summary
+        assert "**核心观点**" in result.arguments
+        assert "**关键数据**" in result.arguments
+        assert "N=12000" in result.arguments
+
+    def test_parse_finance_fields_extracted_independently(self) -> None:
+        """金融观点提炼: 核心观点/论据/关键数据/风险提示 4 个新字段必须独立提取,
+        不互相串扰。
+        """
+        raw = """## 核心观点
+看多 BTC 至 10 万美元
+
+## 论据与逻辑
+1. 现货 ETF 资金持续流入
+2. 减半周期供给收缩
+
+## 关键数据
+BTC：65000 美元
+目标位：100000 美元
+
+## 风险提示
+美联储加息可能打压风险资产
+
+## 一句话总结
+看多 BTC 至 10 万
+
+## 关键词
+BTC；ETF；减半
+
+## 标签
+币圈"""
+        result = parse_markdown_analysis(raw)
+        # 核心观点独立
+        assert "看多 BTC" in result.summary
+        assert "ETF" not in result.summary  # 论据细节不应串到 summary
+        # 论据独立
+        assert "现货 ETF" in result.arguments
+        assert "减半周期" in result.arguments
+        # 关键数据独立
+        assert "65000 美元" in result.key_data
+        assert "100000 美元" in result.key_data
+        # 风险提示独立
+        assert "美联储加息" in result.risk
+
+    def test_parse_finance_optional_sections_can_be_empty(self) -> None:
+        """金融观点提炼: 关键数据/风险提示 是可选字段(非金融内容时可能留空),
+        解析层应返回空串而非报错。
+        """
+        raw = """## 核心观点
+这是一个教程视频，讲解 Python 异步编程
+
+## 论据与逻辑
+1. 介绍了 asyncio 事件循环
+
+## 一句话总结
+Python 异步教程
+
+## 关键词
+Python；异步
+
+## 标签
+教程"""
+        result = parse_markdown_analysis(raw)
+        assert "教程视频" in result.summary
+        assert "asyncio" in result.arguments
+        # 关键数据/风险提示 留空(非金融内容)
+        assert result.key_data == ""
+        assert result.risk == ""
 
 
 class TestAnalyzeContent:
@@ -456,7 +555,10 @@ class TestAnalyzeContent:
         config.analysis.api_base = "https://example.com/v1"
         config.analysis.api_key = "k"
 
-        ai_output = """## 摘要
+        ai_output = """## 核心观点
+作者看多
+
+## 论据与逻辑
 1. 要点一
 
 ## 一句话总结
@@ -480,7 +582,8 @@ A；B
                 config=config,
             )
 
-        assert "要点一" in result.summary
+        assert "看多" in result.summary
+        assert "要点一" in result.arguments
         assert result.keywords == ["A", "B"]
         assert result.is_ai is True
 
@@ -588,7 +691,7 @@ A；B
         config.analysis.api_base = "https://example.com/v1"
         config.analysis.api_key = "k"
 
-        ai_output = "## 摘要\n这是 raw 字段测试\n\n## 一句话总结\nok"
+        ai_output = "## 核心观点\n这是 raw 字段测试\n\n## 一句话总结\nok"
 
         with patch("core.summarizer.create_provider") as mock_cp:
             provider = mock_cp.return_value
@@ -620,7 +723,7 @@ A；B
         primary = AsyncMock()
         primary.generate = AsyncMock(side_effect=RuntimeError("401 unauthorized"))
         secondary = AsyncMock()
-        secondary.generate = AsyncMock(return_value="## 摘要\nfallback 答案")
+        secondary.generate = AsyncMock(return_value="## 核心观点\nfallback 答案")
 
         chain = FallbackChainProvider(
             providers=[primary, secondary],
@@ -654,7 +757,7 @@ A；B
         config.analysis.api_key = "k"
 
         primary = AsyncMock()
-        primary.generate = AsyncMock(return_value="## 摘要\n主 provider 答案")
+        primary.generate = AsyncMock(return_value="## 核心观点\n主 provider 答案")
 
         chain = FallbackChainProvider(
             providers=[primary],
@@ -689,7 +792,7 @@ A；B
         config.analysis.api_base = "https://example.com/v1"
         config.analysis.api_key = "test-key"
 
-        ai_output = "## 摘要\n这是真实链路测试\n\n## 一句话总结\nok"
+        ai_output = "## 核心观点\n这是真实链路测试\n\n## 一句话总结\nok"
 
         # 不 mock create_provider，让真实的 FallbackChainProvider（单 provider）跑；
         # 只 mock 底层 LLM 调用（OpenAIProvider.generate 实例方法），避免真实 HTTP。
@@ -706,6 +809,75 @@ A；B
         assert result.source != "primary"
         assert result.source != "none"
         assert result.is_ai is True
+
+    @pytest.mark.asyncio
+    async def test_analyze_content_full_finance_extraction_response(self) -> None:
+        """金融观点提炼 prompt 端到端: 完整 7 字段 LLM 响应 → AnalysisResult 各字段正确。
+
+        覆盖新加的 arguments/key_data/risk 字段,以及 summary 语义变为「核心观点」。
+        """
+        config = Config()
+        config.analysis.enabled = True
+        config.analysis.provider = "openai"
+        config.analysis.api_base = "https://example.com/v1"
+        config.analysis.api_key = "k"
+
+        ai_output = """## 核心观点
+作者看多沪深300，认为 Q3 有望突破 4000 点，主要驱动是政策预期与资金面改善。
+
+## 论据与逻辑
+1. 政策面：央行 6 月降准 25bp，释放长期资金约 5000 亿，历史上降准后 3 个月内大盘上涨概率 70%。
+2. 资金面：北向资金 6 月净流入 320 亿，扭转 5 月净流出 180 亿的趋势。
+3. 技术面：沪深300 在 3800 形成双底，MACD 金叉确认。
+
+## 关键数据
+沪深300：3800 点
+目标位：4000 点
+北向资金：净流入 320 亿
+
+## 风险提示
+外部地缘冲突升级可能打断反弹；中报业绩不及预期。
+
+## 一句话总结
+政策与资金双轮驱动，沪深300 Q3 看多至 4000 点。
+
+## 关键词
+沪深300；降准；北向资金
+
+## 标签
+股评, 宏观"""
+
+        with patch("core.summarizer.create_provider") as mock_cp:
+            provider = mock_cp.return_value
+            provider.generate = AsyncMock(return_value=ai_output)
+
+            result = await analyze_content(
+                source_id="bili:BV1",
+                title="T",
+                author="A",
+                text="正文",
+                config=config,
+            )
+
+        # summary 字段语义 = 核心观点
+        assert "看多沪深300" in result.summary
+        assert "4000 点" in result.summary
+        # arguments 字段 = 论据与逻辑,含全部 3 条
+        assert "降准 25bp" in result.arguments
+        assert "北向资金" in result.arguments
+        assert "双底" in result.arguments
+        # key_data 字段
+        assert "沪深300：3800 点" in result.key_data
+        assert "净流入 320 亿" in result.key_data
+        # risk 字段
+        assert "地缘冲突" in result.risk
+        assert "中报业绩" in result.risk
+        # 保留字段
+        assert "看多至 4000 点" in result.one_line_summary
+        assert result.keywords == ["沪深300", "降准", "北向资金"]
+        assert result.tags == ["股评", "宏观"]
+        assert result.is_ai is True
+        assert result.raw == ai_output
 
 
 class TestLegacyWrappersReturnEmptyOnFailure:
@@ -843,8 +1015,8 @@ class TestOpenAIProviderResponseParsing:
             "choices": [
                 {
                     "message": {
-                        "content": "## 摘要\n正常 content",
-                        "reasoning_content": "## 摘要\n这是 reasoning 不应被使用",
+                        "content": "## 核心观点\n正常 content",
+                        "reasoning_content": "## 核心观点\n这是 reasoning 不应被使用",
                     }
                 }
             ]
@@ -912,8 +1084,11 @@ class TestPromptTemplateConstraints:
     - 禁止输出思考过程的最高优先级规则
     - 元话语黑名单(让 LLM 识别并停止 CoT 泄露)
     - 字数上限(防止 max_tokens 截断),但不再有 400 字下限(凑字数注水元凶)
-    - 要点数量按信息量自然决定(2-3 / 5-8),不强制 3-8
+    - 要点数量按信息量自然决定(1-2 / 3-6),不强制 3-8
     - 序号格式 + 每条含具体信息
+
+    金融观点提炼 prompt 后,字段标题改为:
+    核心观点 / 论据与逻辑 / 关键数据 / 风险提示 / 一句话总结 / 关键词 / 标签。
 
     注意：本类测试只验证 prompt 文本字面量,不验证 LLM 实际遵守。
     """
@@ -939,7 +1114,7 @@ class TestPromptTemplateConstraints:
             "prompt 不应再含「400 字」字数下限(促使 LLM 输出凑字数 CoT)"
         )
         assert "字数下限" not in _ANALYSIS_PROMPT_TEMPLATE, (
-            "prompt 不应再有「字数下限」措辞(改为「无硬性下限」)"
+            "prompt 不应再有「字数下限」措辞"
         )
 
     def test_prompt_contains_word_count_upper_bound(self) -> None:
@@ -949,42 +1124,65 @@ class TestPromptTemplateConstraints:
         assert "1200" in _ANALYSIS_PROMPT_TEMPLATE
 
     def test_prompt_does_not_force_min_keypoints_count(self) -> None:
-        """CoT 修复: prompt 不再强制「3-8 条」下限,改为按信息量自然决定(2-3 / 5-8)。"""
+        """CoT 修复: prompt 不再强制「3-8 条」下限。
+
+        金融观点提炼 prompt 改为「信息少则 1-2 条，多则 3-6 条」。
+        """
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
         # 不应再有「3-8」这种硬性范围(导致信息不足时硬凑要点)
         assert "3-8" not in _ANALYSIS_PROMPT_TEMPLATE, (
-            "prompt 不应再有「3-8 条」硬性范围(改为按信息量 2-3 / 5-8)"
+            "prompt 不应再有「3-8 条」硬性范围"
         )
-        # 应该有按信息量分档的描述
-        assert "2-3" in _ANALYSIS_PROMPT_TEMPLATE
-        assert "5-8" in _ANALYSIS_PROMPT_TEMPLATE
+        # 不应再有旧 prompt 的「2-3」/「5-8」分档
+        assert "2-3" not in _ANALYSIS_PROMPT_TEMPLATE
+        assert "5-8" not in _ANALYSIS_PROMPT_TEMPLATE
+        # 应该有新 prompt 按信息量分档的描述
+        assert "1-2" in _ANALYSIS_PROMPT_TEMPLATE
+        assert "3-6" in _ANALYSIS_PROMPT_TEMPLATE
 
     def test_prompt_requires_numbered_list_format(self) -> None:
-        """prompt 必须要求用「1. 」「2. 」中文序号格式表达要点。"""
+        """prompt 必须要求论据段用「1. 」「2. 」中文序号格式表达要点。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        summary_start = _ANALYSIS_PROMPT_TEMPLATE.find("## 摘要\n")
-        next_section = _ANALYSIS_PROMPT_TEMPLATE.find("## 一句话总结\n")
-        assert summary_start != -1, "prompt 必须含 `## 摘要` 段标题"
-        assert next_section != -1, "prompt 必须含 `## 一句话总结` 段标题"
-        summary_block = _ANALYSIS_PROMPT_TEMPLATE[summary_start:next_section]
-        assert "1. " in summary_block, "## 摘要 段必须含「1. 」序号约束"
-        assert "3. " in summary_block, "## 摘要 段必须含「3. 」序号样例"
+        arguments_start = _ANALYSIS_PROMPT_TEMPLATE.find("## 论据与逻辑\n")
+        next_section = _ANALYSIS_PROMPT_TEMPLATE.find("## 关键数据\n")
+        assert arguments_start != -1, "prompt 必须含 `## 论据与逻辑` 段标题"
+        assert next_section != -1, "prompt 必须含 `## 关键数据` 段标题"
+        arguments_block = _ANALYSIS_PROMPT_TEMPLATE[arguments_start:next_section]
+        assert "1. " in arguments_block, "## 论据与逻辑 段必须含「1. 」序号约束"
+        assert "2. " in arguments_block, "## 论据与逻辑 段必须含「2. 」序号约束"
 
     def test_prompt_requires_concrete_info_per_point(self) -> None:
-        """prompt 必须要求每条要点含具体信息（数据/案例/时间/论据），不只复述标题。"""
+        """prompt 必须要求每条论据含具体信息（数据/论据/逻辑链条），不只泛泛而谈。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
         assert "数据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「数据」类具体信息"
         assert "论据" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「论据」类具体信息"
+        assert "逻辑链条" in _ANALYSIS_PROMPT_TEMPLATE, "prompt 必须要求每条含「逻辑链条」"
 
-    def test_prompt_still_has_four_sections(self) -> None:
-        """回归保护：prompt 仍然包含 4 个标准字段标题（解析层依赖）。"""
+    def test_prompt_has_finance_extraction_sections(self) -> None:
+        """金融观点提炼 prompt 必须包含 7 个字段标题（解析层依赖）。"""
         from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
 
-        for section in ("## 摘要", "## 一句话总结", "## 关键词", "## 标签"):
+        for section in (
+            "## 核心观点",
+            "## 论据与逻辑",
+            "## 关键数据",
+            "## 风险提示",
+            "## 一句话总结",
+            "## 关键词",
+            "## 标签",
+        ):
             assert section in _ANALYSIS_PROMPT_TEMPLATE, f"prompt 必须保留 {section} 字段标题"
+
+    def test_prompt_does_not_have_old_summary_section(self) -> None:
+        """金融观点提炼后,旧 prompt 的「## 摘要」标题必须被替换掉。"""
+        from core.summarizer import _ANALYSIS_PROMPT_TEMPLATE
+
+        assert "## 摘要" not in _ANALYSIS_PROMPT_TEMPLATE, (
+            "prompt 不应再含旧「## 摘要」字段标题(已改为「## 核心观点」)"
+        )
 
     def test_prompt_keeps_placeholder_format(self) -> None:
         """回归保护：prompt 模板必须保留 {title}/{author}/{text} 占位符供 str.format 调用。"""
@@ -1054,7 +1252,7 @@ class TestMaxTokensConfigurable:
             mock_response.status_code = 200
             mock_response.raise_for_status.return_value = None
             mock_response.json.return_value = {
-                "choices": [{"message": {"content": "## 摘要\nok"}}]
+                "choices": [{"message": {"content": "## 核心观点\nok"}}]
             }
 
             # 捕获 post 调用的 payload

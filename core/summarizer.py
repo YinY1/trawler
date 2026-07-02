@@ -24,27 +24,40 @@ logger = logging.getLogger(__name__)
 # ── Prompt 模板 ──────────────────────────────────────────────────
 
 _ANALYSIS_PROMPT_TEMPLATE = """\
-你是内容分析助手。请阅读以下内容，严格按下面的 Markdown 格式输出分析结果，\
-不要输出任何额外说明或前后缀。
+你是金融内容观点提炼助手。请从以下内容中提炼作者的市场观点和论据，\
+严格按下面的 Markdown 格式输出，不要输出任何额外说明或前后缀。
 
 【最高优先级规则——违反即视为失败】
 1. 直接输出最终分析结果，禁止输出任何思考过程、推理步骤、自我对话、草稿、\
 字数计算或调整说明。包括但不限于："让我分析"、"我重新组织"、"总字数"、\
 "需要扩充"、"我们可以"、"不如忽略"等元话语。如果你发现自己的输出包含这类内容，\
 立即停止并只输出最终答案。
-2. 字段标题（## 摘要 等）仅作为分隔符用于解析，字段内容必须是纯文本，\
+2. 字段标题（## 核心观点 等）仅作为分隔符用于解析，字段内容必须是纯文本，\
 禁止使用任何 Markdown 语法（不要使用 **粗体**、*斜体*、[链接](url)、`代码`、```代码块```、\
 > 引用 等标记）。
-3. 摘要部分必须用「1. 」「2. 」中文序号表达要点，\
+3. 论据部分必须用「1. 」「2. 」中文序号表达要点，\
 不要使用「- 」开头的 markdown 列表。
 
 输出格式（必须严格遵循）：
 
-## 摘要
-（覆盖所有重要观点的总结。按「1. 」「2. 」「3. 」中文序号列出要点，\
-按重要性排序；每条含具体信息（数据、案例、时间、地点、人名、引用、论据），\
-不要只复述标题。要点数量按信息量自然决定：信息少则 2-3 条，信息多则 5-8 条，\
-不要为凑数量或字数注水。每条字数按内容自然展开，无硬性下限。总字数上限 1200 字。）
+## 核心观点
+（作者的主要立场或判断，1-3句。例如：看多/看空/中性、目标方向、时间窗口。\
+如内容非金融/投资相关，按实际主题提炼核心论点。）
+
+## 论据与逻辑
+（按「1. 」「2. 」中文序号列出支撑观点的关键论据，按重要性排序。\
+每条应包含：具体论据（技术面/基本面/资金面/事件驱动）、\
+关键数据（价格、点位、百分比、时间节点）、\
+逻辑链条（为什么得出这个判断）。\
+不要泛泛而谈，必须有具体信息。要点数量按信息量自然决定：信息少则 1-2 条，\
+多则 3-6 条，不要为凑数量注水。每条字数按内容自然展开，总字数上限 1200 字。）
+
+## 关键数据
+（单独列出文中提到的关键数字，如：标的、价位、支撑/阻力位、涨跌幅、估值、时间。\
+每行一个，格式「标的/指标：数值」。如无具体数据则留空。）
+
+## 风险提示
+（作者提到的风险因素或对立观点。如无则留空。）
 
 ## 一句话总结
 （单句概括，不超过 40 字）
@@ -53,7 +66,7 @@ _ANALYSIS_PROMPT_TEMPLATE = """\
 （3-5 个关键词，用中文分号「；」分隔，只输出关键词本身）
 
 ## 标签
-（0-3 个内容类型标签，如 教程、评测、Vlog，用逗号「，」分隔；若无则留空）
+（0-3 个内容类型标签，如 股评、币圈、宏观、教程，用逗号「，」分隔；若无则留空）
 
 ---
 
@@ -67,10 +80,14 @@ _ANALYSIS_PROMPT_TEMPLATE = """\
 # ── 解析层 ───────────────────────────────────────────────────────
 
 # Issue #56 场景 B: 放宽标题格式 —— 允许行尾 [:：] 和加粗 **...**。
-# 常见 LLM 不严格输出：'## 摘要：' / '## 摘要:' / '## **摘要**' / '## **摘要**：'。
+# 常见 LLM 不严格输出：'## 核心观点：' / '## 核心观点:' / '## **核心观点**' / '## **核心观点**：'。
 # one_line_summary 同时接受 '## 总结' 同义词（向后兼容旧 prompt 的「## 一句话总结」）。
+# 金融观点提炼 prompt: summary 字段语义改为「核心观点」,并新增 arguments/key_data/risk。
 _SECTION_PATTERNS: dict[str, re.Pattern[str]] = {
-    "summary": re.compile(r"^#{1,3}\s*\**摘要\**\s*[:：]?\s*$", re.MULTILINE),
+    "summary": re.compile(r"^#{1,3}\s*\**核心观点\**\s*[:：]?\s*$", re.MULTILINE),
+    "arguments": re.compile(r"^#{1,3}\s*\**论据与逻辑\**\s*[:：]?\s*$", re.MULTILINE),
+    "key_data": re.compile(r"^#{1,3}\s*\**关键数据\**\s*[:：]?\s*$", re.MULTILINE),
+    "risk": re.compile(r"^#{1,3}\s*\**风险提示\**\s*[:：]?\s*$", re.MULTILINE),
     "one_line_summary": re.compile(r"^#{1,3}\s*\**(一句话总结|总结)\**\s*[:：]?\s*$", re.MULTILINE),
     "keywords": re.compile(r"^#{1,3}\s*\**关键词\**\s*[:：]?\s*$", re.MULTILINE),
     "tags": re.compile(r"^#{1,3}\s*\**标签\**\s*[:：]?\s*$", re.MULTILINE),
@@ -79,9 +96,19 @@ _SECTION_PATTERNS: dict[str, re.Pattern[str]] = {
 
 @dataclass
 class AnalysisResult:
-    """``analyze_content`` 的结构化结果。"""
+    """``analyze_content`` 的结构化结果。
 
-    summary: str = ""
+    金融观点提炼 prompt 字段映射:
+    - summary: 核心观点（字段名保留以兼容下游 handler，语义已变）
+    - arguments: 论据与逻辑
+    - key_data: 关键数据
+    - risk: 风险提示
+    """
+
+    summary: str = ""  # 核心观点
+    arguments: str = ""  # 论据与逻辑
+    key_data: str = ""  # 关键数据
+    risk: str = ""  # 风险提示
     one_line_summary: str = ""
     keywords: list[str] = field(default_factory=lambda: [])
     tags: list[str] = field(default_factory=lambda: [])
@@ -147,6 +174,9 @@ def parse_markdown_analysis(raw: str) -> AnalysisResult:
     text = _strip_code_fence(raw)
     return AnalysisResult(
         summary=_extract_section(text, _SECTION_PATTERNS["summary"]),
+        arguments=_extract_section(text, _SECTION_PATTERNS["arguments"]),
+        key_data=_extract_section(text, _SECTION_PATTERNS["key_data"]),
+        risk=_extract_section(text, _SECTION_PATTERNS["risk"]),
         one_line_summary=_extract_section(text, _SECTION_PATTERNS["one_line_summary"]),
         keywords=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["keywords"]))[:5],
         tags=_parse_list_field(_extract_section(text, _SECTION_PATTERNS["tags"]))[:3],

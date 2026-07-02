@@ -294,7 +294,19 @@ async def summarize_phase(ctx: PhaseContext) -> bool:
             analysis.source,
             len(analysis.raw),
         )
-    ctx.summary_text = analysis.summary
+    # 金融观点提炼 prompt: 把核心观点 + 论据 + 关键数据 + 风险提示
+    # 拼成完整 summary_text，让通知能看到完整的观点提炼结果。
+    # （summary 字段语义已变为「核心观点」，仅 1-3 句，不足以承载完整内容。）
+    parts: list[str] = []
+    if analysis.summary:
+        parts.append(analysis.summary)
+    if analysis.arguments:
+        parts.append(analysis.arguments)
+    if analysis.key_data:
+        parts.append("关键数据：\n" + analysis.key_data)
+    if analysis.risk:
+        parts.append("风险提示：" + analysis.risk)
+    ctx.summary_text = "\n\n".join(parts)
     ctx.keywords = analysis.keywords
 
     return True
