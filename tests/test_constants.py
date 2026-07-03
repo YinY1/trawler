@@ -88,12 +88,17 @@ def test_run_git_strips_stdout():
 
 
 def test_read_pyproject_version_returns_real_version():
-    """项目根 pyproject.toml 存在且合法,返回真实版本号。"""
+    """项目根 pyproject.toml 存在且合法,返回真实版本号。
+
+    断言语义（PEP 440 版本号格式）而非硬编码值，避免每次 bump 版本号都破坏测试。
+    """
+    import re
+
     from shared import constants as constants_mod
 
     ver = constants_mod._read_pyproject_version()
-    # 当前 pyproject.toml 写的是 0.1.0
-    assert ver == "0.1.0"
+    # PEP 440 简化格式：X.Y.Z（可能带 .devN / .aN / +build 等后缀，这里只要求主版本号部分）
+    assert re.match(r"^\d+\.\d+\.\d+", ver), f"unexpected version format: {ver}"
 
 
 def test_read_pyproject_version_returns_zero_when_missing(monkeypatch, tmp_path):
@@ -158,7 +163,7 @@ def test_no_env_no_git_falls_back_to_zero_and_unknown(monkeypatch, tmp_path):
 def test_local_git_repo_version_includes_pyproject_and_sha(monkeypatch):
     """本地未安装但 git 可用 → VERSION = ``<pyproject>+dev.<short_sha>``.
 
-    pyproject.toml 当前 ``version = "0.1.0"``，``_run_git`` mock 为 ``abc1234``。
+    断言拼接格式（动态读 pyproject 版本），避免每次 bump 版本号都破坏测试。
     """
     from shared import constants as constants_mod
 
@@ -172,7 +177,8 @@ def test_local_git_repo_version_includes_pyproject_and_sha(monkeypatch):
         _patch_fn.object(constants_mod, "_run_git", return_value="abc1234"),
         _force_package_not_found(),
     ):
-        assert constants_mod._get_version() == "0.1.0+dev.abc1234"
+        expected = f"{constants_mod._read_pyproject_version()}+dev.abc1234"
+        assert constants_mod._get_version() == expected
         assert constants_mod._get_git_sha() == "abc1234"
 
 

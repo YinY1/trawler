@@ -47,6 +47,13 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=,format=short
 
+      # issue #98：github.run_started_at 不是官方 github context 属性，在 workflow
+      # 引擎预处理阶段可能为空（实证：v1.0.0 发版 BUILD_DATE 注入失败）。
+      # 改用 date -u 显式生成 UTC ISO 8601 时间戳，100% 可预测。
+      - name: Get build timestamp
+        id: timestamp
+        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -54,9 +61,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # tag 触发：github.ref_name = "v0.2.0"（带 v 前缀，作为版本语义标记原样注入）
+          # tag 触发：github.ref_name = "v1.0.0"（带 v 前缀，作为版本语义标记原样注入）
           # workflow_dispatch 手动触发：ref_name 为分支名 → 传空字符串，容器走 dist metadata fallback
           build-args: |
             GIT_SHA=${{ github.sha }}
-            BUILD_DATE=${{ github.run_started_at }}
+            BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
             TRAWLER_VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
