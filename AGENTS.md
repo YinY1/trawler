@@ -57,6 +57,22 @@ platforms/       平台适配层: bilibili/, xiaohongshu/
 - 保持 `_apply_env_overrides()` 同步更新
 - `config.toml.example` / `cookies.toml.example` / `subscriptions.toml.example` 同步更新
 
+### 发版流程
+
+镜像构建由 git tag 触发（`.github/workflows/docker-publish.yml`，issue #93）。
+日常合 PR 到 master **不会**构建镜像；只有打 `vX.Y.Z` tag 才触发 CI 构建 +
+推送 GHCR，watchtower 才会在 ≤10 分钟内拉到新镜像。
+
+发版步骤：
+1. 确认 master CI 绿、所有改动已合入
+2. bump 版本：`uv run uv version X.Y.Z`（会改 `pyproject.toml` 的 `version`）
+3. commit 版本号改动：`git commit -am "chore: bump version to X.Y.Z"`
+4. 打 tag 并 push：`git tag vX.Y.Z && git push origin vX.Y.Z`
+5. CI 触发构建 → GHCR（latest + vX.Y.Z + vX.Y + sha 标签）→ watchtower 自动拉取
+
+回滚：删除 tag（`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`）
+不会回滚已发布的镜像，需要手动改 watchtower 盯的 tag 或重新发版。
+
 ## Gotchas
 
 - 不要改 `print()` / `console.print()` 的 emoji 和颜色标签，它们是外部接口的一部分

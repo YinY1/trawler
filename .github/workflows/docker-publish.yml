@@ -1,14 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────
 # 构建 Docker 镜像并推送到 GHCR
-# 触发：push 到 master 分支（含 tags）
+# 触发：打 vX.Y.Z tag 时构建（issue #93：移除 push:master 触发，避免
+#       每次合 PR 都刷 latest；latest 现在跟随发版 tag，watchtower 只在
+#       发版后才会拉到新镜像）+ workflow_dispatch 手动兜底
 # ─────────────────────────────────────────────────────────────────────
 
 name: Build & Push to GHCR
 
 on:
   push:
-    branches: [master]
     tags: ["v*"]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -50,6 +52,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # tag 触发：github.ref_name = "v0.2.0"（带 v 前缀，作为版本语义标记原样注入）
+          # workflow_dispatch 手动触发：ref_name 为分支名 → 传空字符串，容器走 dist metadata fallback
           build-args: |
             GIT_SHA=${{ github.sha }}
             BUILD_DATE=${{ github.run_started_at }}
+            TRAWLER_VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}

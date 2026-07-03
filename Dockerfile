@@ -60,8 +60,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 在源码 COPY 之前注入，避免 build-args 变化触发源码 layer 失效导致 uv sync 重复执行
 ARG GIT_SHA=""
 ARG BUILD_DATE=""
+ARG TRAWLER_VERSION=""
 ENV TRAWLER_GIT_SHA=${GIT_SHA}
 ENV TRAWLER_BUILD_DATE=${BUILD_DATE}
+ENV TRAWLER_VERSION=${TRAWLER_VERSION}
 
 # ── 项目源码 ──
 COPY . .
