@@ -47,9 +47,9 @@ class TestTryXhsDownloaderLibDelegates:
     async def test_uses_async_wrapper_not_raw_xhs_lib(self) -> None:
         """验证第一层走 AsyncXhsClient(7头签名),不再 from xhs import XhsClient。
 
-        注：第一层现在显式传 xsec_token + xsec_source=pc_share (issue #89 修复前
-        只传 note_id, 导致图文笔记正文 100% 丢失)。空 token 时 wrapper 内部
-        仍走 pc_feed 默认链路, 行为等价。
+        注：第一层策略（issue #89 review 修正）：有 token 才切 pc_share，
+        无 token 保持原 pc_feed 默认链路（避免视频笔记回归）。_image_note()
+        默认 xsec_token="" → 走 else 分支，只传 note_id。
         """
         mock_client = MagicMock()
         mock_client.get_note_by_id = AsyncMock(return_value={"desc": "d"})
@@ -65,9 +65,7 @@ class TestTryXhsDownloaderLibDelegates:
             await _try_xhs_downloader_lib(_image_note(), _make_config(Path("/tmp")))
 
         mock_cls.assert_called_once_with(cookie="c")
-        mock_client.get_note_by_id.assert_awaited_once_with(
-            "n2", xsec_token="", xsec_source="pc_share"
-        )
+        mock_client.get_note_by_id.assert_awaited_once_with("n2")
 
     async def test_returns_none_when_note_detail_empty(self) -> None:
         """get_note_by_id 返回空 dict → 第一层返回 None(降级信号)。"""
@@ -410,10 +408,10 @@ class TestTryXhsDownloaderLibPassesXsecToken:
         )
 
     async def test_passes_empty_token_keeps_default_behavior(self) -> None:
-        """note.xsec_token="" → 仍按新签名调用，wrapper 内部空 token 走默认链路。
+        """note.xsec_token="" → 保持原 pc_feed 路径，不传额外参数。
 
-        与现有 test_uses_async_wrapper_not_raw_xhs_lib 配合：
-        空字符串 token 不影响 wrapper 的 body 构造（if xsec_token: 跳过）。
+        issue #89 review 修复：原 PR 无条件切 pc_share 会影响视频笔记回归。
+        有 token 才切 pc_share（图文修复必需），无 token 保持原行为。
         """
         note = NoteInfo(
             note_id="n2",
@@ -437,6 +435,5 @@ class TestTryXhsDownloaderLibPassesXsecToken:
         ):
             await _try_xhs_downloader_lib(note, _make_config(Path("/tmp")))
 
-        mock_client.get_note_by_id.assert_awaited_once_with(
-            "n2", xsec_token="", xsec_source="pc_share"
-        )
+        # 无 token：只传 note_id，走 wrapper 默认 pc_feed 链路
+        mock_client.get_note_by_id.assert_awaited_once_with("n2")

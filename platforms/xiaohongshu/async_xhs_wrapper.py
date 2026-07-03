@@ -213,8 +213,8 @@ class AsyncXhsClient:
         Args:
             note_id: 笔记 ID
             xsec_token: 从笔记列表拿到的 token(分享链路必需)
-            xsec_source: feed 链路。默认 ``pc_feed``(downloader 第一层);
-                downloader 第二层(分享链路)显式传 ``pc_share``。
+            xsec_source: feed 链路。默认 ``pc_feed``(downloader 第一层无 token 时);
+                downloader 第一层有 token 时 + 第二层(分享链路)显式传 ``pc_share``。
 
         Returns:
             note_card dict(xhs 库已解包 items[0].note_card)。
