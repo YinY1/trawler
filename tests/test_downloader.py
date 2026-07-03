@@ -207,3 +207,152 @@ async def test_http_non_200_not_permanent(download_dir: Path) -> None:
     assert result.success is False
     assert result.permanent is False
     assert "HTTP 503" in (result.error or "")
+
+
+# ── atomic write + 完整性校验 (Issue #94 切片 A) ────────────────
+
+
+def _make_streaming_resp(
+    *,
+    status: int = 200,
+    content_length: int | None = None,
+    read_side_effect: object = None,
+) -> MagicMock:
+    """构造一个模拟 aiohttp streaming response 的对象。
+
+    ``read_side_effect`` 传 list 时作为 ``resp.content.read`` 的 side_effect；
+    传单个值（bytes）时作为常量返回。content_length 为 None 表示响应头无该字段。
+    """
+    mock_resp = MagicMock()
+    mock_resp.status = status
+    mock_resp.content_length = content_length
+    if read_side_effect is None:
+        read_side_effect = [b""]
+    mock_resp.content = MagicMock()
+    mock_resp.content.read = AsyncMock(side_effect=read_side_effect)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=None)
+    return mock_resp
+
+
+def _make_session_mock(mock_resp: MagicMock) -> MagicMock:
+    """构造 ClientSession mock，``session.get`` 返回双层 async context。"""
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(return_value=mock_resp)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_stream_midway_exception_leaves_no_partial_file(
+    download_dir: Path,
+) -> None:
+    """下载流中途抛 ConnectionResetError → .m4a 与 .m4a.part 均不存在。
+
+    生产事故：CDN 断连后磁盘残留半成品文件，retry 不清理。
+    """
+    cfg = _make_config(download_dir=str(download_dir))
+
+    v = _make_video_mock(
+        info={"pages": [{"cid": 123}]},
+        download_url={"dash": {"audio": [{"baseUrl": "https://cdn.example.com/a.m4s"}]}},
+    )
+
+    # 第一次 read 返回部分数据，第二次抛 ConnectionResetError 模拟 CDN 中断
+    mock_resp = _make_streaming_resp(
+        status=200,
+        content_length=1143599,
+        read_side_effect=[
+            b"x" * 491520,
+            ConnectionResetError(104, "Connection reset by peer"),
+        ],
+    )
+    mock_session = _make_session_mock(mock_resp)
+
+    with (
+        patch("bilibili_api.video.Video", return_value=v),
+        patch("aiohttp.ClientSession") as mock_cls,
+    ):
+        mock_cls.return_value = mock_session
+        result = await _download_bili_video("BV1xxx", cfg, download_dir, "title")
+
+    assert result.success is False
+    assert result.permanent is False
+    final_path = download_dir / "title.m4a"
+    part_path = download_dir / "title.m4a.part"
+    assert not final_path.exists(), "final .m4a 不应残留"
+    assert not part_path.exists(), ".m4a.part 应被异常路径清理"
+    assert result.filepath is None, "失败时 filepath 应为 None"
+
+
+@pytest.mark.asyncio
+async def test_content_length_mismatch_returns_failure(
+    download_dir: Path,
+) -> None:
+    """content_length=1143599 但实际只读到 491520 字节 → success=False 且清理 .part。
+
+    流正常结束（无异常），但写入字节数不匹配，判定为不完整下载。
+    """
+    cfg = _make_config(download_dir=str(download_dir))
+
+    v = _make_video_mock(
+        info={"pages": [{"cid": 123}]},
+        download_url={"dash": {"audio": [{"baseUrl": "https://cdn.example.com/a.m4s"}]}},
+    )
+
+    mock_resp = _make_streaming_resp(
+        status=200,
+        content_length=1143599,
+        read_side_effect=[b"x" * 491520, b""],  # 写入 491520 后正常 EOF
+    )
+    mock_session = _make_session_mock(mock_resp)
+
+    with (
+        patch("bilibili_api.video.Video", return_value=v),
+        patch("aiohttp.ClientSession") as mock_cls,
+    ):
+        mock_cls.return_value = mock_session
+        result = await _download_bili_video("BV1xxx", cfg, download_dir, "title")
+
+    assert result.success is False
+    final_path = download_dir / "title.m4a"
+    part_path = download_dir / "title.m4a.part"
+    assert not final_path.exists(), "完整性失败时 .m4a 不应被生成"
+    assert not part_path.exists(), ".part 应被清理"
+    assert result.error is not None and "完整性" in result.error
+
+
+@pytest.mark.asyncio
+async def test_successful_download_renames_part_to_final(
+    download_dir: Path,
+) -> None:
+    """正常下载（字节数匹配 content_length）→ .part 重命名为 .m4a。"""
+    cfg = _make_config(download_dir=str(download_dir))
+
+    v = _make_video_mock(
+        info={"pages": [{"cid": 123}]},
+        download_url={"dash": {"audio": [{"baseUrl": "https://cdn.example.com/a.m4s"}]}},
+    )
+
+    payload = b"y" * 1143599
+    mock_resp = _make_streaming_resp(
+        status=200,
+        content_length=len(payload),
+        read_side_effect=[payload, b""],
+    )
+    mock_session = _make_session_mock(mock_resp)
+
+    with (
+        patch("bilibili_api.video.Video", return_value=v),
+        patch("aiohttp.ClientSession") as mock_cls,
+    ):
+        mock_cls.return_value = mock_session
+        result = await _download_bili_video("BV1xxx", cfg, download_dir, "title")
+
+    assert result.success is True
+    final_path = download_dir / "title.m4a"
+    part_path = download_dir / "title.m4a.part"
+    assert result.filepath == final_path, "filepath 应为最终 .m4a 路径"
+    assert final_path.exists(), "最终 .m4a 文件应存在"
+    assert not part_path.exists(), ".part 应已重命名为 .m4a"

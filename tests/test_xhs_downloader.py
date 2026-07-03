@@ -6,6 +6,7 @@ See docs/superpowers/plans/2026-06-26-xhs-unify.md Task 9/11/12.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from platforms.xiaohongshu.downloader import _try_xhs_downloader_lib
@@ -298,3 +299,69 @@ class TestTryDirectDownloadFieldExtraction:
             result = await _try_direct_download(note, _make_config(Path("/tmp")))
 
         assert result.content_text == "fallback desc"
+
+
+class TestDownloadFileContentLengthCheck:
+    """_download_file 完整性校验:resp.content_length ≠ len(content) → 不写盘,返回 False。"""
+
+    async def test_download_file_content_length_mismatch_returns_false(
+        self, tmp_path: Path
+    ) -> None:
+        """content_length=1000 但 read() 只返回 500 字节 → 完整性校验失败,不写文件。"""
+        from platforms.xiaohongshu.downloader import _download_file
+
+        url = "https://example.com/image.jpg"
+        dest = tmp_path / "test.jpg"
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.content_length = 1000
+        mock_resp.read = AsyncMock(return_value=b"x" * 500)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=_AsyncCtxManager(mock_resp))
+
+        with patch("platforms.xiaohongshu.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            result = await _download_file(url, dest)
+
+        assert result is False
+        assert not dest.exists()
+
+    async def test_download_file_content_length_match_writes_file(
+        self, tmp_path: Path
+    ) -> None:
+        """content_length=10 且 read() 返回 10 字节 → 正常写盘,返回 True。"""
+        from platforms.xiaohongshu.downloader import _download_file
+
+        url = "https://example.com/image.jpg"
+        dest = tmp_path / "test.jpg"
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.content_length = 10
+        mock_resp.read = AsyncMock(return_value=b"x" * 10)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=_AsyncCtxManager(mock_resp))
+
+        with patch("platforms.xiaohongshu.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            result = await _download_file(url, dest)
+
+        assert result is True
+        assert dest.exists()
+        assert dest.read_bytes() == b"x" * 10
+
+
+class _AsyncCtxManager:
+    """模拟 `async with session.get(...) as resp:` 的双层 async context manager。"""
+
+    def __init__(self, resp: Any) -> None:
+        self._resp = resp
+
+    async def __aenter__(self) -> Any:
+        return self._resp
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None

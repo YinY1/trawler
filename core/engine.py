@@ -205,6 +205,9 @@ class PipelineEngine:
                 store.mark_retry_reset(msg.msg_id)
             logger.info("%s:%s → %s ✓", msg.platform, msg.msg_id, next_phase.name)
             store.save()
+        else:
+            # issue #94 切片 C：所有阶段正常跑完（无 break）才打处理完成日志
+            logger.info("✓ %s:%s 处理完成（达到 %s）", msg.platform, msg.msg_id, msg.phase.name)
 
     @classmethod
     async def _safe_process_message(
@@ -378,6 +381,12 @@ class PipelineEngine:
             log_callback("log", f"📋 实际 reset {count} 条消息")
 
         logger.info("▶ 手动重跑 %d 条消息（from %s, skip_push=%s）", count, from_phase.name, skip_push)
+        # issue #94 切片 C：打印每条消息的 ID / title / 当前 phase，便于日志追溯
+        for mid in msg_ids:
+            m = store.get_message(mid)
+            if m is None or m.phase != from_phase:
+                continue
+            logger.info("  • %s:%s (%s) — %s", m.platform, m.msg_id, m.phase.name, m.title[:30])
 
         # 延迟导入所有平台 handler 模块（触发装饰器注册）
         for module_path in cls._HANDLER_MODULES.values():
@@ -410,5 +419,7 @@ class PipelineEngine:
             await cls._safe_process_message(msg, config, store)
 
         store.save()
+        # issue #94 切片 C：CLI 模式（无 log_callback）也要能看到完成日志
+        logger.info("✓ 手动重跑完成（共 %d 条）", count)
         if log_callback:
             log_callback("done", "✅ 手动重跑完成")

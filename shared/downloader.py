@@ -4,6 +4,7 @@ from __future__ import annotations
 
 # pyright: basic
 import logging
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -197,7 +198,8 @@ async def _download_bili_video(
         )
 
     # ── 下载音频 ──
-    filepath = download_dir / f"{display_name[:80]}.m4a"
+    final_path = download_dir / f"{display_name[:80]}.m4a"
+    part_path = final_path.with_suffix(final_path.suffix + ".part")
 
     headers = {
         "User-Agent": (
@@ -208,6 +210,7 @@ async def _download_bili_video(
         "Referer": "https://www.bilibili.com/",
     }
 
+    bytes_written = 0
     try:
         async with aiohttp.ClientSession(trust_env=False) as session:
             async with session.get(
@@ -222,13 +225,15 @@ async def _download_bili_video(
                         title=display_name,
                         error=f"下载失败 HTTP {resp.status}",
                     )
-                with open(filepath, "wb") as f:
+                with open(part_path, "wb") as f:
                     while True:
                         chunk = await resp.content.read(8192)
                         if not chunk:
                             break
                         f.write(chunk)
+                        bytes_written += len(chunk)
     except Exception as e:
+        part_path.unlink(missing_ok=True)
         return DownloadResult(
             success=False,
             source_id=bvid,
@@ -236,9 +241,24 @@ async def _download_bili_video(
             error=str(e),
         )
 
-    if filepath.exists():
-        size_mb = filepath.stat().st_size / 1024 / 1024
-        logger.info("⬇ 下载完成: %s -> %s (%.1f MB)", display_name, filepath.name, size_mb)
+    # 完整性校验：content_length 已知时必须匹配实际写入字节数
+    if resp.content_length is not None and bytes_written != resp.content_length:
+        part_path.unlink(missing_ok=True)
+        return DownloadResult(
+            success=False,
+            source_id=bvid,
+            title=display_name,
+            error=(
+                f"完整性校验失败: 已写入 {bytes_written} 字节，"
+                f"期望 {resp.content_length} 字节"
+            ),
+        )
+
+    os.replace(part_path, final_path)
+
+    if final_path.exists():
+        size_mb = final_path.stat().st_size / 1024 / 1024
+        logger.info("⬇ 下载完成: %s -> %s (%.1f MB)", display_name, final_path.name, size_mb)
     else:
         logger.warning("⬇ 下载可能成功但未找到文件: %s (%s)", display_name, bvid)
 
@@ -246,7 +266,7 @@ async def _download_bili_video(
         success=True,
         source_id=bvid,
         title=display_name,
-        filepath=filepath,
+        filepath=final_path,
     )
 
 
