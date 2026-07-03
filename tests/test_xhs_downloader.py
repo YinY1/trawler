@@ -45,7 +45,12 @@ class TestTryXhsDownloaderLibDelegates:
     """第一层切 AsyncXhsClient.get_note_by_id(删 from xhs import)。"""
 
     async def test_uses_async_wrapper_not_raw_xhs_lib(self) -> None:
-        """验证第一层走 AsyncXhsClient(7头签名),不再 from xhs import XhsClient。"""
+        """验证第一层走 AsyncXhsClient(7头签名),不再 from xhs import XhsClient。
+
+        注：第一层策略（issue #89 review 修正）：有 token 才切 pc_share，
+        无 token 保持原 pc_feed 默认链路（避免视频笔记回归）。_image_note()
+        默认 xsec_token="" → 走 else 分支，只传 note_id。
+        """
         mock_client = MagicMock()
         mock_client.get_note_by_id = AsyncMock(return_value={"desc": "d"})
         mock_client.close = AsyncMock()
@@ -365,3 +370,70 @@ class _AsyncCtxManager:
 
     async def __aexit__(self, *exc: object) -> None:
         return None
+
+
+class TestTryXhsDownloaderLibPassesXsecToken:
+    """第一层 _try_xhs_downloader_lib 必须把 note.xsec_token 透传给 API (issue #89)。
+
+    根因：第一层 get_note_by_id 只传 note_id, 不传 xsec_token → API 鉴权失败 →
+    图文笔记正文 100% 丢失。修复后必须传 xsec_token=note.xsec_token。
+    """
+
+    async def test_passes_xsec_token_when_present(self) -> None:
+        """note.xsec_token="tok" → get_note_by_id 传 xsec_token="tok"。"""
+        note = NoteInfo(
+            note_id="n1",
+            title="图文笔记",
+            author="a",
+            user_id="u1",
+            note_type="normal",
+            pubdate=0,
+            xsec_token="tok",
+        )
+        mock_client = MagicMock()
+        mock_client.get_note_by_id = AsyncMock(return_value={"desc": "d"})
+        mock_client.close = AsyncMock()
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader.AsyncXhsClient",
+                return_value=mock_client,
+            ),
+            patch("platforms.xiaohongshu.downloader.get_xhs_cookie", return_value="c"),
+        ):
+            await _try_xhs_downloader_lib(note, _make_config(Path("/tmp")))
+
+        mock_client.get_note_by_id.assert_awaited_once_with(
+            "n1", xsec_token="tok", xsec_source="pc_share"
+        )
+
+    async def test_passes_empty_token_keeps_default_behavior(self) -> None:
+        """note.xsec_token="" → 保持原 pc_feed 路径，不传额外参数。
+
+        issue #89 review 修复：原 PR 无条件切 pc_share 会影响视频笔记回归。
+        有 token 才切 pc_share（图文修复必需），无 token 保持原行为。
+        """
+        note = NoteInfo(
+            note_id="n2",
+            title="无 token",
+            author="a",
+            user_id="u1",
+            note_type="normal",
+            pubdate=0,
+            xsec_token="",
+        )
+        mock_client = MagicMock()
+        mock_client.get_note_by_id = AsyncMock(return_value={"desc": "d"})
+        mock_client.close = AsyncMock()
+
+        with (
+            patch(
+                "platforms.xiaohongshu.downloader.AsyncXhsClient",
+                return_value=mock_client,
+            ),
+            patch("platforms.xiaohongshu.downloader.get_xhs_cookie", return_value="c"),
+        ):
+            await _try_xhs_downloader_lib(note, _make_config(Path("/tmp")))
+
+        # 无 token：只传 note_id，走 wrapper 默认 pc_feed 链路
+        mock_client.get_note_by_id.assert_awaited_once_with("n2")

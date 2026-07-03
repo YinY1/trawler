@@ -50,6 +50,8 @@ async def xhs_detector(config: Config, store: MessageStore) -> None:
                 title=n.title,
                 author=n.author,
                 subscription_ref=sub.user_id,
+                xsec_token=n.xsec_token,
+                body=n.desc,
             )
 
 
@@ -70,6 +72,8 @@ async def xhs_download(ctx: PhaseContext) -> bool:
         user_id="",
         note_type="video" if ctx.msg.content_type == ContentType.VIDEO else "normal",
         pubdate=ctx.msg.pubdate,
+        xsec_token=ctx.msg.xsec_token,
+        desc=ctx.msg.body,
     )
 
     try:

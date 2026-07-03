@@ -695,3 +695,90 @@ def test_reset_specific_clears_permanent_error(store: MessageStore) -> None:
     assert msg is not None
     assert msg.error == ""
     assert msg.permanent_error is False
+
+
+# ── xsec_token / body (issue #89) ──────────────────────────────
+
+
+def test_add_new_persists_xsec_token(store: MessageStore) -> None:
+    """add_new(keyword-only xsec_token=...) 必须落盘并能读回（xhs 鉴权 token）。"""
+    store.add_new(
+        "xhs:n1",
+        "xhs",
+        ContentType.TEXT,
+        int(time.time()),
+        "T",
+        "A",
+        xsec_token="tok123",
+    )
+    msg = store.get_message("xhs:n1")
+    assert msg is not None
+    assert msg.xsec_token == "tok123"
+
+
+def test_add_new_persists_body(store: MessageStore) -> None:
+    """add_new(keyword-only body=...) 必须落盘并能读回（detector 预填正文）。"""
+    store.add_new(
+        "xhs:n2",
+        "xhs",
+        ContentType.TEXT,
+        int(time.time()),
+        "T",
+        "A",
+        body="正文内容",
+    )
+    msg = store.get_message("xhs:n2")
+    assert msg is not None
+    assert msg.body == "正文内容"
+
+
+def test_msg_from_dict_loads_legacy_data_without_xsec_token(store: MessageStore) -> None:
+    """旧 messages.json 不含 xsec_token 键时，反序列化默认 ""（向后兼容）。"""
+    store._messages["xhs:legacy"] = {
+        "platform": "xhs",
+        "content_type": ContentType.TEXT.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+        # 注意：故意无 xsec_token 键
+    }
+    msg = store.get_message("xhs:legacy")
+    assert msg is not None
+    assert msg.xsec_token == ""
+
+
+def test_msg_from_dict_loads_xsec_token(store: MessageStore) -> None:
+    """_msg_from_dict 必须把存储中的 xsec_token 反序列化进 MessageRecord。"""
+    store._messages["xhs:n3"] = {
+        "platform": "xhs",
+        "content_type": ContentType.TEXT.value,
+        "phase": Phase.DISCOVERED.value,
+        "pubdate": int(time.time()),
+        "title": "T",
+        "author": "A",
+        "xsec_token": "tok_xyz",
+    }
+    msg = store.get_message("xhs:n3")
+    assert msg is not None
+    assert msg.xsec_token == "tok_xyz"
+
+
+def test_add_new_xsec_token_persists_across_reload(tmp_path: Path) -> None:
+    """xsec_token 落盘后 reload 不丢失（落盘回归测试）。"""
+    s1 = MessageStore(tmp_path)
+    s1.add_new(
+        "xhs:n4",
+        "xhs",
+        ContentType.TEXT,
+        int(time.time()),
+        "T",
+        "A",
+        xsec_token="persist_tok",
+    )
+    s1.save()
+
+    s2 = MessageStore(tmp_path)
+    msg = s2.get_message("xhs:n4")
+    assert msg is not None
+    assert msg.xsec_token == "persist_tok"

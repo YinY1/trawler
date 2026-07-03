@@ -57,7 +57,17 @@ async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> XhsDownload
         cookie = get_xhs_cookie(config)
         client = AsyncXhsClient(cookie=cookie)
 
-        note_detail = await client.get_note_by_id(note.note_id)
+        # issue #89：图文笔记必须有 token + pc_share 才能拿到 desc，否则正文丢失。
+        # 但视频笔记原本走 pc_feed 快速路径是好的，无差别切 pc_share 会引入回归。
+        # 策略：有 token 才切 pc_share（图文修复必需），无 token 保持原 pc_feed 路径。
+        if note.xsec_token:
+            note_detail = await client.get_note_by_id(
+                note.note_id,
+                xsec_token=note.xsec_token,
+                xsec_source="pc_share",
+            )
+        else:
+            note_detail = await client.get_note_by_id(note.note_id)
         if not note_detail:
             return None
 
