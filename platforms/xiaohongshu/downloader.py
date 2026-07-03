@@ -57,7 +57,14 @@ async def _try_xhs_downloader_lib(note: NoteInfo, config: Config) -> XhsDownload
         cookie = get_xhs_cookie(config)
         client = AsyncXhsClient(cookie=cookie)
 
-        note_detail = await client.get_note_by_id(note.note_id)
+        # issue #89：必须透传 xsec_token + pc_share 链路，否则图文笔记 API 鉴权失败
+        # → desc 拿不到 → 正文 100% 丢失。空 token 时 wrapper 内部走默认 pc_feed，
+        # 行为等价（参考第二层 _fetch_note_detail 的调用方式）。
+        note_detail = await client.get_note_by_id(
+            note.note_id,
+            xsec_token=note.xsec_token,
+            xsec_source="pc_share",
+        )
         if not note_detail:
             return None
 

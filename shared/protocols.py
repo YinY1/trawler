@@ -299,6 +299,10 @@ class MessageRecord:
     dynamic_text: str = ""
     # detector 注入，push handler 用于精确匹配订阅（存 uid/user_id 字符串）
     subscription_ref: str = ""
+    # xhs 专属鉴权 token（issue #89）：detector 从 NoteInfo.xsec_token 透传，
+    # download handler 重建 NoteInfo 时读回，传给 xhs API 的 pc_share 链路。
+    # bili/weibo 不用此字段，保持空字符串。
+    xsec_token: str = ""
     # 内容正文（清洗后纯文本）：xhs/weibo 由 download handler 经 engine flush 回写；
     # bili 视频无文本正文，保持空字符串（见 plan D2）
     body: str = ""

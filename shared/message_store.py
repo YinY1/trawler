@@ -99,6 +99,7 @@ class MessageStore:
             error=data.get("error", ""),
             dynamic_text=data.get("dynamic_text", ""),
             subscription_ref=data.get("subscription_ref", ""),
+            xsec_token=data.get("xsec_token", ""),
             body=data.get("body", ""),
             summary=data.get("summary", ""),
             retry_count=data.get("retry_count", 0),
@@ -233,10 +234,18 @@ class MessageStore:
         title: str,
         author: str,
         subscription_ref: str = "",
+        *,
+        xsec_token: str = "",
+        body: str = "",
     ) -> MessageRecord | None:
         """添加新消息。
 
         内部做去重和时间窗口检查。如果消息已在 store 中或超出时间窗口，返回 None。
+
+        ``xsec_token`` 和 ``body`` 为 keyword-only（issue #89）：
+        - ``xsec_token``：xhs 专属鉴权 token，detector 透传，download handler 读回
+        - ``body``：内容正文（xhs detector 阶段预填 NoteInfo.desc）
+        两者默认空字符串，保持向后兼容（现有 45 个调用点不需改动）。
 
         Returns:
             新创建的 MessageRecord，或 None（已存在 / 超期）
@@ -258,6 +267,8 @@ class MessageStore:
             "updated_at": now,
             "error": "",
             "subscription_ref": subscription_ref,
+            "xsec_token": xsec_token,
+            "body": body,
         }
         self._messages[msg_id] = data
         self._dirty = True
