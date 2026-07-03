@@ -183,6 +183,16 @@ async def _download_file(url: str, dest: Path) -> bool:
 
                 content = await resp.read()
 
+            # 完整性校验：content_length 非 None 时比对字节数
+            if resp.content_length is not None and len(content) != resp.content_length:
+                logger.debug(
+                    "下载完整性校验失败: 期望 %d 字节, 实际 %d, URL: %s",
+                    resp.content_length,
+                    len(content),
+                    url,
+                )
+                return False
+
             dest.write_bytes(content)
             return True
 

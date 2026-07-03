@@ -314,3 +314,79 @@ async def test_run_specific_messages_empty_list_with_callback(
     # 空列表也应发 done（让前端 SSE 能收到结束信号）
     assert any(et == "done" for et, _ in events)
 
+
+# ── issue #94 切片 C: 手动重跑日志增强 ─────────────────────────────
+
+import logging  # noqa: E402
+
+
+async def test_run_specific_messages_logs_msg_ids_and_titles_at_start(
+    mock_store: MessageStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """run_specific_messages 开头应 logger.info 每条消息的 msg_id + title + 当前 phase。"""
+    config = MagicMock()
+    config.general.data_dir = str(tmp_path)
+
+    with patch.object(PipelineEngine, "process_message", new=AsyncMock()):
+        with caplog.at_level(logging.INFO, logger="core.engine"):
+            await PipelineEngine.run_specific_messages(
+                msg_ids=["bili:BV1", "bili:BV2"],
+                from_phase=Phase.SUMMARIZED,
+                skip_push=True,
+                config=config,
+                store=mock_store,
+            )
+    # mock_store fixture 中两条消息 title 分别为 T1 / T2，重跑前 phase=PUSHED
+    text = caplog.text
+    assert "bili:BV1" in text
+    assert "bili:BV2" in text
+    assert "T1" in text
+    assert "T2" in text
+
+
+async def test_run_specific_messages_logs_completion_at_end(
+    mock_store: MessageStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """run_specific_messages 结束后应 logger.info 完成日志（CLI 模式可见）。"""
+    config = MagicMock()
+    config.general.data_dir = str(tmp_path)
+
+    with patch.object(PipelineEngine, "process_message", new=AsyncMock()):
+        with caplog.at_level(logging.INFO, logger="core.engine"):
+            await PipelineEngine.run_specific_messages(
+                msg_ids=["bili:BV1"],
+                from_phase=Phase.SUMMARIZED,
+                skip_push=True,
+                config=config,
+                store=mock_store,
+            )
+    assert "手动重跑完成" in caplog.text
+
+
+async def test_process_message_logs_completion_when_all_phases_done(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """process_message 正常跑完所有阶段（无 break）后应 logger.info 处理完成。"""
+    store = MessageStore(tmp_path)
+    config = MagicMock()
+    config.general.data_dir = str(tmp_path)
+
+    PipelineEngine._handlers = {}
+    PipelineEngine._detectors = {}
+
+    # TEXT 阶段流：[DISCOVERED, DOWNLOADED, PUSHED]
+    # 预置到 DOWNLOADED，只需 PUSHED handler 返回 success 即可走完。
+    @PipelineEngine.register("bili", Phase.PUSHED)
+    async def push_ok(ctx: PhaseContext) -> bool:
+        return True
+
+    msg = store.add_new("bili:BV1", "bili", ContentType.TEXT, int(time.time()), "T1", "A")
+    assert msg is not None
+    store.mark_phase("bili:BV1", Phase.DOWNLOADED)
+    msg = store.get_message("bili:BV1")
+    assert msg is not None
+
+    with caplog.at_level(logging.INFO, logger="core.engine"):
+        await PipelineEngine.process_message(msg, config, store)
+    assert "处理完成" in caplog.text
+

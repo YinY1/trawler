@@ -24,6 +24,7 @@ class TestDownloadFile:
 
         mock_resp = MagicMock()
         mock_resp.status = 200
+        mock_resp.content_length = None
 
         async def read_side() -> bytes:
             return b"fake_image_data"
@@ -70,6 +71,51 @@ class TestDownloadFile:
 
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_download_file_content_length_mismatch_returns_false(
+        self, tmp_path
+    ):
+        """content_length=1000 但 read() 只返回 500 字节 → 完整性校验失败,不写文件。"""
+        url = "https://example.com/image.jpg"
+        dest = tmp_path / "test.jpg"
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.content_length = 1000
+        mock_resp.read = AsyncMock(return_value=b"x" * 500)
+        mock_resp.close = MagicMock()
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            result = await _download_file(url, dest)
+
+        assert result is False
+        assert not dest.exists()
+
+    @pytest.mark.asyncio
+    async def test_download_file_content_length_match_writes_file(self, tmp_path):
+        """content_length=10 且 read() 返回 10 字节 → 正常写盘,返回 True。"""
+        url = "https://example.com/image.jpg"
+        dest = tmp_path / "test.jpg"
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.content_length = 10
+        mock_resp.read = AsyncMock(return_value=b"x" * 10)
+        mock_resp.close = MagicMock()
+        mock_session = MagicMock()
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
+        with patch("platforms.weibo.downloader.aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value = mock_session
+            result = await _download_file(url, dest)
+
+        assert result is True
+        assert dest.exists()
+        assert dest.read_bytes() == b"x" * 10
+
 
 # ── download_weibo_media ───────────────────────────────────
 
@@ -113,6 +159,7 @@ class TestDownloadWeiboMedia:
 
         mock_resp = MagicMock()
         mock_resp.status = 200
+        mock_resp.content_length = None
         mock_resp.read = AsyncMock(return_value=b"data")
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
@@ -202,6 +249,7 @@ class TestDownloadWeiboVideo:
 
         mock_resp = MagicMock()
         mock_resp.status = 200
+        mock_resp.content_length = None
         mock_resp.read = AsyncMock(return_value=b"fake_mp4_bytes")
         mock_session = MagicMock()
         mock_session.get = AsyncMock(return_value=mock_resp)
