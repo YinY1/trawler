@@ -61,10 +61,12 @@ platforms/       平台适配层: bilibili/, xiaohongshu/
 
 镜像构建由 git tag 触发（`.github/workflows/docker-publish.yml`，issue #93）。
 日常合 PR 到 master **不会**构建镜像；只有打 `vX.Y.Z` tag 才触发 CI 构建 +
-推送 GHCR，watchtower 才会在 ≤10 分钟内拉到新镜像。
+推送 GHCR（latest + vX.Y.Z + vX.Y + sha 标签），watchtower 才会在 ≤10 分钟
+内拉到新镜像。`workflow_dispatch` 仅作兜底，手动触发只打 sha 标签（不刷 latest，
+避免覆盖发版产物）。
 
 发版步骤：
-1. 确认 master CI 绿、所有改动已合入
+1. 确认 PR 阶段 CI 绿、所有改动已合入（master 上不再跑镜像构建 workflow）
 2. bump 版本：`uv run uv version X.Y.Z`（会改 `pyproject.toml` 的 `version`）
 3. commit 版本号改动：`git commit -am "chore: bump version to X.Y.Z"`
 4. 打 tag 并 push：`git tag vX.Y.Z && git push origin vX.Y.Z`
