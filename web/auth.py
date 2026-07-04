@@ -28,7 +28,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import Argon2Error, InvalidHash, VerificationError, VerifyMismatchError
 from fastapi import Request
 
-from shared.config import WebAuthConfig
+from shared.config import ApiTokenEntry, WebAuthConfig
 
 logger = logging.getLogger(__name__)
 
@@ -80,20 +80,46 @@ def load_auth_config() -> WebAuthConfig:
         return WebAuthConfig()
     with open(AUTH_TOML_PATH, "rb") as f:
         raw = tomllib.load(f)
+    api_tokens_raw = raw.get("api_tokens", [])
+    api_tokens: list[ApiTokenEntry] = [
+        ApiTokenEntry(
+            name=t["name"],
+            token_hash=t["token_hash"],
+            created_at=t.get("created_at", 0.0),
+        )
+        for t in api_tokens_raw
+        if isinstance(t, dict) and "name" in t and "token_hash" in t
+    ]
     return WebAuthConfig(
         admin_password_hash=raw.get("admin_password_hash", ""),
         session_secret=raw.get("session_secret", ""),
         session_max_age_seconds=raw.get("session_max_age_seconds", 604800),
+        api_tokens=api_tokens,
     )
 
 
 def save_auth_config(cfg: WebAuthConfig) -> None:
-    """原子写入 :data:`AUTH_TOML_PATH`（先写 ``.tmp`` 再 rename）。"""
+    """原子写入 :data:`AUTH_TOML_PATH`（先写 ``.tmp`` 再 rename）。
+
+    全量重写（``tomlkit.document()``），与现状一致；``api_tokens`` AoT 与
+    其它字段同 doc 写出。每条 token 是 ``[[api_tokens]]`` 表。
+    """
     AUTH_TOML_PATH.parent.mkdir(parents=True, exist_ok=True)
     doc = tomlkit.document()
     doc["admin_password_hash"] = cfg.admin_password_hash
     doc["session_secret"] = cfg.session_secret
     doc["session_max_age_seconds"] = cfg.session_max_age_seconds
+    tokens_aot = tomlkit.aot()
+    for t in cfg.api_tokens:
+        entry = tomlkit.table()
+        entry["name"] = t.name
+        entry["token_hash"] = t.token_hash
+        entry["created_at"] = t.created_at
+        tokens_aot.append(entry)
+    # tomlkit：空 AoT 也要写出 `[[api_tokens]]` 段会让 tomlkit dumps 出空 AoT,
+    # 但 cfg.api_tokens 为空时跳过写 doc["api_tokens"]，避免无意义空段。
+    if cfg.api_tokens:
+        doc["api_tokens"] = tokens_aot
     tmp = AUTH_TOML_PATH.with_suffix(".toml.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         tomlkit.dump(doc, f)

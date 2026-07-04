@@ -23,7 +23,9 @@ TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
 # ── auth_guard 白名单 (Web 站点访问鉴权) ────────────────────────
 # 不需要登录/setup 检查的路径前缀/精确路径
 _PUBLIC_PATHS = {"/login", "/logout", "/setup"}
-_PUBLIC_PREFIXES = ("/static", "/api/health")
+# /api/ 整段豁免：API namespace 用 token 鉴权（api.auth.require_token），
+# 与浏览器 session/CSRF 完全隔离。详见 docs/superpowers/specs/2026-07-04-http-api-design.md
+_PUBLIC_PREFIXES = ("/static", "/api/")
 
 # CSRF 豁免路径（未登录 POST，无 session 可盗）
 _CSRF_EXEMPT_PATHS = {"/login", "/setup"}
@@ -175,6 +177,10 @@ def create_app() -> FastAPI:
         # 豁免：/login /setup /static/*
         if path in _CSRF_EXEMPT_PATHS or path.startswith("/static"):
             return await call_next(request)
+        # 豁免：/api/* —— API 走 token 鉴权（Authorization: Bearer），无 session 可盗，
+        # CSRF 不适用。路由层 require_token 依赖兜底鉴权（health 等无鉴权端点除外）。
+        if path.startswith("/api/"):
+            return await call_next(request)
         # 仅校验写方法
         if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
             return await call_next(request)
@@ -267,6 +273,13 @@ def create_app() -> FastAPI:
     app.include_router(web_auth_router)
     app.include_router(messages_router)
     app.include_router(health_router)
+
+    # ── API v1 namespace（bot 友好的 JSON 接口）──────────────────────
+    # 与 web 路由平级挂载，但走 token 鉴权（api.auth.require_token），
+    # 中间件层（auth_guard / csrf_guard）对 /api/* 整段豁免。
+    from api.v1.router import router as api_v1_router
+
+    app.include_router(api_v1_router, prefix="/api/v1")
 
     return app
 
