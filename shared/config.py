@@ -246,6 +246,19 @@ class WeiboConfig:
 
 
 @dataclass
+class ApiTokenEntry:
+    """API token 条目（``data/auth.toml`` 的 ``[[api_tokens]]`` AoT 行）。
+
+    bot 友好的 HTTP API 鉴权用（``api/`` 包），存 SHA-256 hash 不存明文。
+    与 ``EndpointConfig`` 同风格：所有字段无 default，dataclass 字段顺序灵活。
+    """
+
+    name: str
+    token_hash: str  # SHA-256 hexdigest
+    created_at: float = 0.0  # unix ts；默认 0.0 允许老数据/手工编辑兼容
+
+
+@dataclass
 class WebAuthConfig:
     """Web UI 访问鉴权配置。
 
@@ -256,6 +269,8 @@ class WebAuthConfig:
     admin_password_hash: str = ""
     session_secret: str = ""
     session_max_age_seconds: int = 60 * 60 * 24 * 7  # 7 天
+    # API token 列表（bot 鉴权），默认空（无 token = 无 API 访问）
+    api_tokens: list[ApiTokenEntry] = field(default_factory=list)
 
 
 # ── 顶层配置 ──────────────────────────────────────────────────

@@ -199,21 +199,17 @@ async def check_run(request: Request) -> dict[str, str]:
     return {"status": "started", "mode": "manual" if is_manual else "full"}
 
 
-@router.get("/check/stream")
-async def check_stream(request: Request) -> StreamingResponse:
-    """SSE endpoint: stream log events to the browser.
+def build_sse_response(state: Any) -> StreamingResponse:
+    """构造 SSE StreamingResponse（web 端 check_stream 与 api 端 check_stream 共用）。
 
-    Each connection owns a private asyncio.Queue registered in
-    ``state.subscribers``; ``_log_callback`` broadcasts every event to all
-    subscribers. This avoids the single-consumer race where two concurrent
-    SSE connections would split events between them and one would hang on
-    EOF.
+    抽出避免复制 generator 逻辑。generator body 完整搬自原 check_stream 内部
+    （sub_queue 注册 / history_snapshot 按 _ts 过滤 / live 队列循环 / heartbeat /
+    finally deregister），以保证 tests/test_web_check.py 行为等价。
 
-    Connect-time replay: snapshot ``log_history`` at entry, yield it as
-    ``log`` events, then continue with the live queue. The final ``None``
-    sentinel is translated into a ``done`` event and the connection closes.
+    Args:
+        state: ``request.app.state``（提供 ``subscribers`` / ``log_history`` /
+            ``check_running`` / ``check_started_at``）。
     """
-    state = request.app.state
     # Per-connection queue; bounded so a slow client cannot grow memory.
     sub_queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue(maxsize=2000)
     state.subscribers.append(sub_queue)
@@ -268,3 +264,13 @@ async def check_stream(request: Request) -> StreamingResponse:
                 pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/check/stream")
+async def check_stream(request: Request) -> StreamingResponse:
+    """SSE endpoint: stream log events to the browser.
+
+    Generator logic lives in ``build_sse_response`` so the API namespace can
+    reuse the same SSE implementation without duplicating code.
+    """
+    return build_sse_response(request.app.state)
