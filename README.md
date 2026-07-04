@@ -100,6 +100,17 @@ Trawler has no built-in scheduler — checks are driven by an external cron via
 */3 * * * * /path/to/trawler/cron_run.sh >> /path/to/trawler/cron.log 2>&1
 ```
 
+### HTTP API
+
+Trawler also exposes a machine-facing JSON HTTP API (`/api/v1`) for external
+bots / scripts / automation to trigger checks, query messages, batch-rerun,
+and manage subscriptions — without relying on cron or Web UI clicks. The API
+shares the same FastAPI server as the Web UI (same port) but uses Bearer token
+authentication.
+
+See the [HTTP API documentation](docs/api.md) for full endpoint reference,
+authentication setup, and curl examples.
+
 ## Architecture
 
 ```
