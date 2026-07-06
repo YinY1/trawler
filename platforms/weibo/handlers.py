@@ -20,6 +20,7 @@ from shared.config import Config
 from shared.message_store import MessageStore
 from shared.protocols import (
     ContentType,
+    FetchedMessage,
     NotificationContent,
     Phase,
     PhaseContext,
@@ -222,3 +223,15 @@ async def weibo_push(ctx: PhaseContext) -> bool:
     results = await send_to_subscription(ctx.config, "weibo", matched.notify_endpoints, content)
     log_fanout_results(results)
     return True
+
+
+# ── 按需 fetcher（issue #101）────────────────────────────────────
+
+
+@PipelineEngine.register_fetcher("weibo")
+async def weibo_fetch_by_id(msg_id: str, config: Config) -> FetchedMessage | None:
+    """weibo fetcher 入口：剥离 ``"weibo:"`` 前缀，调 ``fetch_post_by_id``。"""
+    from platforms.weibo.monitor import fetch_post_by_id
+
+    post_id = msg_id.removeprefix("weibo:")
+    return await fetch_post_by_id(post_id, config)

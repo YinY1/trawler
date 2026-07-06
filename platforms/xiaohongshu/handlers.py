@@ -19,6 +19,7 @@ from shared.config import Config
 from shared.message_store import MessageStore
 from shared.protocols import (
     ContentType,
+    FetchedMessage,
     NoteInfo,
     NotificationContent,
     Phase,
@@ -172,3 +173,15 @@ async def xhs_push(ctx: PhaseContext) -> bool:
         except Exception as exc:
             logger.warning("媒体清理失败 %s: %s", ctx.msg.msg_id, exc)
     return True
+
+
+# ── 按需 fetcher（issue #101）────────────────────────────────────
+
+
+@PipelineEngine.register_fetcher("xhs")
+async def xhs_fetch_by_id(msg_id: str, config: Config) -> FetchedMessage | None:
+    """xhs fetcher 入口：剥离 ``"xhs:"`` 前缀，调 ``fetch_note_by_id``。"""
+    from platforms.xiaohongshu.monitor import fetch_note_by_id
+
+    note_id = msg_id.removeprefix("xhs:")
+    return await fetch_note_by_id(note_id, config)
