@@ -5,11 +5,13 @@ from __future__ import annotations
 # pyright: basic
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomlkit
 from tomlkit.items import AoT
 from tomlkit.toml_document import TOMLDocument
+
+from shared.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +228,76 @@ async def remove_subscription(
 
 
 # ═══════════════════════════════════════════════════════════
+# Endpoint binding (notify_endpoints)
+# ═══════════════════════════════════════════════════════════
+
+
+async def add_endpoint_to_subscription(
+    platform: str,
+    identifier: int | str,
+    endpoint_name: str,
+    path: str = "config/subscriptions.toml",
+) -> tuple[bool, str]:
+    """绑定 endpoint 到订阅的 ``notify_endpoints`` 列表。
+
+    endpoint 存在性校验在 core 层做：调 ``load_config("config/config.toml")``
+    检查 ``endpoint_name in {ep.name for ep in cfg.endpoints}``。
+
+    返回值:
+      ``(True, "已绑定: {endpoint_name}")``     # 成功或已存在（幂等）
+      ``(False, "未找到订阅")``
+      ``(False, "未知 endpoint: {endpoint_name}")``
+      ``(False, "无效平台: {platform}, ...")``
+    """
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    # endpoint 存在性校验（spec §4.2 要点）
+    cfg = await load_config("config/config.toml")
+    known = {ep.name for ep in cfg.endpoints}
+    if endpoint_name not in known:
+        logger.warning("📋 未知 endpoint: %s", endpoint_name)
+        return False, f"未知 endpoint: {endpoint_name}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)  # tomlkit TOMLDocument 兼容 dict 访问
+    plat_section_raw = doc_dict.get(section, {})
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            eps_arr = sub.get("notify_endpoints", [])
+            eps_list = [str(e) for e in eps_arr] if eps_arr else []
+            if endpoint_name not in eps_list:
+                eps_list.append(endpoint_name)
+                sub["notify_endpoints"] = eps_list
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 endpoint 绑定: %s/%s += %s", section, typed_id, endpoint_name)
+    return True, f"已绑定: {endpoint_name}"
+
+
+# ═══════════════════════════════════════════════════════════
 # Search by name
 # ═══════════════════════════════════════════════════════════
 
@@ -272,8 +344,6 @@ async def _search_bili(name: str, config_path: str) -> tuple[bool, str, list[dic
     from bilibili_api import Credential
     from bilibili_api.user import name2uid
 
-    from shared.config import load_config
-
     cfg = await load_config(config_path)
     auth = cfg.bilibili.auth
 
@@ -304,8 +374,6 @@ async def _search_bili(name: str, config_path: str) -> tuple[bool, str, list[dic
 
 async def _search_weibo(name: str, config_path: str) -> tuple[bool, str, list[dict[str, Any]]]:
     """Search Weibo user by name using mobile suggestion API."""
-    from shared.config import load_config
-
     cfg = await load_config(config_path)
     cookie = cfg.weibo.auth.cookie
 
@@ -335,8 +403,6 @@ async def _search_weibo(name: str, config_path: str) -> tuple[bool, str, list[di
 
 async def _search_xhs(name: str, config_path: str) -> tuple[bool, str, list[dict[str, Any]]]:
     """Search Xiaohongshu user by name."""
-    from shared.config import load_config
-
     cfg = await load_config(config_path)
     cookie = cfg.xiaohongshu.auth.cookie
 
