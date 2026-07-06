@@ -174,11 +174,14 @@ class SubscriptionAddRequest(BaseModel):
     """``POST /subscriptions`` 请求体。
 
     ``identifier`` 在 API 层统一为 str，``add_subscription`` 内部按平台转 int/str。
+    ``default_notify_endpoint`` 可选，传入时会在添加订阅后绑定该 endpoint；
+    endpoint 不存在时回滚订阅添加，返回 ``success=False``。
     """
 
     platform: str
     identifier: str
     name: str
+    default_notify_endpoint: str | None = None
 
 
 class SubscriptionAddResponse(BaseModel):
@@ -193,3 +196,13 @@ class SubscriptionRemoveResponse(BaseModel):
 
     success: bool
     message: str
+
+
+class EndpointBindRequest(BaseModel):
+    """``POST /subscriptions/{platform}/{identifier}/endpoints`` 请求体。
+
+    仅一个字段 —— ``endpoint_name``。响应复用 ``SubscriptionAddResponse``，
+    不为 endpoint 端点新建 schema（YAGNI，spec §4.4）。
+    """
+
+    endpoint_name: str
