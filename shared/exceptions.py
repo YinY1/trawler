@@ -74,6 +74,21 @@ class RetryableError(TrawlerError):
     """可重试的临时错误（HTTP 403/429/5xx、网络抖动的基类）"""
 
 
+class PermanentFetchError(TrawlerError):
+    """按 ID 抓取永久失败（issue #101）。
+
+    调用方（``run_fetch_and_process``）应明示给用户、不重试、不创建 record。
+
+    典型场景：
+    - xhs ``xsec_token`` 缺失导致 server 拒绝（``DataError`` 等价信号）
+    - 平台明确返回"资源不存在 / 已删除"
+    - ``note_card`` 正文为空（desc/image_list/video 全空）
+
+    与 ``NotFoundError`` 区别：``NotFoundError`` 是数据层"资源不存在"，
+    ``PermanentFetchError`` 是抓取层"无法获取"的更宽口径（含 token 缺失等）。
+    """
+
+
 # ── Session 失效检测辅助函数 ──────────────────────────────────────
 
 

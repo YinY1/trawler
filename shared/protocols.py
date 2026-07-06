@@ -395,6 +395,32 @@ class Notifier(Protocol):
 # ═══════════════════════════════════════════════════════════
 
 
+# ═══════════════════════════════════════════════════════════
+# fetch_by_id 返回载体（按需消息处理入口专用，issue #101）
+# ═══════════════════════════════════════════════════════════
+
+
+@dataclass
+class FetchedMessage:
+    """``fetch_by_id`` 返回的轻量载体，字段映射到 ``MessageRecord`` 所需。
+
+    与 ``MessageRecord`` 区别：无 phase / error / retry_count 等流水线状态，
+    仅承载"原始抓取结果"。引擎层 ``run_fetch_and_process`` 调
+    ``store.add_new(force=True)`` 时把这些字段写入 ``MessageRecord``。
+
+    所有平台 fetcher（bili/xhs/weibo）统一返回此类型。
+    """
+
+    msg_id: str  # "{platform}:{id}" e.g. "bili:BV1xx"
+    platform: str  # "bili" | "xhs" | "weibo"
+    content_type: ContentType
+    pubdate: int
+    title: str
+    author: str
+    xsec_token: str = ""  # 仅 xhs 用，bili/weibo 保持空
+    body: str = ""  # 内容正文（weibo 长文 / xhs desc / bili 视频无正文留空）
+
+
 def find_subscription_by_ref(
     config: Config, platform: str, subscription_ref: str
 ) -> BiliSubscription | UserSubscription | None:

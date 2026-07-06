@@ -782,3 +782,72 @@ def test_add_new_xsec_token_persists_across_reload(tmp_path: Path) -> None:
     msg = s2.get_message("xhs:n4")
     assert msg is not None
     assert msg.xsec_token == "persist_tok"
+
+
+# ── add_new force (issue #101 on-demand message processing) ────────
+
+
+def test_add_new_force_bypasses_time_window(tmp_path: Path):
+    """``force=True`` 绕过 24h 时间窗，允许任意历史消息入库（issue #101）。"""
+    from shared.protocols import ContentType
+
+    store = MessageStore(str(tmp_path))
+    # pubdate 设为 30 天前（远超 24h 窗口）
+    old_pubdate = int(time.time()) - 30 * 86400
+
+    # 默认（force=False）：超 24h 被丢弃
+    rec_default = store.add_new(
+        msg_id="bili:BV_old",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        pubdate=old_pubdate,
+        title="历史视频",
+        author="UP",
+    )
+    assert rec_default is None
+
+    # force=True：允许入库
+    rec_forced = store.add_new(
+        msg_id="bili:BV_old2",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        pubdate=old_pubdate,
+        title="历史视频2",
+        author="UP",
+        force=True,
+    )
+    assert rec_forced is not None
+    assert rec_forced.msg_id == "bili:BV_old2"
+    assert store.is_known("bili:BV_old2")
+
+
+def test_add_new_force_does_not_bypass_dedup(tmp_path: Path):
+    """force=True 不绕过 is_known 去重（幂等性）."""
+    from shared.protocols import ContentType
+
+    store = MessageStore(str(tmp_path))
+    old_pubdate = int(time.time()) - 30 * 86400
+
+    # 先 force 入库
+    rec1 = store.add_new(
+        msg_id="xhs:note_old",
+        platform="xhs",
+        content_type=ContentType.TEXT,
+        pubdate=old_pubdate,
+        title="历史笔记",
+        author="作者",
+        force=True,
+    )
+    assert rec1 is not None
+
+    # 再次 force 同一 ID → 返回 None（去重）
+    rec2 = store.add_new(
+        msg_id="xhs:note_old",
+        platform="xhs",
+        content_type=ContentType.TEXT,
+        pubdate=old_pubdate,
+        title="历史笔记",
+        author="作者",
+        force=True,
+    )
+    assert rec2 is None
