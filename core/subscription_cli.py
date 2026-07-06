@@ -124,6 +124,7 @@ async def add_subscription(
     identifier: int | str,
     name: str,
     path: str = "config/subscriptions.toml",
+    default_notify_endpoint: str | None = None,
 ) -> tuple[bool, str]:
     """Add a subscription. Returns (success, message)."""
     if platform not in VALID_PLATFORMS:
@@ -161,6 +162,21 @@ async def add_subscription(
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
     logger.info("Added subscription: %s/%s = %s (%s)", section, key, typed_id, name)
+
+    # ── default_notify_endpoint 语法糖（spec §4.3）──────────────
+    # 落盘后再调 endpoint 绑定；失败时回滚（删订阅 + 重写文件）。
+    if default_notify_endpoint is not None:
+        ok_ep, msg_ep = await add_endpoint_to_subscription(
+            platform=platform,
+            identifier=identifier,
+            endpoint_name=default_notify_endpoint,
+            path=path,
+        )
+        if not ok_ep:
+            logger.warning("📋 默认 endpoint 绑定失败，回滚订阅: %s", msg_ep)
+            await remove_subscription(platform=platform, identifier=identifier, path=path)
+            return False, f"默认 endpoint 绑定失败: {msg_ep}"
+
     return True, f"已添加: {name}"
 
 
