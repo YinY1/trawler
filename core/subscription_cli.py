@@ -5,11 +5,13 @@ from __future__ import annotations
 # pyright: basic
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomlkit
 from tomlkit.items import AoT
 from tomlkit.toml_document import TOMLDocument
+
+from shared.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +124,7 @@ async def add_subscription(
     identifier: int | str,
     name: str,
     path: str = "config/subscriptions.toml",
+    default_notify_endpoint: str | None = None,
 ) -> tuple[bool, str]:
     """Add a subscription. Returns (success, message)."""
     if platform not in VALID_PLATFORMS:
@@ -159,6 +162,27 @@ async def add_subscription(
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(tomlkit.dumps(doc), encoding="utf-8")
     logger.info("Added subscription: %s/%s = %s (%s)", section, key, typed_id, name)
+
+    # ── default_notify_endpoint 语法糖（spec §4.3）──────────────
+    # 落盘后再调 endpoint 绑定；失败时回滚（删订阅 + 重写文件）。
+    #
+    # 失败的两种情况：
+    # - "未知 endpoint"（最常见）：用户传错的 endpoint 名，回滚合理
+    # - "未找到订阅"（生产中实际不会触发，因为订阅刚落盘）：
+    #   只有并发写/磁盘错乱时才会发生；此时 remove_subscription 也可能失败，
+    #   但调用是幂等的，最坏情况是 toml 留下半残条目，下次手动清理即可
+    if default_notify_endpoint is not None:
+        ok_ep, msg_ep = await add_endpoint_to_subscription(
+            platform=platform,
+            identifier=identifier,
+            endpoint_name=default_notify_endpoint,
+            path=path,
+        )
+        if not ok_ep:
+            logger.warning("📋 默认 endpoint 绑定失败，回滚订阅: %s", msg_ep)
+            await remove_subscription(platform=platform, identifier=identifier, path=path)
+            return False, f"默认 endpoint 绑定失败: {msg_ep}"
+
     return True, f"已添加: {name}"
 
 
@@ -226,6 +250,146 @@ async def remove_subscription(
 
 
 # ═══════════════════════════════════════════════════════════
+# Endpoint binding (notify_endpoints)
+# ═══════════════════════════════════════════════════════════
+
+
+async def add_endpoint_to_subscription(
+    platform: str,
+    identifier: int | str,
+    endpoint_name: str,
+    path: str = "config/subscriptions.toml",
+    config_path: str = "config/config.toml",
+) -> tuple[bool, str]:
+    """绑定 endpoint 到订阅的 ``notify_endpoints`` 列表。
+
+    endpoint 存在性校验在 core 层做：调 ``load_config(config_path)``
+    检查 ``endpoint_name in {ep.name for ep in cfg.endpoints}``。
+
+    参数:
+      platform:       平台短名（bili/xhs/weibo）
+      identifier:     订阅 key（bili=uid, xhs/weibo=user_id）
+      endpoint_name:  要绑定的 endpoint 名（需存在于 config.toml）
+      path:           subscriptions.toml 路径
+      config_path:    config.toml 路径，用于校验 endpoint 是否已知
+
+    返回值:
+      ``(True, "已绑定: {endpoint_name}")``     # 成功或已存在（幂等）
+      ``(False, "未找到订阅")``
+      ``(False, "未知 endpoint: {endpoint_name}")``
+      ``(False, "无效平台: {platform}, ...")``
+    """
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    # endpoint 存在性校验（spec §4.2 要点）
+    cfg = await load_config(config_path)
+    known = {ep.name for ep in cfg.endpoints}
+    if endpoint_name not in known:
+        logger.warning("📋 未知 endpoint: %s", endpoint_name)
+        return False, f"未知 endpoint: {endpoint_name}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)  # tomlkit TOMLDocument 兼容 dict 访问
+    plat_section_raw = doc_dict.get(section, {})
+    # tomlkit 的 Table 不是 dict 子类（是 Container），坏数据时 isinstance 兜底
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            eps_arr = sub.get("notify_endpoints", [])
+            eps_list = [str(e) for e in eps_arr] if eps_arr else []
+            if endpoint_name not in eps_list:
+                eps_list.append(endpoint_name)
+                sub["notify_endpoints"] = eps_list
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 endpoint 绑定: %s/%s += %s", section, typed_id, endpoint_name)
+    return True, f"已绑定: {endpoint_name}"
+
+
+async def remove_endpoint_from_subscription(
+    platform: str,
+    identifier: int | str,
+    endpoint_name: str,
+    path: str = "config/subscriptions.toml",
+) -> tuple[bool, str]:
+    """从订阅的 ``notify_endpoints`` 列表移除一个 endpoint。
+
+    幂等：endpoint 本来就不在列表里也返回成功。
+    **不做 endpoint 存在性校验**（解绑一个不存在的 endpoint 引用无害，
+    也能清理历史脏数据）。
+
+    返回值:
+      ``(True, "已解绑: {endpoint_name}")``     # 成功或本来就没有（幂等）
+      ``(False, "未找到订阅")``
+      ``(False, "无效平台: ...")``
+    """
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)
+    plat_section_raw = doc_dict.get(section, {})
+    # tomlkit 的 Table 不是 dict 子类（是 Container），坏数据时 isinstance 兜底
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            eps_arr = sub.get("notify_endpoints", [])
+            eps_list = [str(e) for e in eps_arr if str(e) != endpoint_name]
+            if eps_list:
+                sub["notify_endpoints"] = eps_list
+            else:
+                # 列表为空时移除字段，与 remove_subscription 删空 AoT 的约定一致
+                sub.pop("notify_endpoints", None)
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 endpoint 解绑: %s/%s -= %s", section, typed_id, endpoint_name)
+    return True, f"已解绑: {endpoint_name}"
+
+
+# ═══════════════════════════════════════════════════════════
 # Search by name
 # ═══════════════════════════════════════════════════════════
 
@@ -272,8 +436,6 @@ async def _search_bili(name: str, config_path: str) -> tuple[bool, str, list[dic
     from bilibili_api import Credential
     from bilibili_api.user import name2uid
 
-    from shared.config import load_config
-
     cfg = await load_config(config_path)
     auth = cfg.bilibili.auth
 
@@ -304,8 +466,6 @@ async def _search_bili(name: str, config_path: str) -> tuple[bool, str, list[dic
 
 async def _search_weibo(name: str, config_path: str) -> tuple[bool, str, list[dict[str, Any]]]:
     """Search Weibo user by name using mobile suggestion API."""
-    from shared.config import load_config
-
     cfg = await load_config(config_path)
     cookie = cfg.weibo.auth.cookie
 
@@ -335,8 +495,6 @@ async def _search_weibo(name: str, config_path: str) -> tuple[bool, str, list[di
 
 async def _search_xhs(name: str, config_path: str) -> tuple[bool, str, list[dict[str, Any]]]:
     """Search Xiaohongshu user by name."""
-    from shared.config import load_config
-
     cfg = await load_config(config_path)
     cookie = cfg.xiaohongshu.auth.cookie
 

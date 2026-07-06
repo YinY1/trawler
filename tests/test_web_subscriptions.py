@@ -75,3 +75,59 @@ class TestSubscriptions:
         )
         assert resp.status_code == 200
         assert "未找到" in resp.text
+
+
+# ── subscription_endpoint_add（spec §4.6 / Task 7.5b）──────────────────
+
+
+class TestEndpointAddRedirect:
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_endpoint_add_success_redirects_to_added(
+        self,
+        mock_add: AsyncMock,
+        client: AsyncClient,
+    ) -> None:
+        mock_add.return_value = (True, "已绑定: gotify-main")
+        resp = await client.post(
+            "/subscriptions/bili/123/endpoints/add",
+            data={"endpoint_name": "gotify-main"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=subscription.endpoint_added" in loc
+        assert "type=success" in loc
+
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_endpoint_add_unknown_redirects_to_unknown(
+        self,
+        mock_add: AsyncMock,
+        client: AsyncClient,
+    ) -> None:
+        mock_add.return_value = (False, "未知 endpoint: bad-ep")
+        resp = await client.post(
+            "/subscriptions/bili/123/endpoints/add",
+            data={"endpoint_name": "bad-ep"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=subscription.endpoint_unknown" in loc
+        assert "type=error" in loc
+
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_endpoint_add_no_sub_redirects_to_not_found(
+        self,
+        mock_add: AsyncMock,
+        client: AsyncClient,
+    ) -> None:
+        mock_add.return_value = (False, "未找到订阅")
+        resp = await client.post(
+            "/subscriptions/bili/123/endpoints/add",
+            data={"endpoint_name": "gotify-main"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=subscription.not_found" in loc
+        assert "type=error" in loc

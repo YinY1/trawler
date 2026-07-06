@@ -214,3 +214,247 @@ class TestSearchByName:
         ok, msg, _c = await search_by_name(platform="bili", name="李大霄", config_path="/tmp/nonexistent_config.toml")
         assert not ok
         assert "需要先登录" in msg
+
+
+# ── add_endpoint_to_subscription ──────────────────────────────────────
+
+
+class TestAddEndpoint:
+    """add_endpoint_to_subscription 用例。load_config 必须 monkeypatch。"""
+
+    @pytest.fixture
+    def mock_known_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """让 load_config 返回含 'gotify-main' 的 endpoints 列表。"""
+        from core import subscription_cli
+        from shared.config import EndpointConfig
+
+        async def _fake_load(*_a, **_kw):
+            from shared.config import Config
+            cfg = Config()
+            cfg.endpoints = [EndpointConfig(name="gotify-main", url="http://x", token="t")]
+            return cfg
+
+        monkeypatch.setattr(subscription_cli, "load_config", _fake_load)
+
+    async def test_add_endpoint_to_subscription_ok(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert ok
+        assert "已绑定" in msg
+        # 验证落盘
+        subs = await list_subscriptions(path=str(subs_file))
+        assert "gotify-main" in subs["bilibili"][0]["notify_endpoints"]
+
+    async def test_add_endpoint_to_subscription_idempotent(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        from core.subscription_cli import add_endpoint_to_subscription
+        # 先加一次
+        ok1, _ = await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert ok1
+        # 再加一次 — 幂等
+        ok2, msg2 = await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert ok2
+        assert "已绑定" in msg2
+        subs = await list_subscriptions(path=str(subs_file))
+        # 不应重复
+        eps = subs["bilibili"][0]["notify_endpoints"]
+        assert eps.count("gotify-main") == 1
+
+    async def test_add_endpoint_to_subscription_unknown_ep(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="nonexistent", path=str(subs_file),
+        )
+        assert not ok
+        assert "未知 endpoint" in msg
+
+    async def test_add_endpoint_to_subscription_no_sub(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="bili", identifier=99999999,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "未找到订阅" in msg
+
+    async def test_add_endpoint_to_subscription_invalid_platform(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """无效平台返回 (False, "无效平台: ...")，与 add_subscription 一致。"""
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="invalid", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "无效平台" in msg
+
+    async def test_add_endpoint_to_subscription_file_not_found(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """订阅文件不存在 → (False, "未找到订阅")，覆盖 _load_doc 返回 None 分支。"""
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file.parent / "nonexistent.toml"),
+        )
+        assert not ok
+        assert "未找到订阅" in msg
+
+
+# ── remove_endpoint_from_subscription ─────────────────────────────────
+
+
+class TestRemoveEndpoint:
+    @pytest.fixture
+    def mock_known_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from core import subscription_cli
+        from shared.config import EndpointConfig
+
+        async def _fake_load(*_a, **_kw):
+            from shared.config import Config
+            cfg = Config()
+            cfg.endpoints = [EndpointConfig(name="gotify-main", url="http://x", token="t")]
+            return cfg
+
+        monkeypatch.setattr(subscription_cli, "load_config", _fake_load)
+
+    async def test_remove_endpoint_from_subscription_ok(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """先 add 再 remove，验证落盘后列表为空。"""
+        from core.subscription_cli import (
+            add_endpoint_to_subscription,
+            remove_endpoint_from_subscription,
+        )
+        await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert ok
+        assert "已解绑" in msg
+        subs = await list_subscriptions(path=str(subs_file))
+        eps = subs["bilibili"][0].get("notify_endpoints", [])
+        assert "gotify-main" not in eps
+
+    async def test_remove_endpoint_from_subscription_idempotent(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """remove 不存在的 endpoint 也返回 True（幂等）。"""
+        from core.subscription_cli import remove_endpoint_from_subscription
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="never-bound", path=str(subs_file),
+        )
+        assert ok
+        assert "已解绑" in msg
+
+    async def test_remove_endpoint_from_subscription_no_sub(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        from core.subscription_cli import remove_endpoint_from_subscription
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="bili", identifier=99999999,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "未找到订阅" in msg
+
+    async def test_remove_endpoint_from_subscription_invalid_platform(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """无效平台返回 (False, "无效平台: ...")。"""
+        from core.subscription_cli import remove_endpoint_from_subscription
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="invalid", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "无效平台" in msg
+
+
+# ── add_subscription with default_notify_endpoint ─────────────────────
+
+
+class TestAddSubscriptionDefaultEndpoint:
+    """语法糖 + 回滚用例。"""
+
+    @pytest.fixture
+    def mock_known_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from core import subscription_cli
+        from shared.config import Config, EndpointConfig
+
+        async def _fake_load(*_a, **_kw):
+            cfg = Config()
+            cfg.endpoints = [EndpointConfig(name="gotify-main", url="http://x", token="t")]
+            return cfg
+
+        monkeypatch.setattr(subscription_cli, "load_config", _fake_load)
+
+    async def test_add_subscription_with_default_endpoint(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """default_notify_endpoint 合法 → 订阅被加 + endpoint 被绑定。"""
+        ok, msg = await add_subscription(
+            platform="bili", identifier=88888, name="新UP",
+            path=str(subs_file), default_notify_endpoint="gotify-main",
+        )
+        assert ok
+        assert "已添加" in msg
+        subs = await list_subscriptions(path=str(subs_file))
+        names = [s["name"] for s in subs["bilibili"]]
+        assert "新UP" in names
+        # endpoint 被绑定
+        target = next(s for s in subs["bilibili"] if s["uid"] == 88888)
+        assert "gotify-main" in target["notify_endpoints"]
+
+    async def test_add_subscription_with_bad_default_endpoint(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """default_notify_endpoint 不存在 → 回滚，订阅不应被加入文件。"""
+        ok, msg = await add_subscription(
+            platform="bili", identifier=77777, name="回滚UP",
+            path=str(subs_file), default_notify_endpoint="bad-ep",
+        )
+        assert not ok
+        assert "默认 endpoint 绑定失败" in msg
+        # 关键断言：订阅被回滚删除
+        subs = await list_subscriptions(path=str(subs_file))
+        uids = [s["uid"] for s in subs.get("bilibili", [])]
+        assert 77777 not in uids
+
+    async def test_add_subscription_without_default_endpoint(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """不传 default_notify_endpoint → 行为完全不变（向后兼容）。"""
+        ok, msg = await add_subscription(
+            platform="bili", identifier=66666, name="纯加",
+            path=str(subs_file),
+        )
+        assert ok
+        assert "已添加" in msg
+        subs = await list_subscriptions(path=str(subs_file))
+        target = next(s for s in subs["bilibili"] if s["uid"] == 66666)
+        # 不应有 notify_endpoints 字段（保持现有行为）
+        assert "notify_endpoints" not in target or target["notify_endpoints"] == []

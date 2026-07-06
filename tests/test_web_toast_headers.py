@@ -105,30 +105,18 @@ class TestEndpointEditRedirect:
 
 class TestSubscriptionEndpointAddRedirect:
     """After fix: subscription_endpoint_add redirects to /subscriptions
-    with toast_key so HTMX does a full-page refresh (no white screen)."""
+    with toast_key so HTMX does a full-page refresh (no white screen).
 
-    @patch("web.routes.subscriptions.Path")
+    Task 7 重构后该路由改调 ``core.subscription_cli.add_endpoint_to_subscription``，
+    不再直读写 ``config/subscriptions.toml``，因此 mock 目标从 ``Path`` 迁移到
+    core 函数（与 ``tests/test_web_subscriptions.py::TestEndpointAddRedirect`` 同风格）。
+    """
+
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
     async def test_add_endpoint_success_redirects_with_toast_key(
-        self, mock_path_cls, client: AsyncClient
+        self, mock_add: AsyncMock, client: AsyncClient
     ) -> None:
-        import tomlkit
-
-        initial_doc = tomlkit.document()
-        bilibili = tomlkit.table()
-        subs_aot = tomlkit.aot()
-        sub_table = tomlkit.table()
-        sub_table["uid"] = "25270495"
-        sub_table["name"] = "测试UP"
-        sub_table["notify_endpoints"] = []
-        subs_aot.append(sub_table)
-        bilibili["subscriptions"] = subs_aot
-        initial_doc["bilibili"] = bilibili
-        initial_toml = tomlkit.dumps(initial_doc)
-
-        fake_path = mock_path_cls.return_value
-        fake_path.exists.return_value = True
-        fake_path.read_text.return_value = initial_toml
-
+        mock_add.return_value = (True, "已绑定: ops")
         resp = await client.post(
             "/subscriptions/bili/25270495/endpoints/add",
             data={"endpoint_name": "ops"},
@@ -140,30 +128,13 @@ class TestSubscriptionEndpointAddRedirect:
         assert loc.startswith("/subscriptions")
         assert "toast_key=subscription.endpoint_added" in loc
         assert "type=success" in loc
-        fake_path.write_text.assert_called_once()
 
-    @patch("web.routes.subscriptions.Path")
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
     async def test_add_endpoint_subscription_not_found_redirects_with_error_toast_key(
-        self, mock_path_cls, client: AsyncClient
+        self, mock_add: AsyncMock, client: AsyncClient
     ) -> None:
-        import tomlkit
-
-        # Subscription list exists but the queried uid is absent
-        initial_doc = tomlkit.document()
-        bilibili = tomlkit.table()
-        subs_aot = tomlkit.aot()
-        sub_table = tomlkit.table()
-        sub_table["uid"] = "99999999"  # not the queried one
-        sub_table["name"] = "其他UP"
-        subs_aot.append(sub_table)
-        bilibili["subscriptions"] = subs_aot
-        initial_doc["bilibili"] = bilibili
-        initial_toml = tomlkit.dumps(initial_doc)
-
-        fake_path = mock_path_cls.return_value
-        fake_path.exists.return_value = True
-        fake_path.read_text.return_value = initial_toml
-
+        # Subscription absent: core 返回 "未找到订阅"
+        mock_add.return_value = (False, "未找到订阅")
         resp = await client.post(
             "/subscriptions/bili/25270495/endpoints/add",
             data={"endpoint_name": "ops"},
@@ -176,18 +147,12 @@ class TestSubscriptionEndpointAddRedirect:
         assert "toast_key=subscription.not_found" in loc
         assert "type=error" in loc
 
-    @patch("web.routes.subscriptions.Path")
-    async def test_add_endpoint_file_missing_redirects_with_error_toast_key(
-        self, mock_path_cls, client: AsyncClient
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_add_endpoint_unknown_redirects_with_error_toast_key(
+        self, mock_add: AsyncMock, client: AsyncClient
     ) -> None:
-        """When config/subscriptions.toml does not exist, surface the
-        "subscription not found" error toast (same UX as identifier mismatch)."""
-        fake_path = mock_path_cls.return_value
-        fake_path.exists.return_value = False
-        # read_text / write_text should never be touched when the file is absent.
-        fake_path.read_text.return_value = ""
-        fake_path.write_text.return_value = None
-
+        """Unknown endpoint: core 返回 "未知 endpoint: ..."，前端展示 endpoint_unknown toast。"""
+        mock_add.return_value = (False, "未知 endpoint: ops")
         resp = await client.post(
             "/subscriptions/bili/25270495/endpoints/add",
             data={"endpoint_name": "ops"},
@@ -197,10 +162,8 @@ class TestSubscriptionEndpointAddRedirect:
         assert resp.status_code == 303
         loc = resp.headers["location"]
         assert loc.startswith("/subscriptions")
-        assert "toast_key=subscription.not_found" in loc
+        assert "toast_key=subscription.endpoint_unknown" in loc
         assert "type=error" in loc
-        fake_path.read_text.assert_not_called()
-        fake_path.write_text.assert_not_called()
 
 
 class TestEndpointDeleteRedirect:
@@ -228,30 +191,17 @@ class TestEndpointDeleteRedirect:
 
 class TestSubscriptionEndpointRemoveRedirect:
     """After fix: subscription_endpoint_remove redirects to /subscriptions
-    with a toast_key query param so HTMX does a full-page refresh (no white screen)."""
+    with a toast_key query param so HTMX does a full-page refresh (no white screen).
 
-    @patch("web.routes.subscriptions.Path")
+    Task 7 重构后该路由改调 ``core.subscription_cli.remove_endpoint_from_subscription``，
+    mock 目标从 ``Path`` 迁移到 core 函数（与 add 测试同风格）。
+    """
+
+    @patch("web.routes.subscriptions.remove_endpoint_from_subscription", new_callable=AsyncMock)
     async def test_remove_endpoint_success_redirects_with_toast_key(
-        self, mock_path_cls, client: AsyncClient
+        self, mock_remove: AsyncMock, client: AsyncClient
     ) -> None:
-        import tomlkit
-
-        initial_doc = tomlkit.document()
-        bilibili = tomlkit.table()
-        subs_aot = tomlkit.aot()
-        sub_table = tomlkit.table()
-        sub_table["uid"] = "25270495"
-        sub_table["name"] = "测试UP"
-        sub_table["notify_endpoints"] = ["ops"]  # pre-assigned, will be removed
-        subs_aot.append(sub_table)
-        bilibili["subscriptions"] = subs_aot
-        initial_doc["bilibili"] = bilibili
-        initial_toml = tomlkit.dumps(initial_doc)
-
-        fake_path = mock_path_cls.return_value
-        fake_path.exists.return_value = True
-        fake_path.read_text.return_value = initial_toml
-
+        mock_remove.return_value = (True, "已解绑: ops")
         resp = await client.post(
             "/subscriptions/bili/25270495/endpoints/remove",
             data={"endpoint_name": "ops"},
@@ -263,31 +213,13 @@ class TestSubscriptionEndpointRemoveRedirect:
         assert loc.startswith("/subscriptions")
         assert "toast_key=subscription.endpoint_removed" in loc
         assert "type=success" in loc
-        fake_path.write_text.assert_called_once()
 
-    @patch("web.routes.subscriptions.Path")
+    @patch("web.routes.subscriptions.remove_endpoint_from_subscription", new_callable=AsyncMock)
     async def test_remove_endpoint_subscription_not_found_redirects_with_error_toast_key(
-        self, mock_path_cls, client: AsyncClient
+        self, mock_remove: AsyncMock, client: AsyncClient
     ) -> None:
-        import tomlkit
-
-        # Subscription list exists but the queried uid is absent
-        initial_doc = tomlkit.document()
-        bilibili = tomlkit.table()
-        subs_aot = tomlkit.aot()
-        sub_table = tomlkit.table()
-        sub_table["uid"] = "99999999"  # not the queried one
-        sub_table["name"] = "其他UP"
-        sub_table["notify_endpoints"] = ["ops"]
-        subs_aot.append(sub_table)
-        bilibili["subscriptions"] = subs_aot
-        initial_doc["bilibili"] = bilibili
-        initial_toml = tomlkit.dumps(initial_doc)
-
-        fake_path = mock_path_cls.return_value
-        fake_path.exists.return_value = True
-        fake_path.read_text.return_value = initial_toml
-
+        # Subscription absent: core 返回 "未找到订阅"
+        mock_remove.return_value = (False, "未找到订阅")
         resp = await client.post(
             "/subscriptions/bili/25270495/endpoints/remove",
             data={"endpoint_name": "ops"},
@@ -299,4 +231,3 @@ class TestSubscriptionEndpointRemoveRedirect:
         assert loc.startswith("/subscriptions")
         assert "toast_key=subscription.not_found" in loc
         assert "type=error" in loc
-        fake_path.write_text.assert_not_called()

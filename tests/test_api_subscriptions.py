@@ -151,7 +151,9 @@ class TestAddSubscription:
         data = resp.json()
         assert data["success"] is True
         assert data["message"] == "已添加: UP1"
-        mock_add.assert_awaited_once_with("bili", "123", "UP1")
+        mock_add.assert_awaited_once_with(
+            "bili", "123", "UP1", default_notify_endpoint=None
+        )
 
     @patch("api.routes.subscriptions.add_subscription", new_callable=AsyncMock)
     async def test_add_subscription_duplicate_returns_success_false(
@@ -232,3 +234,143 @@ class TestRemoveSubscription:
             assert resp.status_code == 401
         finally:
             await c.__aexit__(None, None, None)
+
+
+# ── POST /subscriptions/{platform}/{identifier}/endpoints ─────────────
+
+
+class TestBindEndpoint:
+    @patch("api.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_api_bind_endpoint_ok(
+        self,
+        mock_bind: AsyncMock,
+        authed_client: AsyncClient,
+    ) -> None:
+        """add_endpoint_to_subscription 返回 (True, "已绑定: ...") → 200 success=True。"""
+        mock_bind.return_value = (True, "已绑定: gotify-main")
+        resp = await authed_client.post(
+            "/api/v1/subscriptions/bilibili/123/endpoints",
+            json={"endpoint_name": "gotify-main"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "已绑定" in data["message"]
+        mock_bind.assert_awaited_once_with("bilibili", "123", "gotify-main")
+
+    @patch("api.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_api_bind_endpoint_unknown(
+        self,
+        mock_bind: AsyncMock,
+        authed_client: AsyncClient,
+    ) -> None:
+        """未知 endpoint → 200 success=False（不映射 4xx）。"""
+        mock_bind.return_value = (False, "未知 endpoint: bad-ep")
+        resp = await authed_client.post(
+            "/api/v1/subscriptions/bilibili/123/endpoints",
+            json={"endpoint_name": "bad-ep"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "未知 endpoint" in data["message"]
+
+    @patch("api.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_api_bind_endpoint_no_sub(
+        self,
+        mock_bind: AsyncMock,
+        authed_client: AsyncClient,
+    ) -> None:
+        """订阅不存在 → 200 success=False。"""
+        mock_bind.return_value = (False, "未找到订阅")
+        resp = await authed_client.post(
+            "/api/v1/subscriptions/bilibili/9999/endpoints",
+            json={"endpoint_name": "gotify-main"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data["message"] == "未找到订阅"
+
+    async def test_api_bind_endpoint_no_token_returns_401(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无 token → 401。"""
+        c = await _make_no_token_client(tmp_path, monkeypatch)
+        try:
+            resp = await c.post(
+                "/api/v1/subscriptions/bilibili/123/endpoints",
+                json={"endpoint_name": "gotify-main"},
+            )
+            assert resp.status_code == 401
+        finally:
+            await c.__aexit__(None, None, None)
+
+
+# ── DELETE /subscriptions/{platform}/{identifier}/endpoints/{name} ────
+
+
+class TestUnbindEndpoint:
+    @patch("api.routes.subscriptions.remove_endpoint_from_subscription", new_callable=AsyncMock)
+    async def test_api_unbind_endpoint_ok(
+        self,
+        mock_unbind: AsyncMock,
+        authed_client: AsyncClient,
+    ) -> None:
+        """remove 返回 (True, "已解绑: ...") → 200 success=True。"""
+        mock_unbind.return_value = (True, "已解绑: gotify-main")
+        resp = await authed_client.delete(
+            "/api/v1/subscriptions/bilibili/123/endpoints/gotify-main"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "已解绑" in data["message"]
+        mock_unbind.assert_awaited_once_with("bilibili", "123", "gotify-main")
+
+
+# ── POST /subscriptions with default_notify_endpoint ─────────────────
+
+
+class TestAddSubscriptionWithDefault:
+    @patch("api.routes.subscriptions.add_subscription", new_callable=AsyncMock)
+    async def test_api_add_subscription_with_default(
+        self,
+        mock_add: AsyncMock,
+        authed_client: AsyncClient,
+    ) -> None:
+        """请求体含 default_notify_endpoint → 透传给 add_subscription。"""
+        mock_add.return_value = (True, "已添加: UP1")
+        resp = await authed_client.post(
+            "/api/v1/subscriptions",
+            json={
+                "platform": "bili",
+                "identifier": "123",
+                "name": "UP1",
+                "default_notify_endpoint": "gotify-main",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        # 关键：default_notify_endpoint 透传到 core
+        mock_add.assert_awaited_once_with(
+            "bili", "123", "UP1", default_notify_endpoint="gotify-main"
+        )
+
+    @patch("api.routes.subscriptions.add_subscription", new_callable=AsyncMock)
+    async def test_api_add_subscription_without_default_omits_kwarg(
+        self,
+        mock_add: AsyncMock,
+        authed_client: AsyncClient,
+    ) -> None:
+        """请求体不含 default_notify_endpoint → pydantic 默认 None，
+        add_subscription 仍被以关键字参数形式调用（值为 None）。"""
+        mock_add.return_value = (True, "已添加: UP1")
+        resp = await authed_client.post(
+            "/api/v1/subscriptions",
+            json={"platform": "bili", "identifier": "123", "name": "UP1"},
+        )
+        assert resp.status_code == 200
+        mock_add.assert_awaited_once_with(
+            "bili", "123", "UP1", default_notify_endpoint=None
+        )
