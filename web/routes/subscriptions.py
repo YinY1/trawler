@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import tomlkit
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from core.subscription_cli import add_subscription, list_subscriptions, remove_subscription, search_by_name
+from core.subscription_cli import (
+    add_endpoint_to_subscription,
+    add_subscription,
+    list_subscriptions,
+    remove_endpoint_from_subscription,
+    remove_subscription,
+    search_by_name,
+)
 from shared.config import load_config
 from web.app import TEMPLATES
 
@@ -104,47 +109,20 @@ async def subscription_endpoint_add(
     identifier: str,
     endpoint_name: str = Form(...),
 ) -> RedirectResponse:
-    """Add an endpoint reference to a subscription."""
-    p = Path("config/subscriptions.toml")
-    if not p.exists():
-        # file-missing and identifier-not-found both surface as the same
-        # "subscription not found" error toast to the user.
-        return RedirectResponse(
-            url="/subscriptions?toast_key=subscription.not_found&type=error",
-            status_code=303,
-        )
+    """绑定 endpoint 到订阅（重构后调 core 函数）。
+
+    Web 路径用短名 ``bili/xhs/weibo``，core 函数要全名，转换在调用前做。
+    """
     plat_name = _platform_key_to_name(platform)
-    doc = tomlkit.parse(p.read_text(encoding="utf-8"))
-    doc_dict = cast(dict[str, Any], doc)
-    plat_section_raw = doc_dict.get(plat_name, {})
-    if not isinstance(plat_section_raw, dict):
-        plat_section_raw = {}
-    plat_section = cast(dict[str, Any], plat_section_raw)
-    subs = plat_section.get("subscriptions", [])
-    id_field = "uid" if plat_name == "bilibili" else "user_id"
-    found = False
-    for sub in subs:
-        if not isinstance(sub, dict):
-            continue
-        sub_dict = cast(dict[str, Any], sub)
-        sub_id = str(sub_dict.get(id_field, ""))
-        if sub_id == identifier:
-            eps_arr = sub_dict.get("notify_endpoints", [])
-            eps_list = [str(e) for e in eps_arr]
-            if endpoint_name not in eps_list:
-                eps_list.append(endpoint_name)
-                sub_dict["notify_endpoints"] = eps_list
-            found = True
-            break
-    if not found:
-        return RedirectResponse(
-            url="/subscriptions?toast_key=subscription.not_found&type=error",
-            status_code=303,
-        )
-    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    ok, msg = await add_endpoint_to_subscription(plat_name, identifier, endpoint_name)
+    if not ok and "未找到订阅" in msg:
+        toast_key, t = "subscription.not_found", "error"
+    elif not ok:  # 未知 endpoint
+        toast_key, t = "subscription.endpoint_unknown", "error"
+    else:
+        toast_key, t = "subscription.endpoint_added", "success"
     return RedirectResponse(
-        url="/subscriptions?toast_key=subscription.endpoint_added&type=success",
-        status_code=303,
+        url=f"/subscriptions?toast_key={toast_key}&type={t}", status_code=303
     )
 
 
@@ -154,41 +132,16 @@ async def subscription_endpoint_remove(
     identifier: str,
     endpoint_name: str = Form(...),
 ) -> RedirectResponse:
-    """Remove an endpoint reference from a subscription."""
-    p = Path("config/subscriptions.toml")
-    if not p.exists():
-        return RedirectResponse(
-            url="/subscriptions?toast_key=subscription.not_found&type=error",
-            status_code=303,
-        )
+    """从订阅解绑 endpoint（重构后调 core 函数）。
+
+    订阅不存在 → ``subscription.not_found``；其余（含幂等）→ success。
+    """
     plat_name = _platform_key_to_name(platform)
-    doc = tomlkit.parse(p.read_text(encoding="utf-8"))
-    doc_dict = cast(dict[str, Any], doc)
-    plat_section_raw = doc_dict.get(plat_name, {})
-    if not isinstance(plat_section_raw, dict):
-        plat_section_raw = {}
-    plat_section = cast(dict[str, Any], plat_section_raw)
-    subs = plat_section.get("subscriptions", [])
-    id_field = "uid" if plat_name == "bilibili" else "user_id"
-    found = False
-    for sub in subs:
-        if not isinstance(sub, dict):
-            continue
-        sub_dict = cast(dict[str, Any], sub)
-        sub_id = str(sub_dict.get(id_field, ""))
-        if sub_id == identifier:
-            eps_arr = sub_dict.get("notify_endpoints", [])
-            eps = [str(e) for e in eps_arr if str(e) != endpoint_name]
-            sub_dict["notify_endpoints"] = eps
-            found = True
-            break
-    if not found:
-        return RedirectResponse(
-            url="/subscriptions?toast_key=subscription.not_found&type=error",
-            status_code=303,
-        )
-    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    ok, msg = await remove_endpoint_from_subscription(plat_name, identifier, endpoint_name)
+    if not ok and "未找到订阅" in msg:
+        toast_key, t = "subscription.not_found", "error"
+    else:
+        toast_key, t = "subscription.endpoint_removed", "success"
     return RedirectResponse(
-        url="/subscriptions?toast_key=subscription.endpoint_removed&type=success",
-        status_code=303,
+        url=f"/subscriptions?toast_key={toast_key}&type={t}", status_code=303
     )
