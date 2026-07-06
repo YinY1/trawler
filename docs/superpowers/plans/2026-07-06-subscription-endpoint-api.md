@@ -165,7 +165,6 @@ async def add_endpoint_to_subscription(
         return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
 
     # endpoint 存在性校验（spec §4.2 要点）
-    from shared.config import load_config
     cfg = await load_config("config/config.toml")
     known = {ep.name for ep in cfg.endpoints}
     if endpoint_name not in known:
@@ -210,9 +209,21 @@ async def add_endpoint_to_subscription(
     return True, f"已绑定: {endpoint_name}"
 ```
 
-**注意 import 位置**：`from shared.config import load_config` 写在函数内部（lazy import），避免在模块顶部与现有 `search_by_name` 风格不一致；现有代码所有 `load_config` import 都是函数内 lazy（见 `core/subscription_cli.py:275` 和 `:307`）。顶部加 import 会被 ruff 的循环导入检测触发。
+**注意 import 位置**：`load_config` **必须**是 `core/subscription_cli.py` 的模块级 import（不是函数内 lazy import）。测试 fixture 用 `monkeypatch.setattr(subscription_cli, "load_config", _fake_load)` 拦截调用，要求 `load_config` 是模块属性。现有 `_search_*` 三个函数内的 lazy import `from shared.config import load_config` 应删除（它们变成死代码），新函数直接用模块全局 `load_config`。`shared/config.py` 不反向依赖 `core.subscription_cli`，无循环导入风险。
 
 **`cast` 必须显式断言**：`TOMLDocument` 不是 `dict[str, Any]` 的子类（tomlkit 自定义容器类型），直接 `doc_dict: dict[str, Any] = doc` 会让 pyright strict 报 `"TOMLDocument" is incompatible with "dict[str, Any]"`。必须用 `cast(dict[str, Any], doc)` 显式断言（与 `web/routes/subscriptions.py:118` 现有做法一致）。
+
+**`load_config` 模块级 import（必做）**：
+
+在 `core/subscription_cli.py` 顶部 imports 段落（与其他 `from shared.*` import 一起，或紧邻现有 `from shared.config import ...` 如有）追加：
+
+```python
+from shared.config import load_config
+```
+
+**同时删除** `_search_*` 三个函数（约 line 275/307/338）内的 lazy import `from shared.config import load_config`（它们变成死代码，ruff 会标 F811）。新函数 `add_endpoint_to_subscription` 直接用模块全局 `load_config`，**不要写函数内 lazy import**。
+
+**为什么必须模块级**：测试 fixture 用 `monkeypatch.setattr(subscription_cli, "load_config", _fake_load)` 拦截 `load_config` 调用。这要求 `load_config` 是模块的属性（module-level import），且函数调用时通过模块全局命名查找（不能用本地 import 遮蔽）。`shared/config.py` 不反向依赖 `core.subscription_cli`，无循环导入风险。
 
 **配套 import 改动**：把 `core/subscription_cli.py:8` 的 `from typing import Any` 改成：
 
@@ -1259,6 +1270,7 @@ uv run pyright
 
 **常见可能告警**：
 - ~~`core/subscription_cli.py` 新函数中 `doc_dict: dict[str, Any] = doc` 给 TOMLDocument 做类型断言，pyright 可能提示。如出问题，改成 `doc_dict = cast(dict[str, Any], doc)` 并 `from typing import cast`。~~ **已在 Task 1 Step 1.3 + Task 2 Step 2.3 改用 `cast(dict[str, Any], doc)`（与 Web 路由一致），不会触发该告警。**
+- **ruff F811**（redefined-while-unused）：Task 1 Step 1.3 要求删除 `_search_*` 三个函数内的 lazy import `from shared.config import load_config`（约 line 275/307/338）。如果忘删，ruff F811 会标 "load_config" redefined。删完后模块顶部一份 + 函数内零份，F811 自动消失。
 - 测试中 `mock_known_endpoint` fixture 返回 None 但参数标 `-> None`，pyright 可能挑刺；如出问题改成 `-> None` 显式（已是这样）。
 
 - [ ] **Step 8.3: core 单元测试**
