@@ -10,7 +10,7 @@ from platforms.xiaohongshu.async_xhs_wrapper import AsyncXhsClient
 from platforms.xiaohongshu.auth import get_xhs_cookie
 from shared.config import Config
 from shared.exceptions import DataError, is_session_expired_error
-from shared.protocols import NoteInfo
+from shared.protocols import FetchedMessage, NoteInfo
 
 logger = logging.getLogger("trawler.xiaohongshu.monitor")
 
@@ -208,3 +208,99 @@ async def _mark_xhs_expired(config: Config, config_path: str) -> None:
         logger.info("已将 XHS expires_at=0 写回 cookies.toml")
     except Exception as exc:
         logger.warning("写回 XHS expires_at=0 失败: %s", exc)
+
+
+async def fetch_note_by_id(
+    note_id: str,
+    config: Config,
+) -> FetchedMessage | None:
+    """按 note_id 抓取单条小红书笔记元数据（issue #101）。
+
+    调 ``AsyncXhsClient.get_note_by_id(note_id, xsec_token="", xsec_source="pc_feed")``。
+    **xsec_token 缺失是主要失败原因**：``pc_feed`` 链路对外部仅给 note_id 的场景
+    可能拿不到正文。
+
+    失败信号（spec §1）：
+    - ``DataError`` 异常 → 抛 ``PermanentFetchError``（server 拒绝，token 缺失等）
+    - 拿到 ``note_card`` 但 ``desc`` / ``image_list`` / ``video`` 全空
+      → 抛 ``PermanentFetchError``（"xhs: 笔记正文为空，可能 xsec_token 缺失"）
+
+    Args:
+        note_id: 笔记 ID（不带 "xhs:" 前缀）
+        config: 全局配置（用于取 cookie）
+
+    Returns:
+        ``FetchedMessage``；``content_type`` 按 ``note_card.type == "video"`` 判断。
+
+    Raises:
+        PermanentFetchError: 永久失败（见上）。
+    """
+    from platforms.xiaohongshu.auth import get_xhs_cookie
+    from shared.exceptions import DataError, PermanentFetchError
+    from shared.protocols import ContentType, FetchedMessage
+
+    cookie = get_xhs_cookie(config)
+    if not cookie:
+        raise PermanentFetchError("xhs: cookie 缺失")
+
+    client = AsyncXhsClient(cookie=cookie)
+    try:
+        note_card = await client.get_note_by_id(
+            note_id, xsec_token="", xsec_source="pc_feed",
+        )
+    except DataError as e:
+        raise PermanentFetchError(f"xhs: server 拒绝（可能 xsec_token 缺失）: {e}") from e
+    finally:
+        # 关闭语义参考现有 monitor.py:130 的 await client.close() 用法
+        # （AsyncXhsClient 无 __aenter__/__aexit__，仅 async def close，见
+        # async_xhs_wrapper.py:345）
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+    if not isinstance(note_card, dict) or not note_card.get("note_id"):
+        raise PermanentFetchError(f"xhs: note_card 为空或格式异常 (note_id={note_id})")
+
+    # 正文为空检测（spec §1 xhs 失败信号）
+    desc = note_card.get("desc", "") or ""
+    image_list = note_card.get("image_list", [])
+    video = note_card.get("video")
+    has_video = isinstance(video, dict) and bool(video)
+    has_images = isinstance(image_list, list) and len(image_list) > 0
+    if not desc and not has_video and not has_images:
+        raise PermanentFetchError("xhs: 笔记正文为空，可能 xsec_token 缺失")
+
+    note_type = note_card.get("type", "normal")
+    is_video = note_type == "video" or has_video
+    title = note_card.get("display_title", "") or note_card.get("title", "") or ""
+    user_info = note_card.get("user", {}) if isinstance(note_card.get("user"), dict) else {}
+    author = user_info.get("nickname", "") or ""
+
+    # pubdate 优先级与 _parse_note_data 一致
+    pubdate = (
+        note_card.get("last_update_time", 0)
+        or note_card.get("time", 0)
+        or note_card.get("create_time", 0)
+        or note_card.get("timestamp", 0)
+    )
+    if not pubdate and len(note_id) >= 8:
+        try:
+            pubdate = int(note_id[:8], 16)
+        except (ValueError, TypeError):
+            pubdate = 0
+    try:
+        pubdate = int(pubdate) if pubdate else 0
+    except (ValueError, TypeError):
+        pubdate = 0
+
+    return FetchedMessage(
+        msg_id=f"xhs:{note_card.get('note_id', note_id)}",
+        platform="xhs",
+        content_type=ContentType.VIDEO if is_video else ContentType.TEXT,
+        pubdate=pubdate,
+        title=title,
+        author=author,
+        xsec_token=note_card.get("xsec_token", "") or note_card.get("xsec_token_str", "") or "",
+        body=desc,
+    )
