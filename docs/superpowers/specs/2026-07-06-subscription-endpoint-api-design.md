@@ -365,19 +365,19 @@ uv run pytest -x                                   # 全量回归
 uv run trawler serve  # 或类似入口
 
 # 1. 语法糖 add+bind
-curl -X POST http://localhost:8000/api/subscriptions \
+curl -X POST http://localhost:8000/api/v1/subscriptions \
   -H "Authorization: Bearer xxx" \
   -H "Content-Type: application/json" \
   -d '{"platform":"bilibili","identifier":"123","name":"UP","default_notify_endpoint":"gotify-main"}'
 
 # 2. 事后绑定
-curl -X POST http://localhost:8000/api/subscriptions/bilibili/123/endpoints \
+curl -X POST http://localhost:8000/api/v1/subscriptions/bilibili/123/endpoints \
   -H "Authorization: Bearer xxx" \
   -H "Content-Type: application/json" \
   -d '{"endpoint_name":"gotify-backup"}'
 
 # 3. 解绑
-curl -X DELETE http://localhost:8000/api/subscriptions/bilibili/123/endpoints/gotify-main \
+curl -X DELETE http://localhost:8000/api/v1/subscriptions/bilibili/123/endpoints/gotify-main \
   -H "Authorization: Bearer xxx"
 
 # 4. 检查 toml 落盘

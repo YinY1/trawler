@@ -21,8 +21,9 @@
 | `api/routes/subscriptions.py` | 扩展 | `add_sub` 透传新字段；新增 `bind_endpoint` / `unbind_endpoint` 路由 |
 | `web/routes/subscriptions.py` | 重构 | `subscription_endpoint_add/remove` 改成调 core（保留 toast_key 重定向语义） |
 | `web/templates/base.html` | 1 行追加 | `TOAST_KEY_MAP` 加 `subscription.endpoint_unknown` |
-| `tests/test_subscription_cli.py` | 扩展 | 10 个新单元测试（含回滚） |
-| `tests/test_api_subscriptions.py` | 扩展 | 5 个新集成测试 |
+| `tests/test_subscription_cli.py` | 扩展 | 10 个新单元测试（Task 1: 4 + Task 2: 3 + Task 3: 3，含回滚） |
+| `tests/test_api_subscriptions.py` | 扩展 | 7 个新集成测试（spec §7.2 列 5 + 兼容性 1 + 鉴权 1） |
+| `tests/test_web_subscriptions.py` | 扩展 | 3 个新路由集成测试（Task 7.5b，spec §7 漏列） |
 
 **依赖顺序**：core 实现 → schema → api route → web 重构 → 测试 → 验证。schema 可与 core 测试并行。
 
@@ -179,7 +180,7 @@ async def add_endpoint_to_subscription(
     if doc is None:
         return False, "未找到订阅"
 
-    doc_dict: dict[str, Any] = doc  # tomlkit TOMLDocument 兼容 dict 访问
+    doc_dict = cast(dict[str, Any], doc)  # tomlkit TOMLDocument 兼容 dict 访问
     plat_section_raw = doc_dict.get(section, {})
     if not isinstance(plat_section_raw, dict):
         plat_section_raw = {}
@@ -210,6 +211,16 @@ async def add_endpoint_to_subscription(
 ```
 
 **注意 import 位置**：`from shared.config import load_config` 写在函数内部（lazy import），避免在模块顶部与现有 `search_by_name` 风格不一致；现有代码所有 `load_config` import 都是函数内 lazy（见 `core/subscription_cli.py:275` 和 `:307`）。顶部加 import 会被 ruff 的循环导入检测触发。
+
+**`cast` 必须显式断言**：`TOMLDocument` 不是 `dict[str, Any]` 的子类（tomlkit 自定义容器类型），直接 `doc_dict: dict[str, Any] = doc` 会让 pyright strict 报 `"TOMLDocument" is incompatible with "dict[str, Any]"`。必须用 `cast(dict[str, Any], doc)` 显式断言（与 `web/routes/subscriptions.py:118` 现有做法一致）。
+
+**配套 import 改动**：把 `core/subscription_cli.py:8` 的 `from typing import Any` 改成：
+
+```python
+from typing import Any, cast
+```
+
+Task 2 的 `remove_endpoint_from_subscription` 沿用此处引入的 `cast`，**不重复加 import**。
 
 - [ ] **Step 1.4: 运行测试确认通过**
 
@@ -334,7 +345,7 @@ async def remove_endpoint_from_subscription(
     if doc is None:
         return False, "未找到订阅"
 
-    doc_dict: dict[str, Any] = doc
+    doc_dict = cast(dict[str, Any], doc)
     plat_section_raw = doc_dict.get(section, {})
     if not isinstance(plat_section_raw, dict):
         plat_section_raw = {}
@@ -497,7 +508,9 @@ async def add_subscription(
 ) -> tuple[bool, str]:
 ```
 
-**改前末尾 return（line 158-162）：**
+**改前末尾 return（位于 `core/subscription_cli.py` `# Write back` block 之后，约 line 160-162）：**
+
+> **唯一锚点是 `return True, f"已添加: {name}"` 这一行**。用 `edit` 工具时把它作为 oldString 的尾部标识，匹配前方 `# Write back` 三行（`p.parent.mkdir(...) / p.write_text(...) / logger.info(...)`）+ 该 return 共 4 行作为完整 oldString。
 
 ```python
     # Write back
@@ -551,7 +564,7 @@ uv run pytest -x tests/test_subscription_cli.py::TestAddSubscriptionDefaultEndpo
 uv run pytest -x tests/test_subscription_cli.py -v
 ```
 
-预期：全部 PASS（17 个，含原 7 个 + Task 1 的 4 + Task 2 的 3 + 本 Task 的 3 = 17）。
+预期：全部 PASS（31 个，含原 21 个 + Task 1 的 4 + Task 2 的 3 + 本 Task 的 3 = 31）。
 
 - [ ] **Step 3.6: 提交**
 
@@ -926,7 +939,9 @@ class TestAddSubscriptionWithDefault:
 - 沿用现有 `authed_client` fixture（不重写）。
 - 所有 core 函数全 mock，**不触真 `config/subscriptions.toml`**（与文件 docstring line 11-12 的约定一致）。
 - 路径前缀 `/api/v1/`（与现有 line 85、101、117 测试一致）。
-- 新增了 1 个 `test_api_add_subscription_without_default_omits_kwarg`（spec §7.2 没列但很重要）：验证向后兼容时 `default_notify_endpoint=None` 仍以 kwarg 形式传，保证 core `if default_notify_endpoint is not None` 分支能正确判空。
+- 实际新增 **7 条测试**（spec §7.2 列 5 条 + 兼容性 1 条 `test_api_add_subscription_without_default_omits_kwarg` + 鉴权 1 条 `test_api_bind_endpoint_no_token_returns_401`）。
+  - `test_api_add_subscription_without_default_omits_kwarg`：验证请求体不含 `default_notify_endpoint` 时，pydantic 默认 None，`add_subscription` 仍被以 kwarg 形式调用，保证 core `if default_notify_endpoint is not None` 分支能正确判空。
+  - `test_api_bind_endpoint_no_token_returns_401`：常规鉴权测试，归到 `TestBindEndpoint` class 内（与现有 `test_*_no_token_returns_401` 风格一致）。
 
 - [ ] **Step 6.2: 运行测试**
 
@@ -934,7 +949,7 @@ class TestAddSubscriptionWithDefault:
 uv run pytest -x tests/test_api_subscriptions.py -v
 ```
 
-预期：全部 PASS（原 12 个 + 新增 6 个 = 18 个）。
+预期：全部 PASS（原 12 个 + 新增 7 个 = **19 个**）。
 
 - [ ] **Step 6.3: 提交**
 
@@ -1108,6 +1123,95 @@ uv run pytest -x tests/test_web_subscriptions.py -v
 
 **如果 `test_web_subscriptions.py` 有针对 endpoint add/remove 的细粒度断言（比如断言 toml 内容），需要查看并按需更新**。先跑一遍看哪些挂。
 
+- [ ] **Step 7.5b：补 Web endpoint 路由集成测试**
+
+**文件**：`tests/test_web_subscriptions.py`（沿用现有 fixture 风格）
+
+**背景**：现有 `test_web_subscriptions.py` 完全没有覆盖 `subscription_endpoint_add` /
+`subscription_endpoint_remove`。重构后必须补测试，避免下次改坏。
+
+**新增 3 个测试**（参考现有 `test_add_redirects` 的 mock + 路由调用模式）：
+
+1. `test_endpoint_add_success_redirects_to_added`
+   - mock `web.routes.subscriptions.add_endpoint_to_subscription` 返回 `(True, "已绑定: gotify-main")`
+   - POST `/subscriptions/bili/123/endpoints/add` body `endpoint_name=gotify-main`
+   - 断言 redirect status_code == 303
+   - 断言 Location 含 `toast_key=subscription.endpoint_added&type=success`
+
+2. `test_endpoint_add_unknown_redirects_to_unknown`
+   - mock 返回 `(False, "未知 endpoint: xxx")`
+   - 断言 Location 含 `toast_key=subscription.endpoint_unknown&type=error`
+
+3. `test_endpoint_add_no_sub_redirects_to_not_found`
+   - mock 返回 `(False, "未找到订阅")`
+   - 断言 Location 含 `toast_key=subscription.not_found&type=error`
+
+**测试代码骨架**（贴到 `tests/test_web_subscriptions.py` 末尾）：
+
+```python
+# ── subscription_endpoint_add（spec §4.6 / Task 7.5b）──────────────────
+
+
+class TestEndpointAddRedirect:
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_endpoint_add_success_redirects_to_added(
+        self,
+        mock_add: AsyncMock,
+        web_client: AsyncClient,
+    ) -> None:
+        mock_add.return_value = (True, "已绑定: gotify-main")
+        resp = await web_client.post(
+            "/subscriptions/bili/123/endpoints/add",
+            data={"endpoint_name": "gotify-main"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=subscription.endpoint_added" in loc
+        assert "type=success" in loc
+
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_endpoint_add_unknown_redirects_to_unknown(
+        self,
+        mock_add: AsyncMock,
+        web_client: AsyncClient,
+    ) -> None:
+        mock_add.return_value = (False, "未知 endpoint: bad-ep")
+        resp = await web_client.post(
+            "/subscriptions/bili/123/endpoints/add",
+            data={"endpoint_name": "bad-ep"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=subscription.endpoint_unknown" in loc
+        assert "type=error" in loc
+
+    @patch("web.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
+    async def test_endpoint_add_no_sub_redirects_to_not_found(
+        self,
+        mock_add: AsyncMock,
+        web_client: AsyncClient,
+    ) -> None:
+        mock_add.return_value = (False, "未找到订阅")
+        resp = await web_client.post(
+            "/subscriptions/bili/123/endpoints/add",
+            data={"endpoint_name": "gotify-main"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=subscription.not_found" in loc
+        assert "type=error" in loc
+```
+
+**注意**：`web_client` fixture 沿用现有 `test_web_subscriptions.py` 中的命名（如叫 `client` 则全局替换）。
+
+**验证**：
+
+```bash
+uv run pytest -x tests/test_web_subscriptions.py -v
+```
+
+预期：原 5 个 + 新增 3 个 = **8 个 PASS**。
+
 - [ ] **Step 7.6: 落地检查 toast_key**
 
 ```bash
@@ -1154,7 +1258,7 @@ uv run pyright
 预期：`0 errors, 0 warnings`。
 
 **常见可能告警**：
-- `core/subscription_cli.py` 新函数中 `doc_dict: dict[str, Any] = doc` 给 TOMLDocument 做类型断言，pyright 可能提示。如出问题，改成 `doc_dict = cast(dict[str, Any], doc)` 并 `from typing import cast`（但 spec §4.2 没要求 cast，原 Web 路由用了 cast，二选一）。
+- ~~`core/subscription_cli.py` 新函数中 `doc_dict: dict[str, Any] = doc` 给 TOMLDocument 做类型断言，pyright 可能提示。如出问题，改成 `doc_dict = cast(dict[str, Any], doc)` 并 `from typing import cast`。~~ **已在 Task 1 Step 1.3 + Task 2 Step 2.3 改用 `cast(dict[str, Any], doc)`（与 Web 路由一致），不会触发该告警。**
 - 测试中 `mock_known_endpoint` fixture 返回 None 但参数标 `-> None`，pyright 可能挑刺；如出问题改成 `-> None` 显式（已是这样）。
 
 - [ ] **Step 8.3: core 单元测试**
@@ -1163,7 +1267,7 @@ uv run pyright
 uv run pytest -x tests/test_subscription_cli.py -v
 ```
 
-预期：17 个测试 PASS（原 7 + Task 1 的 4 + Task 2 的 3 + Task 3 的 3）。
+预期：31 个测试 PASS（原 21 + Task 1 的 4 + Task 2 的 3 + Task 3 的 3 = 31）。
 
 - [ ] **Step 8.4: API 集成测试**
 
@@ -1171,7 +1275,7 @@ uv run pytest -x tests/test_subscription_cli.py -v
 uv run pytest -x tests/test_api_subscriptions.py -v
 ```
 
-预期：18 个测试 PASS（原 12 + Task 6 新增 6）。
+预期：19 个测试 PASS（原 12 + Task 6 新增 7）。
 
 - [ ] **Step 8.5: Web 回归测试**
 
@@ -1179,7 +1283,7 @@ uv run pytest -x tests/test_api_subscriptions.py -v
 uv run pytest -x tests/test_web_subscriptions.py -v
 ```
 
-预期：原有数量 PASS。
+预期：**8 个测试 PASS**（原 5 + Task 7.5b 新增 3）。
 
 - [ ] **Step 8.6: 全量回归**
 
@@ -1245,8 +1349,9 @@ grep 'subscription.endpoint_unknown' web/templates/base.html
 | §4.5 api/routes 扩展 | Task 5 |
 | §4.6 web 重构 + toast_key | Task 7 |
 | §6 错误处理矩阵 | Task 1/2/5 实现 + Task 6 测试覆盖 |
-| §7.1 core 单元测试 10 条 | Task 1 (3) + Task 2 (3) + Task 3 (3) = 9；spec §7.1 列了 10 条，**少 1 条**：spec 同时列了 `test_add_endpoint_to_subscription_idempotent`（Task 1 含）和 `test_remove_endpoint_from_subscription_idempotent`（Task 2 含），重数后实为 9 条独立测试名。**spec §7.1 列表去重后实际是 9 个测试，与 plan 一致。**无遗漏。 |
-| §7.2 API 集成测试 5 条 | Task 6 写了 6 条（spec 列 5 条 + 1 条额外 `test_api_add_subscription_without_default_omits_kwarg`，验证向后兼容，必要） |
+| §7.1 core 单元测试 10 条 | Task 1 (4) + Task 2 (3) + Task 3 (3) = **10**；spec §7.1 列表去重后实际就是 10 个测试，与 plan 一致。**注**：现有 `tests/test_subscription_cli.py` 已有 21 个测试（TestList 6 + TestAdd 7 + TestRemove 5 + TestSearchByName 3），加 10 后共 31 个，见 Task 3.5 / Task 8.3 预期。 |
+| §7.2 API 集成测试 5 条 | Task 6 写了 **7 条**（spec 列 5 条 + 兼容性 1 条 `test_api_add_subscription_without_default_omits_kwarg` + 鉴权 1 条 `test_api_bind_endpoint_no_token_returns_401`）。原 `tests/test_api_subscriptions.py` 已有 12 个，加 7 后共 19 个。 |
+| **Web endpoint 路由测试（spec §7 漏列）** | Task 7.5b 补 3 个 `TestEndpointAddRedirect` 测试，覆盖 toast_key 三种分支（added / endpoint_unknown / not_found）。原 `tests/test_web_subscriptions.py` 已有 5 个，加 3 后共 8 个。 |
 | §9 验证清单 | Task 8 全部命令齐备 |
 
 ### Placeholder scan
@@ -1261,8 +1366,9 @@ grep 'subscription.endpoint_unknown' web/templates/base.html
 - `remove_endpoint_from_subscription` 同上。
 - `add_subscription` 新增关键字参数 `default_notify_endpoint: str | None = None` — Task 3 定义，Task 5 调用一致。
 - `EndpointBindRequest { endpoint_name: str }` — Task 4 定义，Task 5 路由用 `body: EndpointBindRequest`，Task 6 测试 POST `{"endpoint_name": ...}`。
-- toast_key `subscription.endpoint_unknown` — Task 7 路由用，Task 8 grep 检查。
+- toast_key `subscription.endpoint_unknown` — Task 7 路由用，Task 7.5b 测试覆盖三种分支（added / endpoint_unknown / not_found），Task 8 grep 检查。
 - 测试 fixture `mock_known_endpoint` 在 Task 1 和 Task 3 各定义一次（独立 class，无共享），签名一致。
+- Task 7.5b 的 Web 测试 mock 的是 `web.routes.subscriptions.add_endpoint_to_subscription`（不是 `core.subscription_cli.add_endpoint_to_subscription`），与现有 `test_web_subscriptions.py` 的 `@patch("web.routes.subscriptions.add_subscription")` 模式一致。
 
 ---
 
@@ -1276,8 +1382,8 @@ grep 'subscription.endpoint_unknown' web/templates/base.html
 | 4. api/schemas.py 扩展 | 5 min | — （可与 Task 1-3 并行） |
 | 5. api/routes/subscriptions.py | 10 min | Task 4 + Task 3 完成 |
 | 6. API 集成测试 | 20 min | Task 5 完成 |
-| 7. web 重构 + toast_key | 15 min | Task 1 + Task 2 完成 |
+| 7. web 重构 + toast_key + Web 测试 | 20 min | Task 1 + Task 2 完成 |
 | 8. 全量验证 | 10 min | Task 1-7 全部完成 |
 
-**串行总时长：100 min。**
-**最优并行（Task 4 与 Task 1-3 并行）：约 90 min。**
+**串行总时长：105 min。**
+**最优并行（Task 4 与 Task 1-3 并行）：约 95 min。**
