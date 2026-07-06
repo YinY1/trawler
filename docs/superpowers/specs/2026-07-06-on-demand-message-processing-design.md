@@ -138,10 +138,10 @@ class FetchedMessage:
     body: str = ""
 ```
 
-#### 新增异常(`shared/protocols.py`)
+#### 新增异常(`shared/exceptions.py`,继承 `TrawlerError`)
 
 ```python
-class PermanentFetchError(Exception):
+class PermanentFetchError(TrawlerError):
     """按 ID 抓取永久失败(调用方应明示,不重试)。"""
 ```
 
@@ -150,7 +150,7 @@ class PermanentFetchError(Exception):
 | 平台 | 文件 | 实现要点 |
 |---|---|---|
 | **bili** | `platforms/bilibili/monitor.py` 新增 `fetch_video_by_id` | 基于 `bilibili_api.video.Video(bvid).get_info()`;`content_type=VIDEO`;从 API 返回解析 title/pubdate/author/desc |
-| **xhs** | `platforms/xiaohongshu/monitor.py` 新增 `fetch_note_by_id` | 调 `AsyncXhsClient.get_note_by_id(note_id, xsec_token="", xsec_source="pc_feed")`;若响应 `note_card` 无 `xsec_token` 字段 → 抛 `PermanentFetchError("xhs: 缺少 xsec_token,无法获取正文")`;`content_type` 按 `note_card.type == "video"` 判断 |
+| **xhs** | `platforms/xiaohongshu/monitor.py` 新增 `fetch_note_by_id` | 调 `AsyncXhsClient.get_note_by_id(note_id, xsec_token="", xsec_source="pc_feed")`;**失败信号**:`DataError` 异常(server 拒绝/-100)→ 抛 `PermanentFetchError`;若拿到 `note_card` 但 `desc` / `image_list` / `video` 全空 → 抛 `PermanentFetchError("xhs: 笔记正文为空,可能 xsec_token 缺失")`;`content_type` 按 `note_card.type == "video"` 判断 |
 | **weibo** | `platforms/weibo/monitor.py` 新增 `fetch_post_by_id`(包装 `api.fetch_post_detail`) | `fetch_post_detail(cookie, post_id)` 返回 dict;判 `page_info.media_info` 有无 video → `content_type`;title 取 `clean_text[:50]`;body 取长文 `_fetch_long_text` 结果 |
 
 #### 注册机制
