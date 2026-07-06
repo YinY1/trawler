@@ -680,5 +680,101 @@ async def _run_manual_check(
     )
 
 
+# ═══════════════════════════════════════════════════════════
+# 命令: fetch（按需消息处理，issue #101）
+# ═══════════════════════════════════════════════════════════
+
+
+@cli.command()
+@click.option(
+    "--ids",
+    "ids",
+    required=True,
+    help="逗号分隔的消息 ID，如 bili:BV1xx,xhs:note1,weibo:123",
+)
+@click.option(
+    "--skip-push",
+    is_flag=True,
+    default=False,
+    help="跳过推送通知（默认推送）",
+)
+@click.option(
+    "--config",
+    "config_path",
+    default="config/config.toml",
+    show_default=True,
+    help="配置文件路径",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="启用详细日志输出",
+)
+def fetch(
+    ids: str,
+    skip_push: bool,
+    config_path: str,
+    verbose: bool,
+) -> None:
+    """按指定消息 ID 抓取并处理（不依赖订阅）。
+
+    - 对每个 ID：不存在则抓取入库 + 走完整流水线；已存在则直接处理
+    - 默认推送给订阅者（--skip-push 跳过）
+    - 突破 24h 时间窗限制，允许任意历史消息
+
+    msg_id 必须带平台前缀（bili:/xhs:/weibo:），无前缀会被拒绝。
+    """
+    try:
+        config = asyncio.run(load_config(config_path))
+    except Exception as exc:
+        console.print(f"[red]✗ 配置加载失败: {exc}[/]")
+        sys.exit(1)
+
+    setup_logging(verbose=verbose, log_dir=config.general.data_dir)
+    if verbose:
+        console.print("[dim]调试模式已启用[/]")
+
+    # 拆分 + 前缀校验（快速失败）
+    msg_ids = [m.strip() for m in ids.split(",") if m.strip()]
+    valid_prefixes = {"bili:", "xhs:", "weibo:"}
+    invalid = [m for m in msg_ids if not any(m.startswith(p) for p in valid_prefixes)]
+    if invalid:
+        console.print(
+            f"[red]✗[/] 无效的 msg_id（需 bili:/xhs:/weibo: 前缀）: {invalid}"
+        )
+        sys.exit(1)
+
+    console.print(f"[bold blue]▶[/] 按需抓取处理 {len(msg_ids)} 条消息")
+    console.print(f"[dim]{' / '.join(msg_ids)}[/]")
+
+    store = MessageStore(config.general.data_dir)
+
+    # 延迟导入避免模块加载顺序问题（与 _run_manual_check 同款）
+    from core.engine import PipelineEngine
+
+    try:
+        asyncio.run(
+            PipelineEngine.run_fetch_and_process(
+                msg_ids=msg_ids,
+                skip_push=skip_push,
+                config=config,
+                store=store,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]已中断[/]")
+        sys.exit(130)
+    except Exception as exc:
+        console.print(f"[red]✗ 运行出错: {exc}[/]")
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    console.print("[green]✓[/] 处理完成")
+
+
 if __name__ == "__main__":
     cli()
