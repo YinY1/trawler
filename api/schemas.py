@@ -130,6 +130,31 @@ class RerunResponse(BaseModel):
     reset_count: int | None = None
 
 
+class FetchRequest(BaseModel):
+    """``POST /messages/fetch`` 请求体（issue #101）。
+
+    - ``msg_ids`` 必须非空
+    - ``skip_push`` 默认 ``False``（与 ``RerunRequest`` 默认 ``True`` 相反，
+      按需入口语义是"处理新消息"，应当推送）
+    """
+
+    msg_ids: list[str]
+    skip_push: bool = False
+
+
+class FetchResponse(BaseModel):
+    """``POST /messages/fetch`` 成功响应（202）。
+
+    ``fetch_count`` 恒为 ``None``：抓取是异步的，202 响应提交时尚未跑完。
+    实际抓取数通过 SSE ``done`` 事件推送（见路由 docstring）。
+    字段保留是为与 ``RerunResponse`` 对称、未来如需同步模式可填。
+    """
+
+    status: str
+    task_id: str | None = None
+    fetch_count: int | None = None  # 恒 None（异步），保留为对称字段
+
+
 # ═══════════════════════════════════════════════════════════
 # T4: subscriptions 系列端点
 # ═══════════════════════════════════════════════════════════

@@ -237,6 +237,7 @@ class MessageStore:
         *,
         xsec_token: str = "",
         body: str = "",
+        force: bool = False,
     ) -> MessageRecord | None:
         """添加新消息。
 
@@ -247,12 +248,18 @@ class MessageStore:
         - ``body``：内容正文（xhs detector 阶段预填 NoteInfo.desc）
         两者默认空字符串，保持向后兼容（现有 45 个调用点不需改动）。
 
+        ``force`` 为 keyword-only（issue #101）：
+        - True 时绕过 ``is_in_window`` 时间窗口检查（按需入口专用），
+          允许任意历史消息入库。
+        - ``is_known`` 去重检查不变（同一 msg_id 不会重复入库，幂等）。
+        - 默认 False 保持现有 cron 流水线行为不变。
+
         Returns:
             新创建的 MessageRecord，或 None（已存在 / 超期）
         """
         if self.is_known(msg_id):
             return None
-        if not self.is_in_window(pubdate):
+        if not force and not self.is_in_window(pubdate):
             return None
 
         now = time.time()

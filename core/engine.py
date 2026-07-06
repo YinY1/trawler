@@ -21,7 +21,14 @@ from typing import Any
 from shared.config import Config
 from shared.constants import MAX_SUMMARY_RETRIES
 from shared.message_store import MessageStore
-from shared.protocols import PHASE_FLOW, ContentType, MessageRecord, Phase, PhaseContext
+from shared.protocols import (
+    PHASE_FLOW,
+    ContentType,
+    FetchedMessage,
+    MessageRecord,
+    Phase,
+    PhaseContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +70,8 @@ class PipelineEngine:
 
     _handlers: dict[tuple[str, Phase], PhaseHandler] = {}
     _detectors: dict[str, Callable[..., Awaitable[None]]] = {}
+    # issue #101: 按需 fetcher 注册表（对称 _detectors）
+    _fetchers: dict[str, Callable[[str, Config], Awaitable[FetchedMessage | None]]] = {}
     _HANDLER_MODULES: dict[str, str] = {
         "bili": "platforms.bilibili.handlers",
         "xhs": "platforms.xiaohongshu.handlers",
@@ -104,6 +113,23 @@ class PipelineEngine:
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             cls._detectors[platform] = func
+            return func
+
+        return decorator
+
+    @classmethod
+    def register_fetcher(cls, platform: str) -> Callable[..., Any]:
+        """装饰器：注册某平台的 fetcher 函数（issue #101，对称 ``register_detector``）。
+
+        Usage::
+
+            @PipelineEngine.register_fetcher("bili")
+            async def bili_fetch_by_id(msg_id: str, config: Config) -> FetchedMessage | None:
+                ...
+        """
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            cls._fetchers[platform] = func
             return func
 
         return decorator
@@ -423,3 +449,136 @@ class PipelineEngine:
         logger.info("✓ 手动重跑完成（共 %d 条）", count)
         if log_callback:
             log_callback("done", "✅ 手动重跑完成")
+
+    @staticmethod
+    def _platform_from_msg_id(msg_id: str) -> str | None:
+        """根据 msg_id 前缀判断平台（issue #101）。
+
+        Returns:
+            "bili" / "xhs" / "weibo"；未知前缀返回 None。
+        """
+        if msg_id.startswith("bili:"):
+            return "bili"
+        if msg_id.startswith("xhs:"):
+            return "xhs"
+        if msg_id.startswith("weibo:"):
+            return "weibo"
+        return None
+
+    @classmethod
+    async def run_fetch_and_process(
+        cls,
+        msg_ids: list[str],
+        skip_push: bool,
+        config: Config,
+        store: MessageStore,
+        log_callback: Callable[[str, str], None] | None = None,
+    ) -> int:
+        """按 ID 抓取并处理（issue #101，不依赖订阅 / 已入库记录）。
+
+        对每个 msg_id:
+        1. 已存在 store → 直接 ``_safe_process_message``（走当前 phase 续跑）
+        2. 不存在 → 调对应平台 ``fetch_by_id``:
+           - PermanentFetchError → log error + 跳过（不创建 record）
+           - 返回 None（抓取失败但可重试） → log warning + 跳过
+           - 成功 → ``store.add_new(force=True)`` → ``_safe_process_message``
+
+        Returns:
+            实际成功抓取并入库的 ID 数（供 API ``fetch_count`` 字段使用，
+            区别于 ``len(msg_ids)`` —— 永久失败 / 返回 None / 未知前缀
+            / 未注册 fetcher 的不计入；已存在 store 的不计入，因为没走抓取）。
+
+        与 ``run_specific_messages`` 区别:
+        - 跑 fetch（detector 的按 ID 单条等价物）
+        - 不调 cleanup（同 D6 决策，避免误删历史）
+        - 不调 ``reset_specific``（新消息从 DISCOVERED 开始；已存在消息走当前 phase）
+
+        ⚠️ 并发安全：与 ``run_specific_messages`` 相同 —— 不持有文件锁，
+        复用 ``state.check_running`` 单锁（在 API/Web 入口占锁）。
+        """
+        from shared.exceptions import PermanentFetchError
+
+        if log_callback:
+            log_callback("log", f"▶ 按需抓取处理 {len(msg_ids)} 条消息")
+
+        # 延迟导入所有平台 handler 模块（触发装饰器注册，含 fetcher）
+        for module_path in cls._HANDLER_MODULES.values():
+            importlib.import_module(module_path)
+
+        fetched_count = 0
+        for msg_id in msg_ids:
+            msg = store.get_message(msg_id)
+            if msg is not None:
+                # 已存在 → 续跑（从当前 phase）
+                logger.info("▶ %s 已存在，直接处理（phase=%s）", msg_id, msg.phase.name)
+                if log_callback:
+                    log_callback("log", f"▶ {msg_id} 已存在，续跑处理")
+                setattr(msg, "_skip_push", skip_push)
+                await cls._safe_process_message(msg, config, store)
+                continue
+
+            # 不存在 → fetch
+            platform = cls._platform_from_msg_id(msg_id)
+            if platform is None:
+                logger.warning("⏭ 跳过 %s：未知前缀", msg_id)
+                if log_callback:
+                    log_callback("log", f"⏭ {msg_id} 未知前缀，跳过")
+                continue
+
+            fetcher = cls._fetchers.get(platform)
+            if fetcher is None:
+                logger.error("✗ %s 平台未注册 fetcher", platform)
+                if log_callback:
+                    log_callback("log", f"✗ {platform} 未注册 fetcher")
+                continue
+
+            try:
+                fm = await fetcher(msg_id, config)
+            except PermanentFetchError as e:
+                logger.error("✗ %s 抓取永久失败: %s", msg_id, e)
+                if log_callback:
+                    log_callback("log", f"✗ {msg_id} 抓取失败: {e}")
+                continue
+            except Exception as e:
+                # 未预期异常（网络、解析 bug 等）→ log + skip，不创建 record
+                logger.exception("✗ %s 抓取异常", msg_id)
+                if log_callback:
+                    log_callback("log", f"✗ {msg_id} 抓取异常: {e}")
+                continue
+
+            if fm is None:
+                logger.warning("⏭ %s 抓取返回空（可重试）", msg_id)
+                if log_callback:
+                    log_callback("log", f"⏭ {msg_id} 抓取返回空")
+                continue
+
+            # 入库（force=True 突破时间窗；is_known 去重仍生效，理论不会重复）
+            rec = store.add_new(
+                msg_id=fm.msg_id,
+                platform=fm.platform,
+                content_type=fm.content_type,
+                pubdate=fm.pubdate,
+                title=fm.title,
+                author=fm.author,
+                xsec_token=fm.xsec_token,
+                body=fm.body,
+                force=True,
+            )
+            if rec is None:
+                # is_known 命中（理论不该发生，step 1 已检查）；fallback 取已有记录
+                rec = store.get_message(fm.msg_id)
+                if rec is None:
+                    logger.error("✗ %s 入库失败且无已有记录", fm.msg_id)
+                    continue
+
+            fetched_count += 1
+            setattr(rec, "_skip_push", skip_push)
+            if log_callback:
+                log_callback("log", f"▶ {fm.msg_id} 抓取入库，开始处理")
+            await cls._safe_process_message(rec, config, store)
+
+        store.save()
+        logger.info("✓ 按需处理完成（抓取 %d / 共 %d）", fetched_count, len(msg_ids))
+        if log_callback:
+            log_callback("done", f"✅ 按需处理完成（抓取 {fetched_count} 条）")
+        return fetched_count

@@ -88,6 +88,10 @@ trawler check --platform xhs
 
 # Check token status
 trawler token status
+
+# Fetch and process messages by ID (no subscription required, bypasses 24h window)
+trawler fetch --ids bili:BV1xx,xhs:note1,weibo:123
+trawler fetch --ids bili:BV1xx --skip-push
 ```
 
 ### Scheduling
@@ -104,9 +108,9 @@ Trawler has no built-in scheduler — checks are driven by an external cron via
 
 Trawler also exposes a machine-facing JSON HTTP API (`/api/v1`) for external
 bots / scripts / automation to trigger checks, query messages, batch-rerun,
-and manage subscriptions — without relying on cron or Web UI clicks. The API
-shares the same FastAPI server as the Web UI (same port) but uses Bearer token
-authentication.
+fetch by ID, and manage subscriptions — without relying on cron or Web UI
+clicks. The API shares the same FastAPI server as the Web UI (same port) but
+uses Bearer token authentication.
 
 See the [HTTP API documentation](docs/api.md) for full endpoint reference,
 authentication setup, and curl examples.

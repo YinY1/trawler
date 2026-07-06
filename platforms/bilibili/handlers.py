@@ -20,6 +20,7 @@ from shared.config import Config
 from shared.message_store import MessageStore
 from shared.protocols import (
     ContentType,
+    FetchedMessage,
     NotificationContent,
     Phase,
     PhaseContext,
@@ -374,3 +375,15 @@ async def bili_push(ctx: PhaseContext) -> bool:
             logger.warning("媒体清理失败 %s: %s", ctx.msg.msg_id, exc)
 
     return True
+
+
+# ── 按需 fetcher（issue #101）────────────────────────────────────
+
+
+@PipelineEngine.register_fetcher("bili")
+async def bili_fetch_by_id(msg_id: str, config: Config) -> FetchedMessage | None:
+    """B 站 fetcher 入口：剥离 ``"bili:"`` 前缀，调 ``fetch_video_by_id``。"""
+    from platforms.bilibili.monitor import fetch_video_by_id
+
+    bvid = msg_id.removeprefix("bili:")
+    return await fetch_video_by_id(bvid, config)

@@ -27,6 +27,8 @@ from fastapi.responses import JSONResponse
 
 from api.auth import require_token
 from api.schemas import (
+    FetchRequest,
+    FetchResponse,
     MessageListResponse,
     MessageOut,
     RerunRequest,
@@ -258,4 +260,101 @@ async def rerun_messages(
     state.check_task = asyncio.create_task(_rerun())
     return RerunResponse(
         status="started", task_id=task_id, reset_count=reset_count
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# POST /messages/fetch（按需抓取处理，issue #101）
+# ═══════════════════════════════════════════════════════════
+
+
+@router.post("/messages/fetch", response_model=FetchResponse, status_code=202)
+async def fetch_messages(
+    body: FetchRequest,
+    request: Request,
+    _token_name: str = Depends(require_token),
+) -> FetchResponse | JSONResponse:
+    """按 ID 抓取并处理（不依赖订阅）。
+
+    走 ``state.check_running`` 单锁（与 ``/messages/rerun`` / ``/check/run``
+    完全对称、互斥）。
+
+    - ``msg_ids`` 空 → 422
+    - 已有 run 在跑 → 409 ``{"status": "already_running", "task_id": ...}``
+    - 成功 → 202 + ``{"status": "started", "task_id": ..., "fetch_count": null}``
+
+    后台 task 调 ``PipelineEngine.run_fetch_and_process``。
+    与 ``/messages/rerun`` 区别：不返回 ``reset_count``（无 reset 操作）。
+    ``fetch_count`` 在 202 响应里**恒为 null**（抓取是异步的，提交时尚未跑完）；
+    引擎 ``run_fetch_and_process`` 返回的实际抓取数通过 ``log_callback`` 的
+    "done" 事件以 SSE 推送给前端（``log_callback("done", f"...抓取 {n} 条")``）。
+
+    **设计权衡**：之所以不做"同步抓取再返 202"，是因为 fetch 可能耗时数十秒
+    （每条 ID 一次外部 API 调用），HTTP 请求必须立即返回避免超时；实际抓取数
+    通过 SSE 异步通知是更合理的契约（与 ``/check/run`` / ``/messages/rerun`` 的
+    ``reset_count`` 也通过 SSE 推送的模式一致）。
+    """
+    if not body.msg_ids:
+        raise HTTPException(
+            status_code=422, detail="msg_ids 不能为空"
+        )
+
+    state = request.app.state
+    if state.check_running:
+        existing_task_id = getattr(state, "api_task_id", None)
+        return JSONResponse(
+            status_code=409,
+            content={"status": "already_running", "task_id": existing_task_id},
+        )
+
+    cfg = await load_config()
+    store = MessageStore(cfg.general.data_dir)
+
+    # 占锁 + 初始化 run state（与 /messages/rerun 完全对称）
+    task_id = uuid4().hex
+    state.check_running = True
+    state.check_processed_count = 0
+    state.check_started_at = time.time()
+    state.log_history.clear()
+    state.api_task_id = task_id  # type: ignore[attr-defined]
+    cb = make_log_callback(state)
+
+    async def _fetch() -> None:
+        try:
+            await PipelineEngine.run_fetch_and_process(
+                msg_ids=body.msg_ids,
+                skip_push=body.skip_push,
+                config=cfg,
+                store=store,
+                log_callback=cb,
+            )
+        except Exception as exc:
+            err_item: dict[str, object] = {
+                "type": "error",
+                "message": f"按需抓取失败: {exc}",
+                "time": time.strftime("%H:%M:%S"),
+                "_ts": time.time(),
+            }
+            state.log_history.append(err_item)
+            for sub in list(state.subscribers):
+                try:
+                    sub.put_nowait(err_item)
+                except asyncio.QueueFull:
+                    pass
+        finally:
+            state.check_running = False
+            state.check_started_at = None
+            state.check_task = None
+            state.api_task_id = None  # type: ignore[attr-defined]
+            for sub in list(state.subscribers):
+                try:
+                    sub.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+
+    state.check_task = asyncio.create_task(_fetch())
+    # fetch_count 在 202 响应里为 None（抓取异步，提交时未跑完）；
+    # 实际成功抓取数通过 /check/status SSE "done" 事件返回（由引擎 log_callback 推送）。
+    return FetchResponse(
+        status="started", task_id=task_id, fetch_count=None,
     )
