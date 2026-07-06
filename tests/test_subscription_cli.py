@@ -294,6 +294,30 @@ class TestAddEndpoint:
         assert not ok
         assert "未找到订阅" in msg
 
+    async def test_add_endpoint_to_subscription_invalid_platform(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """无效平台返回 (False, "无效平台: ...")，与 add_subscription 一致。"""
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="invalid", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "无效平台" in msg
+
+    async def test_add_endpoint_to_subscription_file_not_found(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """订阅文件不存在 → (False, "未找到订阅")，覆盖 _load_doc 返回 None 分支。"""
+        from core.subscription_cli import add_endpoint_to_subscription
+        ok, msg = await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file.parent / "nonexistent.toml"),
+        )
+        assert not ok
+        assert "未找到订阅" in msg
+
 
 # ── remove_endpoint_from_subscription ─────────────────────────────────
 
@@ -356,6 +380,18 @@ class TestRemoveEndpoint:
         )
         assert not ok
         assert "未找到订阅" in msg
+
+    async def test_remove_endpoint_from_subscription_invalid_platform(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """无效平台返回 (False, "无效平台: ...")。"""
+        from core.subscription_cli import remove_endpoint_from_subscription
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="invalid", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "无效平台" in msg
 
 
 # ── add_subscription with default_notify_endpoint ─────────────────────

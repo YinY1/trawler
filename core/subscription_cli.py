@@ -165,6 +165,12 @@ async def add_subscription(
 
     # ── default_notify_endpoint 语法糖（spec §4.3）──────────────
     # 落盘后再调 endpoint 绑定；失败时回滚（删订阅 + 重写文件）。
+    #
+    # 失败的两种情况：
+    # - "未知 endpoint"（最常见）：用户传错的 endpoint 名，回滚合理
+    # - "未找到订阅"（生产中实际不会触发，因为订阅刚落盘）：
+    #   只有并发写/磁盘错乱时才会发生；此时 remove_subscription 也可能失败，
+    #   但调用是幂等的，最坏情况是 toml 留下半残条目，下次手动清理即可
     if default_notify_endpoint is not None:
         ok_ep, msg_ep = await add_endpoint_to_subscription(
             platform=platform,
@@ -253,11 +259,19 @@ async def add_endpoint_to_subscription(
     identifier: int | str,
     endpoint_name: str,
     path: str = "config/subscriptions.toml",
+    config_path: str = "config/config.toml",
 ) -> tuple[bool, str]:
     """绑定 endpoint 到订阅的 ``notify_endpoints`` 列表。
 
-    endpoint 存在性校验在 core 层做：调 ``load_config("config/config.toml")``
+    endpoint 存在性校验在 core 层做：调 ``load_config(config_path)``
     检查 ``endpoint_name in {ep.name for ep in cfg.endpoints}``。
+
+    参数:
+      platform:       平台短名（bili/xhs/weibo）
+      identifier:     订阅 key（bili=uid, xhs/weibo=user_id）
+      endpoint_name:  要绑定的 endpoint 名（需存在于 config.toml）
+      path:           subscriptions.toml 路径
+      config_path:    config.toml 路径，用于校验 endpoint 是否已知
 
     返回值:
       ``(True, "已绑定: {endpoint_name}")``     # 成功或已存在（幂等）
@@ -269,7 +283,7 @@ async def add_endpoint_to_subscription(
         return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
 
     # endpoint 存在性校验（spec §4.2 要点）
-    cfg = await load_config("config/config.toml")
+    cfg = await load_config(config_path)
     known = {ep.name for ep in cfg.endpoints}
     if endpoint_name not in known:
         logger.warning("📋 未知 endpoint: %s", endpoint_name)
@@ -285,6 +299,7 @@ async def add_endpoint_to_subscription(
 
     doc_dict = cast(dict[str, Any], doc)  # tomlkit TOMLDocument 兼容 dict 访问
     plat_section_raw = doc_dict.get(section, {})
+    # tomlkit 的 Table 不是 dict 子类（是 Container），坏数据时 isinstance 兜底
     if not isinstance(plat_section_raw, dict):
         plat_section_raw = {}
     subs = plat_section_raw.get("subscriptions", [])
@@ -343,6 +358,7 @@ async def remove_endpoint_from_subscription(
 
     doc_dict = cast(dict[str, Any], doc)
     plat_section_raw = doc_dict.get(section, {})
+    # tomlkit 的 Table 不是 dict 子类（是 Container），坏数据时 isinstance 兜底
     if not isinstance(plat_section_raw, dict):
         plat_section_raw = {}
     subs = plat_section_raw.get("subscriptions", [])
@@ -357,7 +373,11 @@ async def remove_endpoint_from_subscription(
         if sub_id == str(typed_id):
             eps_arr = sub.get("notify_endpoints", [])
             eps_list = [str(e) for e in eps_arr if str(e) != endpoint_name]
-            sub["notify_endpoints"] = eps_list
+            if eps_list:
+                sub["notify_endpoints"] = eps_list
+            else:
+                # 列表为空时移除字段，与 remove_subscription 删空 AoT 的约定一致
+                sub.pop("notify_endpoints", None)
             found = True
             break
 
