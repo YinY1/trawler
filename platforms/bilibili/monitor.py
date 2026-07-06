@@ -8,7 +8,7 @@ import logging
 import bilibili_api
 
 from shared.config import Config
-from shared.protocols import VideoInfo
+from shared.protocols import FetchedMessage, VideoInfo
 
 logger = logging.getLogger("trawler.bilibili.monitor")
 
@@ -131,3 +131,51 @@ async def fetch_user_videos(
     videos.sort(key=lambda v: v.pubdate, reverse=True)
     logger.info(f"UP 主 {uid} 获取到 {len(videos)} 个视频")
     return videos
+
+
+async def fetch_video_by_id(
+    bvid: str,
+    config: Config,
+) -> FetchedMessage | None:
+    """按 BVID 抓取单条 B 站视频元数据（issue #101）。
+
+    基于 ``bilibili_api.video.Video(bvid).get_info()``，不依赖订阅列表。
+
+    Args:
+        bvid: 视频 BV 号（不带 "bili:" 前缀）
+        config: 全局配置（用于取 credential）
+
+    Returns:
+        ``FetchedMessage``（``content_type=VIDEO``，B 站一律走完整 5 阶段）；
+        抓取失败/视频不存在 → None（调用方可重试）。
+
+    Raises:
+        无 —— 所有异常内部捕获并 log，对外只返回 None。
+        （B 站目前无明确的"永久失败"信号，token/credential 缺失由
+        ``get_credential`` 在 ``auth.py`` 层抛 ``AuthError``，不是这里职责。）
+    """
+    from platforms.bilibili.auth import get_credential
+    from shared.protocols import ContentType, FetchedMessage
+
+    credential = get_credential(config)
+    try:
+        v = bilibili_api.video.Video(bvid=bvid, credential=credential)
+        info = await v.get_info()
+    except Exception as e:
+        logger.error("按 BVID 抓取失败 (%s): %s", bvid, e)
+        return None
+
+    if not isinstance(info, dict) or not info.get("bvid"):
+        logger.warning("BVID %s 返回数据为空或格式异常", bvid)
+        return None
+
+    owner = info.get("owner", {}) if isinstance(info.get("owner"), dict) else {}
+    return FetchedMessage(
+        msg_id=f"bili:{info['bvid']}",
+        platform="bili",
+        content_type=ContentType.VIDEO,
+        pubdate=int(info.get("pubdate", 0) or 0),
+        title=info.get("title", "") or "",
+        author=owner.get("name", "") or "",
+        body=info.get("desc", "") or "",
+    )
