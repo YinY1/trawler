@@ -297,6 +297,62 @@ async def add_endpoint_to_subscription(
     return True, f"已绑定: {endpoint_name}"
 
 
+async def remove_endpoint_from_subscription(
+    platform: str,
+    identifier: int | str,
+    endpoint_name: str,
+    path: str = "config/subscriptions.toml",
+) -> tuple[bool, str]:
+    """从订阅的 ``notify_endpoints`` 列表移除一个 endpoint。
+
+    幂等：endpoint 本来就不在列表里也返回成功。
+    **不做 endpoint 存在性校验**（解绑一个不存在的 endpoint 引用无害，
+    也能清理历史脏数据）。
+
+    返回值:
+      ``(True, "已解绑: {endpoint_name}")``     # 成功或本来就没有（幂等）
+      ``(False, "未找到订阅")``
+      ``(False, "无效平台: ...")``
+    """
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)
+    plat_section_raw = doc_dict.get(section, {})
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            eps_arr = sub.get("notify_endpoints", [])
+            eps_list = [str(e) for e in eps_arr if str(e) != endpoint_name]
+            sub["notify_endpoints"] = eps_list
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 endpoint 解绑: %s/%s -= %s", section, typed_id, endpoint_name)
+    return True, f"已解绑: {endpoint_name}"
+
+
 # ═══════════════════════════════════════════════════════════
 # Search by name
 # ═══════════════════════════════════════════════════════════

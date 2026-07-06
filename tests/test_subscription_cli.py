@@ -293,3 +293,66 @@ class TestAddEndpoint:
         )
         assert not ok
         assert "未找到订阅" in msg
+
+
+# ── remove_endpoint_from_subscription ─────────────────────────────────
+
+
+class TestRemoveEndpoint:
+    @pytest.fixture
+    def mock_known_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from shared.config import EndpointConfig
+        from core import subscription_cli
+
+        async def _fake_load(*_a, **_kw):
+            from shared.config import Config
+            cfg = Config()
+            cfg.endpoints = [EndpointConfig(name="gotify-main", url="http://x", token="t")]
+            return cfg
+
+        monkeypatch.setattr(subscription_cli, "load_config", _fake_load)
+
+    async def test_remove_endpoint_from_subscription_ok(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """先 add 再 remove，验证落盘后列表为空。"""
+        from core.subscription_cli import (
+            add_endpoint_to_subscription,
+            remove_endpoint_from_subscription,
+        )
+        await add_endpoint_to_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert ok
+        assert "已解绑" in msg
+        subs = await list_subscriptions(path=str(subs_file))
+        eps = subs["bilibili"][0].get("notify_endpoints", [])
+        assert "gotify-main" not in eps
+
+    async def test_remove_endpoint_from_subscription_idempotent(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        """remove 不存在的 endpoint 也返回 True（幂等）。"""
+        from core.subscription_cli import remove_endpoint_from_subscription
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="bili", identifier=2137589551,
+            endpoint_name="never-bound", path=str(subs_file),
+        )
+        assert ok
+        assert "已解绑" in msg
+
+    async def test_remove_endpoint_from_subscription_no_sub(
+        self, subs_file: Path, mock_known_endpoint: None
+    ) -> None:
+        from core.subscription_cli import remove_endpoint_from_subscription
+        ok, msg = await remove_endpoint_from_subscription(
+            platform="bili", identifier=99999999,
+            endpoint_name="gotify-main", path=str(subs_file),
+        )
+        assert not ok
+        assert "未找到订阅" in msg
