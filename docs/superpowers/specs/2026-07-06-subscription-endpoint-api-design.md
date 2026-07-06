@@ -49,11 +49,14 @@ api/routes/subscriptions.py
   + DELETE /subscriptions/{platform}/{identifier}/endpoints/{endpoint_name}
   ~ add_sub 透传 default_notify_endpoint
 
+web/templates/base.html
+  ~ TOAST_KEY_MAP 加 'subscription.endpoint_unknown': '通知端点不存在'
+
 tests/test_subscription_cli.py
   + add/remove endpoint 用例 + add_subscription 语法糖用例（含回滚）
 ```
 
-**总改动**：5 源文件 + 1 测试文件。`web/routes/subscriptions.py` 为重构（净行数减少约 60 行）。
+**总改动**：6 源文件 + 1 测试文件。`web/routes/subscriptions.py` 为重构（净行数减少约 60 行）。
 
 ### 4.2 core 层：新增函数签名
 
@@ -235,7 +238,14 @@ async def subscription_endpoint_add(
     )
 ```
 
-**新增 toast_key**：`subscription.endpoint_unknown`（未知 endpoint 时的错误提示）。如果 i18n 文件存在，需要同步加翻译键。
+**新增 toast_key**：`subscription.endpoint_unknown`（未知 endpoint 时的错误提示）。
+
+**toast_key 翻译机制**：trawler **不用标准 i18n 框架**，文案写死在 `web/templates/base.html:128-139` 的前端 JS `TOAST_KEY_MAP` 字典里（key → 中文文案）。新增 toast_key **必须同步在 `TOAST_KEY_MAP` 加一行**，否则前端 fallback 显示空字符串：
+
+```javascript
+// web/templates/base.html:128-139 附近，TOAST_KEY_MAP 内追加：
+'subscription.endpoint_unknown': '通知端点不存在',
+```
 
 **注意**：Web 路由路径仍是 `/subscriptions/{platform}/{identifier}/endpoints/add`（用 Web 短名 `bili/xhs/weibo`），与 API 路径 `/api/subscriptions/{platform}/...`（用全名）解耦。两条路径背后调用同一个 core 函数。
 
@@ -334,7 +344,7 @@ test_api_add_subscription_with_default # 语法糖完整流程
 | `load_config` 是 async，core 函数签名也要 async | 已有先例，`add_subscription` 已是 async |
 | tomlkit 写入时 inline_table vs table 格式差异 | 沿用 Web 路由现有做法，写入时统一转 list[str] |
 | 语法糖回滚需要双次写盘 | 可接受，正确性优先；订阅添加是低频操作 |
-| Web toast_key 新增 `endpoint_unknown` | 需要确认 i18n 翻译文件是否要同步加 |
+| 新增 toast_key 漏加到 `TOAST_KEY_MAP` | spec §4.6 已明确要求同步改 `web/templates/base.html`，验证清单加 grep 检查 |
 
 ## 9. 验证清单
 
@@ -372,4 +382,7 @@ curl -X DELETE http://localhost:8000/api/subscriptions/bilibili/123/endpoints/go
 
 # 4. 检查 toml 落盘
 cat config/subscriptions.toml
+
+# 5. 确认 toast_key 已加到前端字典
+grep 'subscription.endpoint_unknown' web/templates/base.html
 ```
