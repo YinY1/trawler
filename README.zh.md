@@ -88,6 +88,10 @@ trawler check --platform xhs
 
 # Check token status
 trawler token status
+
+# Fetch and process messages by ID (no subscription required, bypasses 24h window)
+trawler fetch --ids bili:BV1xx,xhs:note1,weibo:123
+trawler fetch --ids bili:BV1xx --skip-push
 ```
 
 ### 定时调度
@@ -103,7 +107,7 @@ Trawler 没有内置调度器 —— 检查由外部 cron 通过
 ### HTTP API
 
 Trawler 还对外暴露面向机器的 JSON HTTP API（`/api/v1`），方便外部
-bot / 脚本 / 自动化触发检查、查询消息、批量重跑、管理订阅 —— 无需依赖 cron
+bot / 脚本 / 自动化触发检查、查询消息、批量重跑、按 ID 抓取、管理订阅 —— 无需依赖 cron
 或 Web UI 点击。该 API 与 Web UI 共用同一个 FastAPI server（同端口），但
 使用 Bearer token 鉴权。
 
