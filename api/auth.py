@@ -25,6 +25,64 @@ from web.auth import AUTH_TOML_PATH, load_auth_config, save_auth_config
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════
+# Token scopes（spec §4）
+# ═══════════════════════════════════════════════════════════
+
+#: Scope 常量。命名规范 ``<resource>:<action>``，全小写单数资源名。
+#:
+#: 消费 scope（6 个，路由层校验）：
+SCOPE_SUBSCRIPTIONS_READ = "subscriptions:read"
+SCOPE_SUBSCRIPTIONS_WRITE = "subscriptions:write"
+SCOPE_MESSAGES_READ = "messages:read"
+SCOPE_MESSAGES_WRITE = "messages:write"
+SCOPE_CHECK_READ = "check:read"
+SCOPE_CHECK_RUN = "check:run"
+#:
+#: 占位 scope（spec §3、§12）。**本 PR 不在路由层消费**，
+#: 仅供未来 ``tokens:manage`` HTTP endpoint 或 CLI 校验白名单引用。
+SCOPE_TOKENS_MANAGE = "tokens:manage"
+
+#: 所有合法 scope（CLI ``--scope`` 白名单校验用）。包含 tokens:manage 占位。
+ALL_SCOPES: tuple[str, ...] = (
+    SCOPE_SUBSCRIPTIONS_READ,
+    SCOPE_SUBSCRIPTIONS_WRITE,
+    SCOPE_MESSAGES_READ,
+    SCOPE_MESSAGES_WRITE,
+    SCOPE_CHECK_READ,
+    SCOPE_CHECK_RUN,
+    SCOPE_TOKENS_MANAGE,
+)
+
+#: write → read 隐含规则映射（spec §4.3）。check:run / check:read 正交，不在此表。
+_WRITE_IMPLIES_READ: dict[str, str] = {
+    SCOPE_SUBSCRIPTIONS_WRITE: SCOPE_SUBSCRIPTIONS_READ,
+    SCOPE_MESSAGES_WRITE: SCOPE_MESSAGES_READ,
+}
+
+
+def scope_implies(granted: str, required: str) -> bool:
+    """判断 granted scope 是否满足 required（含 write→read 隐含）。
+
+    - ``granted == required`` → True
+    - granted 是某 resource 的 write，required 是同 resource read → True
+    - 其余（不同 resource、read→write、check:run↔check:read）→ False
+    """
+    if granted == required:
+        return True
+    return _WRITE_IMPLIES_READ.get(granted) == required
+
+
+def token_has_scope(token: ApiTokenEntry, required: str) -> bool:
+    """token 是否满足 required scope。
+
+    空 scopes（``[]``）= 全权限，永远返回 True（spec §5，仅运行时）。
+    非 list 遍历 granted scope，调 ``scope_implies`` 判断。
+    """
+    if not token.scopes:
+        return True
+    return any(scope_implies(g, required) for g in token.scopes)
+
 
 def _hash_token(plain: str) -> str:
     """SHA-256 hexdigest。Token 是高熵随机串，无需 argon2。"""

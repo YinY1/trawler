@@ -244,3 +244,66 @@ class TestScopesPersistence:
         create_token("bot", scopes=[])  # 显式空
         cfg = load_auth_config()  # 重新读
         assert cfg.api_tokens[0].scopes == []
+
+
+class TestScopeUtils:
+    """scope_implies / token_has_scope 纯函数用例（spec §4.3 / §4.4）。"""
+
+    def test_scope_implies_write_implies_read(self) -> None:
+        from api.auth import scope_implies
+
+        assert scope_implies("messages:write", "messages:read") is True
+        assert scope_implies("subscriptions:write", "subscriptions:read") is True
+
+    def test_scope_implies_read_does_not_imply_write(self) -> None:
+        from api.auth import scope_implies
+
+        assert scope_implies("messages:read", "messages:write") is False
+
+    def test_scope_implies_check_run_read_orthogonal(self) -> None:
+        """check:run 与 check:read 正交（spec §4.4）。"""
+        from api.auth import scope_implies
+
+        assert scope_implies("check:run", "check:read") is False
+        assert scope_implies("check:read", "check:run") is False
+
+    def test_scope_implies_different_resources(self) -> None:
+        from api.auth import scope_implies
+
+        assert scope_implies("messages:write", "subscriptions:read") is False
+        assert scope_implies("messages:read", "messages:read") is True
+
+    def test_token_has_scope_empty_scopes_means_full(self) -> None:
+        """token.scopes == [] → 任何 required 都放行（spec §5）。"""
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, "messages:read") is True
+        assert token_has_scope(token, "check:run") is True
+        assert token_has_scope(token, "subscriptions:write") is True
+
+    def test_token_has_scope_explicit_grant(self) -> None:
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(
+            name="x", token_hash="h", scopes=["messages:read"]
+        )
+        assert token_has_scope(token, "messages:read") is True
+
+    def test_token_has_scope_write_grants_read(self) -> None:
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(
+            name="x", token_hash="h", scopes=["messages:write"]
+        )
+        assert token_has_scope(token, "messages:read") is True  # 隐含
+        assert token_has_scope(token, "messages:write") is True
+
+    def test_token_has_scope_insufficient(self) -> None:
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(
+            name="x", token_hash="h", scopes=["messages:read"]
+        )
+        assert token_has_scope(token, "messages:write") is False
+        assert token_has_scope(token, "check:run") is False
