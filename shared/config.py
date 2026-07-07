@@ -251,11 +251,15 @@ class ApiTokenEntry:
 
     bot 友好的 HTTP API 鉴权用（``api/`` 包），存 SHA-256 hash 不存明文。
     与 ``EndpointConfig`` 同风格：所有字段无 default，dataclass 字段顺序灵活。
+
+    ``scopes`` 为空 list 表示拥有全部 scope（向后兼容老 token，spec §5）。
+    非 list 表示受限 —— 路由层通过 ``api.auth.require_scopes`` 强制校验。
     """
 
     name: str
     token_hash: str  # SHA-256 hexdigest
     created_at: float = 0.0  # unix ts；默认 0.0 允许老数据/手工编辑兼容
+    scopes: list[str] = field(default_factory=list)
 
 
 @dataclass

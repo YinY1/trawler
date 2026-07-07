@@ -56,10 +56,16 @@ async def require_token(request: Request) -> str:
     raise HTTPException(status_code=401, detail="invalid or missing token")
 
 
-def create_token(name: str, auth_path: Path = AUTH_TOML_PATH) -> str:
+def create_token(
+    name: str,
+    scopes: list[str] | None = None,
+    auth_path: Path = AUTH_TOML_PATH,
+) -> str:
     """生成新 token，hash 后存 ``data/auth.toml``，返回明文（仅此一次）。
 
-    同名 token 覆盖（先删后加），保证唯一性。``auth_path`` 参数供测试 monkeypatch。
+    同名 token 覆盖（先删后加），保证唯一性。
+    ``scopes`` 为 None 或空 list → 空 list 落盘（= 全权限，spec §5）。
+    ``auth_path`` 参数供测试 monkeypatch。
     """
     plain = secrets.token_urlsafe(32)
     cfg = load_auth_config()
@@ -69,6 +75,7 @@ def create_token(name: str, auth_path: Path = AUTH_TOML_PATH) -> str:
             name=name,
             token_hash=_hash_token(plain),
             created_at=datetime.now(timezone.utc).timestamp(),
+            scopes=list(scopes) if scopes else [],
         )
     )
     save_auth_config(cfg)

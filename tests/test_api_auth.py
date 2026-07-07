@@ -185,3 +185,62 @@ class TestCreateRevokeToken:
 
         cfg = load_auth_config()
         assert cfg.api_tokens == []
+
+
+class TestScopesPersistence:
+    """scopes 字段持久化用例（spec §7）。"""
+
+    def test_create_token_with_scopes_persists(
+        self, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        plain = create_token(
+            "scoped-bot", scopes=["messages:read", "check:read"]
+        )
+        assert plain  # 明文非空
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 1
+        entry = cfg.api_tokens[0]
+        assert entry.name == "scoped-bot"
+        assert entry.scopes == ["messages:read", "check:read"]
+
+    def test_create_token_without_scopes_defaults_empty(
+        self, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        create_token("legacy-bot")  # 不传 scopes
+        cfg = load_auth_config()
+        assert cfg.api_tokens[0].scopes == []
+
+    def test_old_auth_toml_without_scopes_loads_as_empty(self, auth_path: Path) -> None:
+        """手写老格式 auth.toml（无 scopes 字段）→ 加载后 scopes == []。
+
+        验证向后兼容（spec §5.1）。
+        """
+        # 手写一条无 scopes 字段的 token
+        auth_path.write_text(
+            '[[api_tokens]]\n'
+            'name = "legacy"\n'
+            f'token_hash = "{"a" * 64}"\n'
+            "created_at = 1717500000.0\n",
+            encoding="utf-8",
+        )
+        from web.auth import load_auth_config
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 1
+        assert cfg.api_tokens[0].scopes == []
+
+    def test_empty_scopes_round_trip_through_toml(self, auth_path: Path) -> None:
+        """scopes == [] 的 token 写盘再读回仍是 []（不被 tomlkit 丢失）。"""
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        create_token("bot", scopes=[])  # 显式空
+        cfg = load_auth_config()  # 重新读
+        assert cfg.api_tokens[0].scopes == []

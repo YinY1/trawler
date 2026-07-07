@@ -86,6 +86,7 @@ def load_auth_config() -> WebAuthConfig:
             name=t["name"],
             token_hash=t["token_hash"],
             created_at=t.get("created_at", 0.0),
+            scopes=list(t.get("scopes", [])),
         )
         for t in api_tokens_raw
         if isinstance(t, dict) and "name" in t and "token_hash" in t
@@ -115,6 +116,11 @@ def save_auth_config(cfg: WebAuthConfig) -> None:
         entry["name"] = t.name
         entry["token_hash"] = t.token_hash
         entry["created_at"] = t.created_at
+        # tomlkit: 显式 array，避免空 list 被丢失
+        scopes_arr = tomlkit.array()
+        for s in t.scopes:
+            scopes_arr.append(s)
+        entry["scopes"] = scopes_arr
         tokens_aot.append(entry)
     # tomlkit：空 AoT 也要写出 `[[api_tokens]]` 段会让 tomlkit dumps 出空 AoT,
     # 但 cfg.api_tokens 为空时跳过写 doc["api_tokens"]，避免无意义空段。
