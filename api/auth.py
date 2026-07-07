@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException, Request
+from fastapi.security import SecurityScopes
 
 from shared.config import ApiTokenEntry
 from web.auth import AUTH_TOML_PATH, load_auth_config, save_auth_config
@@ -110,6 +111,43 @@ async def require_token(request: Request) -> str:
     cfg = load_auth_config()
     for entry in cfg.api_tokens:
         if _verify_token(plain, entry.token_hash):
+            return entry.name
+    raise HTTPException(status_code=401, detail="invalid or missing token")
+
+
+async def require_scopes(
+    security_scopes: SecurityScopes,
+    request: Request,
+) -> str:
+    """FastAPI 依赖：校验 ``Authorization: Bearer`` + 所需 scope（spec §6）。
+
+    用 ``Security(require_scopes, scopes=[...])`` 挂到路由，FastAPI 自动：
+    - 把 scope 列表注入 ``security_scopes.scopes``
+    - 在 OpenAPI docs 渲染 security 字段（redoc / swagger UI 直接可见）
+
+    错误码语义：
+    - 无 header / 格式错 / token 不匹配 → 401（与 ``require_token`` 一致）
+    - token 合法但缺 scope → 403 ``insufficient scope: requires xxx``
+    - 通过 → 返回 token name（供日志/审计）
+
+    特殊情况：
+    - ``security_scopes.scopes == ()``（路由不要求 scope）→ 行为等价 ``require_token``
+    - ``token.scopes == []``（空 list）= 全权限（spec §5），任何 required 都放行
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="invalid or missing token")
+    plain = auth[len("Bearer ") :]
+    cfg = load_auth_config()
+    for entry in cfg.api_tokens:
+        if _verify_token(plain, entry.token_hash):
+            # 身份通过，校验 scope
+            for required in security_scopes.scopes:
+                if not token_has_scope(entry, required):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"insufficient scope: requires {required}",
+                    )
             return entry.name
     raise HTTPException(status_code=401, detail="invalid or missing token")
 

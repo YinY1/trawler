@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from shared.config import ApiTokenEntry
 from web.auth import set_password
 
 PASSWORD = "test12345"
@@ -307,3 +308,114 @@ class TestScopeUtils:
         )
         assert token_has_scope(token, "messages:write") is False
         assert token_has_scope(token, "check:run") is False
+
+
+class TestRequireScopes:
+    """require_scopes FastAPI 依赖用例（spec §6）。
+
+    通过 FastAPI TestClient 或直接 async 调测试。直接 async 调更轻量，
+    与现有 TestRequireToken 风格一致。
+    """
+
+    @pytest.fixture
+    def token_entry(self, auth_path: Path) -> tuple[str, ApiTokenEntry]:
+        """返回 (明文 token, ApiTokenEntry)。"""
+        from api.auth import ApiTokenEntry, create_token
+
+        plain = create_token("scoped", scopes=["messages:read"])
+        return plain, ApiTokenEntry(
+            name="scoped",
+            token_hash="",  # 不用，require_scopes 内部读 auth.toml
+            scopes=["messages:read"],
+        )
+
+    def _make_request(self, token: str | None) -> SimpleNamespace:
+        headers = {}
+        if token is not None:
+            headers["authorization"] = f"Bearer {token}"
+        return SimpleNamespace(headers=headers)
+
+    async def test_no_header_returns_401(self, auth_path: Path) -> None:
+        from fastapi.security import SecurityScopes
+
+        from api.auth import require_scopes
+
+        security = SecurityScopes(scopes=["messages:read"])
+        request = self._make_request(None)
+        with pytest.raises(HTTPException) as exc:
+            await require_scopes(security, request)
+        assert exc.value.status_code == 401
+        assert "token" in exc.value.detail
+
+    async def test_invalid_token_returns_401(
+        self, auth_path: Path
+    ) -> None:
+        from fastapi.security import SecurityScopes
+
+        from api.auth import require_scopes
+
+        security = SecurityScopes(scopes=["messages:read"])
+        request = self._make_request("not-a-real-token")
+        with pytest.raises(HTTPException) as exc:
+            await require_scopes(security, request)
+        assert exc.value.status_code == 401
+
+    async def test_insufficient_scope_returns_403(
+        self, auth_path: Path
+    ) -> None:
+        """token 有 messages:read，访问 messages:write → 403。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("limited", scopes=["messages:read"])
+        security = SecurityScopes(scopes=["messages:write"])
+        request = self._make_request(plain)
+        with pytest.raises(HTTPException) as exc:
+            await require_scopes(security, request)
+        assert exc.value.status_code == 403
+        assert "scope" in exc.value.detail.lower()
+
+    async def test_sufficient_scope_passes(
+        self, auth_path: Path
+    ) -> None:
+        """token 有 messages:write，访问 messages:read（隐含）→ 放行返 token name。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("writer", scopes=["messages:write"])
+        security = SecurityScopes(scopes=["messages:read"])
+        request = self._make_request(plain)
+        name = await require_scopes(security, request)
+        assert name == "writer"
+
+    async def test_empty_scopes_token_passes_any(
+        self, auth_path: Path
+    ) -> None:
+        """空 scope token = 全权限，任何 required scope 都放行（spec §5）。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("admin-like")  # 不传 scopes → []
+        for req in ["messages:read", "messages:write", "check:run",
+                    "subscriptions:write"]:
+            security = SecurityScopes(scopes=[req])
+            request = self._make_request(plain)
+            name = await require_scopes(security, request)
+            assert name == "admin-like"
+
+    async def test_empty_security_scopes_acts_like_require_token(
+        self, auth_path: Path
+    ) -> None:
+        """路由不要求 scope（SecurityScopes.scopes == ()）→ 只校验身份。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("any-bot", scopes=["messages:read"])
+        security = SecurityScopes(scopes=[])  # 路由不要求 scope
+        request = self._make_request(plain)
+        name = await require_scopes(security, request)
+        assert name == "any-bot"
