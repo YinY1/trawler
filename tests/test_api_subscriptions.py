@@ -374,3 +374,92 @@ class TestAddSubscriptionWithDefault:
         mock_add.assert_awaited_once_with(
             "bili", "123", "UP1", default_notify_endpoint=None
         )
+
+
+# ── scope 校验（spec §10.2）──────────────────────────────────────────
+
+
+@pytest.fixture
+async def scoped_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 scope 的 client（与 ``tests/test_api_check.py::scoped_client`` 同模式）。"""
+    scopes = request.param
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+
+    app = create_app()
+    plain = create_token("scoped-bot", scopes=scopes)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        yield c
+
+
+class TestSubscriptionsScopes:
+    """subscriptions 路由 scope 校验。"""
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["messages:read"]], indirect=True
+    )
+    async def test_list_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        resp = await scoped_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 403
+        assert "subscriptions:read" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["subscriptions:read"]], indirect=True
+    )
+    async def test_add_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        """read 不隐含 write（spec §4.3）。"""
+        resp = await scoped_client.post(
+            "/api/v1/subscriptions",
+            json={"platform": "bilibili", "identifier": "123", "name": "UP"},
+        )
+        assert resp.status_code == 403
+        assert "subscriptions:write" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["subscriptions:read"]], indirect=True
+    )
+    async def test_remove_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        resp = await scoped_client.delete(
+            "/api/v1/subscriptions/bilibili/123"
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["subscriptions:read"]], indirect=True
+    )
+    async def test_bind_endpoint_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        resp = await scoped_client.post(
+            "/api/v1/subscriptions/bilibili/123/endpoints",
+            json={"endpoint_name": "gotify-main"},
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["subscriptions:read"]], indirect=True
+    )
+    async def test_unbind_endpoint_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        resp = await scoped_client.delete(
+            "/api/v1/subscriptions/bilibili/123/endpoints/gotify-main"
+        )
+        assert resp.status_code == 403
