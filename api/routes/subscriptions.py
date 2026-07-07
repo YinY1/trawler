@@ -5,7 +5,7 @@
 - ``POST /subscriptions`` → ``add_subscription``
 - ``DELETE /subscriptions/{platform}/{identifier}`` → ``remove_subscription``
 
-鉴权统一走 ``Depends(require_token)``。``add_subscription`` / ``remove_subscription``
+鉴权统一走 ``Security(require_scopes, scopes=[...])``。``add_subscription`` / ``remove_subscription``
 返回 ``(False, ...)`` 视为业务正常响应（200 + ``success=False``），不抛 HTTPException
 —— 重复 / 未找到是订阅管理的常见态，调用方靠 ``success`` 字段判断，不靠状态码。
 """
@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request, Security
 
-from api.auth import require_token
+from api.auth import require_scopes
 from api.schemas import (
     EndpointBindRequest,
     SubscriptionAddRequest,
@@ -40,7 +40,7 @@ router = APIRouter()
 async def list_subs(
     request: Request,
     platform: str | None = Query(default=None, description="按平台过滤 (bili/xhs/weibo)"),
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["subscriptions:read"]),
 ) -> SubscriptionListResponse:
     """列出订阅，可选 platform 过滤。透传 ``list_subscriptions`` 原始 dict。"""
     result = await list_subscriptions(platform=platform)
@@ -51,7 +51,7 @@ async def list_subs(
 async def add_sub(
     body: SubscriptionAddRequest,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
 ) -> SubscriptionAddResponse:
     """添加订阅。
 
@@ -76,7 +76,7 @@ async def remove_sub(
     platform: str,
     identifier: str,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
 ) -> SubscriptionRemoveResponse:
     """删除订阅。
 
@@ -100,7 +100,7 @@ async def bind_endpoint(
     identifier: str,
     body: EndpointBindRequest,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
 ) -> SubscriptionAddResponse:
     """绑定 endpoint 到订阅。
 
@@ -127,7 +127,7 @@ async def unbind_endpoint(
     identifier: str,
     endpoint_name: str,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
 ) -> SubscriptionAddResponse:
     """解绑 endpoint。订阅不存在返回 ``success=False``，其余（含幂等）返回 True。
 

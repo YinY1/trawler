@@ -2,7 +2,7 @@
 
 与 ``web/routes/check.py`` 的 ``/check`` 系列对称，但面向机器调用：
 - 全程 JSON（request body / response），不走 form-encoded
-- 鉴权走 ``Depends(require_token)``（``Authorization: Bearer``），不依赖 session
+- 鉴权走 ``Security(require_scopes, scopes=[...])``（``Authorization: Bearer``），不依赖 session
 - 触发后台 run 后立即返回 ``task_id``（uuid4），客户端轮询 status / 订阅 SSE
 
 **与 Web UI 共享互斥锁**：``state.check_running`` 与 Web UI 的 ``POST /check/run``
@@ -22,10 +22,10 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Security
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from api.auth import require_token
+from api.auth import require_scopes
 from api.schemas import CheckRunRequest, CheckRunResponse, CheckStatusResponse
 from core.engine import PipelineEngine
 from core.pipeline import run_check_once
@@ -43,7 +43,7 @@ router = APIRouter()
 async def check_run(
     body: CheckRunRequest,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["check:run"]),
 ) -> CheckRunResponse:
     """触发一次检查（全量 or 手动），后台 ``asyncio.create_task`` 执行。
 
@@ -164,7 +164,7 @@ async def check_run(
 @router.get("/check/status", response_model=CheckStatusResponse)
 async def check_status(
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["check:read"]),
 ) -> CheckStatusResponse:
     """当前 run 的状态快照。
 
@@ -186,11 +186,11 @@ async def check_status(
 @router.get("/check/stream")
 async def check_stream(
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["check:read"]),
 ) -> StreamingResponse:
     """SSE 日志流，与 Web UI ``GET /check/stream`` 同源（复用 ``state.subscribers``）。
 
-    鉴权走 ``Authorization: Bearer`` header（``Depends(require_token)``），
+    鉴权走 ``Authorization: Bearer`` header（``Security(require_scopes)``），
     无 token → 401 JSON，不是 SSE 流。bot 触发 run 时浏览器开着 Web UI 也会看到
     同一份 SSE 流（特性，非 bug）。
     """
