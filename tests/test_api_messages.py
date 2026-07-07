@@ -386,3 +386,86 @@ class TestRerunMessages:
             await asyncio.sleep(0.05)
         assert app.state.check_running is False, "rerun 未释放 check_running 锁"
         assert app.state.api_task_id is None
+
+
+# ═══════════════════════════════════════════════════════════
+# scope 校验（spec §10.2）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def scoped_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 scope 的 client（与 ``tests/test_api_check.py::scoped_client`` 同模式）。"""
+    scopes = request.param
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+
+    app = create_app()
+    plain = create_token("scoped-bot", scopes=scopes)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        c._app = app  # type: ignore[attr-defined]
+        yield c
+
+
+class TestMessagesScopes:
+    """messages 路由 scope 校验。"""
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["check:read"]], indirect=True
+    )
+    async def test_list_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        resp = await scoped_client.get("/api/v1/messages")
+        assert resp.status_code == 403
+        assert "messages:read" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["check:read"]], indirect=True
+    )
+    async def test_get_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        resp = await scoped_client.get("/api/v1/messages/some-id")
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["messages:read"]], indirect=True
+    )
+    async def test_rerun_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        """messages:read 不隐含 messages:write（spec §4.3）。"""
+        resp = await scoped_client.post(
+            "/api/v1/messages/rerun",
+            json={"mode": "all"},
+        )
+        assert resp.status_code == 403
+        assert "messages:write" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["messages:read"]], indirect=True
+    )
+    async def test_fetch_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        """messages:read 不隐含 messages:write（spec §4.3）。
+
+        fetch 路由在 messages.py:271，也要求 messages:write。
+        """
+        resp = await scoped_client.post(
+            "/api/v1/messages/fetch",
+            json={"platform": "bilibili", "msg_ids": ["123"]},
+        )
+        assert resp.status_code == 403

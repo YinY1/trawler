@@ -22,10 +22,10 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Security
 from fastapi.responses import JSONResponse
 
-from api.auth import require_token
+from api.auth import require_scopes
 from api.schemas import (
     FetchRequest,
     FetchResponse,
@@ -100,7 +100,7 @@ async def list_messages(
     author: str | None = Query(None),
     platform: str | None = Query(None),
     phase: str | None = Query(None),
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["messages:read"]),
 ) -> MessageListResponse:
     """多维度筛选消息。
 
@@ -147,7 +147,7 @@ async def list_messages(
 async def get_message(
     msg_id: str,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["messages:read"]),
 ) -> MessageOut:
     """单条消息详情。不存在 → 404 ``{"detail": "message not found"}``。"""
     cfg = await load_config()
@@ -167,7 +167,7 @@ async def get_message(
 async def rerun_messages(
     body: RerunRequest,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["messages:write"]),
 ) -> RerunResponse | JSONResponse:
     """批量重跑指定消息。
 
@@ -272,7 +272,7 @@ async def rerun_messages(
 async def fetch_messages(
     body: FetchRequest,
     request: Request,
-    _token_name: str = Depends(require_token),
+    _token_name: str = Security(require_scopes, scopes=["messages:write"]),
 ) -> FetchResponse | JSONResponse:
     """按 ID 抓取并处理（不依赖订阅）。
 

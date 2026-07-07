@@ -6,7 +6,7 @@
 （bot 关心服务存活，不关心构建元数据）。
 
 无鉴权：``/api/*`` 整段在 ``web/app.py:_PUBLIC_PREFIXES`` 与 ``csrf_guard``
-入口判断中被豁免（见 ``web/app.py``）；本路由也不挂 ``Depends(require_token)``，
+入口判断中被豁免（见 ``web/app.py``）；本路由也不挂 ``Depends(require_scopes)``，
 所以无需任何凭证即可访问。
 """
 

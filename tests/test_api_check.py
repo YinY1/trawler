@@ -286,3 +286,79 @@ class TestCheckStream:
                 assert "text/event-stream" in resp.headers.get("content-type", "")
         finally:
             await producer_task
+
+
+# ═══════════════════════════════════════════════════════════
+# scope 校验（spec §10.2）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def scoped_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 scope 的 client。
+
+    用法: ``client = await scoped_client(["messages:read"])``
+    通过 ``request.param`` 传 scope 列表（pytest indirect）。
+    """
+    scopes = request.param
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+
+    app = create_app()
+    plain = create_token("scoped-bot", scopes=scopes)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        c._app = app  # type: ignore[attr-defined]
+        yield c
+
+
+class TestCheckScopes:
+    """check 路由 scope 校验（spec §10.2）。"""
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["messages:read"]], indirect=True
+    )
+    async def test_run_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        """token 只有 messages:read，访问 /check/run → 403。"""
+        resp = await scoped_client.post(
+            "/api/v1/check/run", json={"mode": "full"}
+        )
+        assert resp.status_code == 403
+        assert "scope" in resp.json()["detail"].lower()
+        assert "check:run" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["check:run"]], indirect=True
+    )
+    async def test_status_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        """token 只有 check:run（正交），访问 /check/status → 403。
+
+        spec §4.4: check:run / check:read 正交，不互相隐含。
+        """
+        resp = await scoped_client.get("/api/v1/check/status")
+        assert resp.status_code == 403
+        assert "check:read" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "scoped_client", [["check:run"]], indirect=True
+    )
+    async def test_stream_insufficient_scope_returns_403(
+        self, scoped_client: AsyncClient
+    ) -> None:
+        """token 只有 check:run，访问 /check/stream → 403。"""
+        resp = await scoped_client.get("/api/v1/check/stream")
+        assert resp.status_code == 403

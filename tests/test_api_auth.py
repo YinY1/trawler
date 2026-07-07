@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from shared.config import ApiTokenEntry
 from web.auth import set_password
 
 PASSWORD = "test12345"
@@ -185,3 +186,236 @@ class TestCreateRevokeToken:
 
         cfg = load_auth_config()
         assert cfg.api_tokens == []
+
+
+class TestScopesPersistence:
+    """scopes 字段持久化用例（spec §7）。"""
+
+    def test_create_token_with_scopes_persists(
+        self, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        plain = create_token(
+            "scoped-bot", scopes=["messages:read", "check:read"]
+        )
+        assert plain  # 明文非空
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 1
+        entry = cfg.api_tokens[0]
+        assert entry.name == "scoped-bot"
+        assert entry.scopes == ["messages:read", "check:read"]
+
+    def test_create_token_without_scopes_defaults_empty(
+        self, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        create_token("legacy-bot")  # 不传 scopes
+        cfg = load_auth_config()
+        assert cfg.api_tokens[0].scopes == []
+
+    def test_old_auth_toml_without_scopes_loads_as_empty(self, auth_path: Path) -> None:
+        """手写老格式 auth.toml（无 scopes 字段）→ 加载后 scopes == []。
+
+        验证向后兼容（spec §5.1）。
+        """
+        # 手写一条无 scopes 字段的 token
+        auth_path.write_text(
+            '[[api_tokens]]\n'
+            'name = "legacy"\n'
+            f'token_hash = "{"a" * 64}"\n'
+            "created_at = 1717500000.0\n",
+            encoding="utf-8",
+        )
+        from web.auth import load_auth_config
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 1
+        assert cfg.api_tokens[0].scopes == []
+
+    def test_empty_scopes_round_trip_through_toml(self, auth_path: Path) -> None:
+        """scopes == [] 的 token 写盘再读回仍是 []（不被 tomlkit 丢失）。"""
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        create_token("bot", scopes=[])  # 显式空
+        cfg = load_auth_config()  # 重新读
+        assert cfg.api_tokens[0].scopes == []
+
+
+class TestScopeUtils:
+    """scope_implies / token_has_scope 纯函数用例（spec §4.3 / §4.4）。"""
+
+    def test_scope_implies_write_implies_read(self) -> None:
+        from api.auth import scope_implies
+
+        assert scope_implies("messages:write", "messages:read") is True
+        assert scope_implies("subscriptions:write", "subscriptions:read") is True
+
+    def test_scope_implies_read_does_not_imply_write(self) -> None:
+        from api.auth import scope_implies
+
+        assert scope_implies("messages:read", "messages:write") is False
+
+    def test_scope_implies_check_run_read_orthogonal(self) -> None:
+        """check:run 与 check:read 正交（spec §4.4）。"""
+        from api.auth import scope_implies
+
+        assert scope_implies("check:run", "check:read") is False
+        assert scope_implies("check:read", "check:run") is False
+
+    def test_scope_implies_different_resources(self) -> None:
+        from api.auth import scope_implies
+
+        assert scope_implies("messages:write", "subscriptions:read") is False
+        assert scope_implies("messages:read", "messages:read") is True
+
+    def test_token_has_scope_empty_scopes_means_full(self) -> None:
+        """token.scopes == [] → 任何 required 都放行（spec §5）。"""
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, "messages:read") is True
+        assert token_has_scope(token, "check:run") is True
+        assert token_has_scope(token, "subscriptions:write") is True
+
+    def test_token_has_scope_explicit_grant(self) -> None:
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(
+            name="x", token_hash="h", scopes=["messages:read"]
+        )
+        assert token_has_scope(token, "messages:read") is True
+
+    def test_token_has_scope_write_grants_read(self) -> None:
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(
+            name="x", token_hash="h", scopes=["messages:write"]
+        )
+        assert token_has_scope(token, "messages:read") is True  # 隐含
+        assert token_has_scope(token, "messages:write") is True
+
+    def test_token_has_scope_insufficient(self) -> None:
+        from api.auth import ApiTokenEntry, token_has_scope
+
+        token = ApiTokenEntry(
+            name="x", token_hash="h", scopes=["messages:read"]
+        )
+        assert token_has_scope(token, "messages:write") is False
+        assert token_has_scope(token, "check:run") is False
+
+
+class TestRequireScopes:
+    """require_scopes FastAPI 依赖用例（spec §6）。
+
+    通过 FastAPI TestClient 或直接 async 调测试。直接 async 调更轻量，
+    与现有 TestRequireToken 风格一致。
+    """
+
+    @pytest.fixture
+    def token_entry(self, auth_path: Path) -> tuple[str, ApiTokenEntry]:
+        """返回 (明文 token, ApiTokenEntry)。"""
+        from api.auth import ApiTokenEntry, create_token
+
+        plain = create_token("scoped", scopes=["messages:read"])
+        return plain, ApiTokenEntry(
+            name="scoped",
+            token_hash="",  # 不用，require_scopes 内部读 auth.toml
+            scopes=["messages:read"],
+        )
+
+    def _make_request(self, token: str | None) -> SimpleNamespace:
+        headers = {}
+        if token is not None:
+            headers["authorization"] = f"Bearer {token}"
+        return SimpleNamespace(headers=headers)
+
+    async def test_no_header_returns_401(self, auth_path: Path) -> None:
+        from fastapi.security import SecurityScopes
+
+        from api.auth import require_scopes
+
+        security = SecurityScopes(scopes=["messages:read"])
+        request = self._make_request(None)
+        with pytest.raises(HTTPException) as exc:
+            await require_scopes(security, request)
+        assert exc.value.status_code == 401
+        assert "token" in exc.value.detail
+
+    async def test_invalid_token_returns_401(
+        self, auth_path: Path
+    ) -> None:
+        from fastapi.security import SecurityScopes
+
+        from api.auth import require_scopes
+
+        security = SecurityScopes(scopes=["messages:read"])
+        request = self._make_request("not-a-real-token")
+        with pytest.raises(HTTPException) as exc:
+            await require_scopes(security, request)
+        assert exc.value.status_code == 401
+
+    async def test_insufficient_scope_returns_403(
+        self, auth_path: Path
+    ) -> None:
+        """token 有 messages:read，访问 messages:write → 403。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("limited", scopes=["messages:read"])
+        security = SecurityScopes(scopes=["messages:write"])
+        request = self._make_request(plain)
+        with pytest.raises(HTTPException) as exc:
+            await require_scopes(security, request)
+        assert exc.value.status_code == 403
+        assert "scope" in exc.value.detail.lower()
+
+    async def test_sufficient_scope_passes(
+        self, auth_path: Path
+    ) -> None:
+        """token 有 messages:write，访问 messages:read（隐含）→ 放行返 token name。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("writer", scopes=["messages:write"])
+        security = SecurityScopes(scopes=["messages:read"])
+        request = self._make_request(plain)
+        name = await require_scopes(security, request)
+        assert name == "writer"
+
+    async def test_empty_scopes_token_passes_any(
+        self, auth_path: Path
+    ) -> None:
+        """空 scope token = 全权限，任何 required scope 都放行（spec §5）。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("admin-like")  # 不传 scopes → []
+        for req in ["messages:read", "messages:write", "check:run",
+                    "subscriptions:write"]:
+            security = SecurityScopes(scopes=[req])
+            request = self._make_request(plain)
+            name = await require_scopes(security, request)
+            assert name == "admin-like"
+
+    async def test_empty_security_scopes_acts_like_require_token(
+        self, auth_path: Path
+    ) -> None:
+        """路由不要求 scope（SecurityScopes.scopes == ()）→ 只校验身份。"""
+        from fastapi.security import SecurityScopes
+
+        from api.auth import create_token, require_scopes
+
+        plain = create_token("any-bot", scopes=["messages:read"])
+        security = SecurityScopes(scopes=[])  # 路由不要求 scope
+        request = self._make_request(plain)
+        name = await require_scopes(security, request)
+        assert name == "any-bot"
