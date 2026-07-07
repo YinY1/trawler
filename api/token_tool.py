@@ -47,8 +47,31 @@ def cli() -> None:
 @cli.command()
 @click.argument("name")
 @click.option("--force", is_flag=True, help="覆盖同名 token")
-def create(name: str, force: bool) -> None:
-    """生成新 token，明文仅打印一次（存储为 SHA-256 hash，无法恢复）。"""
+@click.option(
+    "--scope",
+    "scopes",
+    multiple=True,
+    help="限制 token scope（可多次指定，如 --scope messages:read --scope check:read）。"
+    "不指定 = 全权限。合法 scope 见 ALL_SCOPES 常量。",
+)
+def create(name: str, force: bool, scopes: tuple[str, ...]) -> None:
+    """生成新 token，明文仅打印一次（存储为 SHA-256 hash，无法恢复）。
+
+    ``--scope`` 可多次指定，限制 token 可访问的 API 范围（spec §4）。
+    不传 ``--scope`` → 全权限 token（向后兼容老 bot，但建议生产环境显式收紧）。
+    """
+    from api.auth import ALL_SCOPES
+
+    # scope 白名单校验（防拼写错误）
+    invalid = [s for s in scopes if s not in ALL_SCOPES]
+    if invalid:
+        console.print(
+            f"[red]✗[/] 未知 scope: {', '.join(invalid)}",
+            style="red",
+        )
+        console.print(f"[dim]合法 scope: {', '.join(ALL_SCOPES)}[/]")
+        sys.exit(1)
+
     if _token_exists(name) and not force:
         console.print(
             f"[red]✗[/] token '{name}' 已存在，加 --force 覆盖",
@@ -56,10 +79,19 @@ def create(name: str, force: bool) -> None:
         )
         sys.exit(1)
 
-    plain = create_token(name)
+    scope_list = list(scopes)
+    plain = create_token(name, scopes=scope_list)
     console.print(f"[green]✓[/] 已创建 token '{name}'，明文（仅此一次）：")
     console.print(f"[yellow]{plain}[/]")
     console.print("[dim]存储为 SHA-256 hash，后续无法再查看明文。[/]")
+    if scope_list:
+        console.print(f"[cyan]📝[/] Scopes: {', '.join(scope_list)}")
+    else:
+        console.print(
+            "[yellow]⚠️[/] 未指定 scope = [bold]无限制[/]（全权限）。"
+            " 建议生产环境用 --scope 显式收紧。",
+            style="yellow",
+        )
 
 
 @cli.command("list")
@@ -74,9 +106,14 @@ def list_cmd() -> None:
     table.add_column("Name")
     table.add_column("Hash (前 8 位)")
     table.add_column("Created At")
+    table.add_column("Scopes")
     for t in cfg.api_tokens:
         created = datetime.fromtimestamp(t.created_at).strftime("%Y-%m-%d %H:%M")
-        table.add_row(t.name, t.token_hash[:8], created)
+        if t.scopes:
+            scopes_str = ", ".join(t.scopes)
+        else:
+            scopes_str = "(无限制)"
+        table.add_row(t.name, t.token_hash[:8], created, scopes_str)
     console.print(table)
 
 

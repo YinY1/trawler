@@ -170,3 +170,88 @@ class TestEndToEnd:
         request = SimpleNamespace(headers={"authorization": f"Bearer {plain}"})
         name = await require_token(request)
         assert name == "mybot"
+
+
+# ── create --scope ──────────────────────────────────────────────
+
+
+class TestCreateWithScopes:
+    def test_create_with_scopes_persists(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from web.auth import load_auth_config
+
+        result = runner.invoke(
+            cli,
+            [
+                "create", "notifier",
+                "--scope", "messages:read",
+                "--scope", "check:read",
+            ],
+        )
+        assert result.exit_code == 0
+        cfg = load_auth_config()
+        assert cfg.api_tokens[0].scopes == ["messages:read", "check:read"]
+
+    def test_create_without_scope_warns_unrestricted(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """不带 --scope → 全权限，输出警告（spec §5.3）。"""
+        result = runner.invoke(cli, ["create", "bot"])
+        assert result.exit_code == 0
+        # 警告文本含「无限制」或「unrestricted」
+        assert "无限制" in result.output or "unrestricted" in result.output.lower()
+
+    def test_create_with_invalid_scope_fails(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """--scope xxx 不在白名单 → 退出码非 0，不落盘。"""
+        result = runner.invoke(
+            cli, ["create", "bot", "--scope", "messages:delete"]
+        )
+        assert result.exit_code != 0
+        assert "scope" in result.output.lower() or "未知" in result.output
+
+        from web.auth import load_auth_config
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 0  # 未落盘
+
+    def test_create_with_tokens_manage_placeholder_ok(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """tokens:manage 占位常量也应通过白名单校验（虽然路由不消费）。"""
+        result = runner.invoke(
+            cli, ["create", "bot", "--scope", "tokens:manage"]
+        )
+        assert result.exit_code == 0
+
+
+# ── list with scopes ────────────────────────────────────────────
+
+
+class TestListWithScopes:
+    def test_list_shows_unrestricted_for_empty_scopes(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+
+        create_token("admin-bot")  # 空 scope
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "admin-bot" in result.output
+        assert "无限制" in result.output or "unrestricted" in result.output.lower()
+
+    def test_list_shows_scope_list(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+
+        create_token(
+            "notifier", scopes=["messages:read", "check:read"]
+        )
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        out = result.output
+        assert "notifier" in out
+        assert "messages:read" in out
+        assert "check:read" in out
