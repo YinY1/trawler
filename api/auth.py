@@ -1,7 +1,10 @@
 """API token 鉴权 — ``Authorization: Bearer <token>``。
 
 与 Web UI 的 session/CSRF 鉴权完全隔离（中间件层对 ``/api/*`` 豁免，
-本模块通过 FastAPI 依赖 ``require_token`` 在路由层兜底鉴权）。
+本模块通过 FastAPI 依赖 ``require_scopes`` 在路由层兜底鉴权 + scope 校验：
+所有 12 个生产路由均挂 ``Security(require_scopes, scopes=[...])``）。
+``require_token`` 保留作为测试桩，以及未来「不要求 scope」路由的等价依赖
+（行为等价于 ``Security(require_scopes)`` 不传 scopes，见其 docstring）。
 
 存储：``data/auth.toml`` 的 ``[[api_tokens]]`` AoT，复用 ``web/auth.py`` 的
 ``load_auth_config`` / ``save_auth_config`` 读写（同文件，与 admin 密码共管）。
