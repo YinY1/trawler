@@ -714,3 +714,45 @@ class TestGetResourceFilter:
         # 关键路由仍存在（重构没破坏路由注册）
         assert "/api/v1/messages" in paths
         assert "get" in paths["/api/v1/messages"]
+
+
+# ═══════════════════════════════════════════════════════════
+# token_has_scope 空 scopes 语义（issue #108 破坏性变更）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestTokenHasScopeEmptyScopes:
+    """#108 后空 scopes 不再 = 全权限（spec §6.2）。"""
+
+    def test_empty_scopes_denies_messages_read(self) -> None:
+        """空 scopes token 对 messages:read 返回 False（#105 是 True，#108 改 False）。"""
+        from api.auth import SCOPE_MESSAGES_READ, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, SCOPE_MESSAGES_READ) is False
+
+    def test_empty_scopes_denies_subscriptions_write(self) -> None:
+        from api.auth import SCOPE_SUBSCRIPTIONS_WRITE, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, SCOPE_SUBSCRIPTIONS_WRITE) is False
+
+    def test_empty_scopes_denies_tokens_manage(self) -> None:
+        """空 scopes 连 tokens:manage 都没有 → 不是 superuser。"""
+        from api.auth import SCOPE_TOKENS_MANAGE, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, SCOPE_TOKENS_MANAGE) is False
+
+    def test_tokens_manage_grants_superuser_scope(self) -> None:
+        """持 tokens:manage 的 token 对 tokens:manage 返回 True（superuser 标识）。"""
+        from api.auth import SCOPE_TOKENS_MANAGE, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(
+            name="admin", token_hash="h", scopes=["tokens:manage"]
+        )
+        assert token_has_scope(token, SCOPE_TOKENS_MANAGE) is True

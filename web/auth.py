@@ -28,7 +28,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import Argon2Error, InvalidHash, VerificationError, VerifyMismatchError
 from fastapi import Request
 
-from shared.config import ApiTokenEntry, ResourceRules, WebAuthConfig
+from shared.config import ApiTokenEntry, WebAuthConfig
 
 logger = logging.getLogger(__name__)
 
@@ -71,23 +71,6 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ── auth.toml I/O ───────────────────────────────────────────────
 
 
-def _resource_rules_from_dict(raw: object) -> ResourceRules:
-    """``tomllib`` 解析出的嵌套 table → ``ResourceRules``。
-
-    老格式无 ``[resource_rules]`` 子表时 ``raw`` 是空 dict → 返回默认全权限
-    （两字段 ``None``）。``raw["platforms"]`` / ``raw["subscription_refs"]``
-    缺失时对应字段为 ``None``（= 不限制该维度）。
-    """
-    if not isinstance(raw, dict):
-        return ResourceRules()
-    platforms_raw = raw.get("platforms")
-    subs_raw = raw.get("subscription_refs")
-    return ResourceRules(
-        platforms=list(platforms_raw) if platforms_raw is not None else None,
-        subscription_refs=list(subs_raw) if subs_raw is not None else None,
-    )
-
-
 def load_auth_config() -> WebAuthConfig:
     """从 :data:`AUTH_TOML_PATH` 加载。
 
@@ -104,7 +87,6 @@ def load_auth_config() -> WebAuthConfig:
             token_hash=t["token_hash"],
             created_at=t.get("created_at", 0.0),
             scopes=list(t.get("scopes", [])),
-            resource_rules=_resource_rules_from_dict(t.get("resource_rules", {})),
         )
         for t in api_tokens_raw
         if isinstance(t, dict) and "name" in t and "token_hash" in t
@@ -139,22 +121,6 @@ def save_auth_config(cfg: WebAuthConfig) -> None:
         for s in t.scopes:
             scopes_arr.append(s)
         entry["scopes"] = scopes_arr
-        # resource_rules 嵌套 table：非默认（两字段任一非 None）才写。
-        # 默认 ResourceRules() 省略 section，保持老 token 文件 diff 干净。
-        rules = t.resource_rules
-        if rules.platforms is not None or rules.subscription_refs is not None:
-            nested = tomlkit.table()
-            if rules.platforms is not None:
-                p_arr = tomlkit.array()
-                for p in rules.platforms:
-                    p_arr.append(p)
-                nested["platforms"] = p_arr
-            if rules.subscription_refs is not None:
-                s_arr = tomlkit.array()
-                for sub in rules.subscription_refs:
-                    s_arr.append(sub)
-                nested["subscription_refs"] = s_arr
-            entry["resource_rules"] = nested
         tokens_aot.append(entry)
     # tomlkit：空 AoT 也要写出 `[[api_tokens]]` 段会让 tomlkit dumps 出空 AoT,
     # 但 cfg.api_tokens 为空时跳过写 doc["api_tokens"]，避免无意义空段。
