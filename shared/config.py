@@ -207,6 +207,8 @@ class BiliSubscription:
     uid: int = 0
     name: str = ""
     notify_endpoints: list[str] = field(default_factory=list)
+    owner_token: str = ""  # issue #108: 创建者 token name，全权 CRUD
+    assigned_tokens: list[str] = field(default_factory=list)  # issue #108: 被分配 token，只读
 
 
 @dataclass
@@ -214,6 +216,8 @@ class UserSubscription:
     user_id: str = ""
     name: str = ""
     notify_endpoints: list[str] = field(default_factory=list)
+    owner_token: str = ""  # issue #108
+    assigned_tokens: list[str] = field(default_factory=list)  # issue #108
 
 
 # ── 平台配置 ──────────────────────────────────────────────────
@@ -246,43 +250,24 @@ class WeiboConfig:
 
 
 @dataclass
-class ResourceRules:
-    """token 行级过滤规则（issue #106 spec §4）。
-
-    所有字段 ``None`` 表示**不限制**该维度；空 list 表示**禁止一切**（与
-    ``scopes == []`` 的「全权限」语义**相反**，见 spec §5.3）。
-
-    - ``platforms``: 允许的平台 short name 列表（``"bili"`` / ``"xhs"`` /
-      ``"weibo"``）。``None`` = 不限平台；``[]`` = 拒绝所有平台。
-    - ``subscription_refs``: 允许的订阅复合 key 列表，格式
-      ``<platform_short>:<id>``（如 ``"bili:100"`` / ``"xhs:u456"``）。
-      ``None`` = 不限订阅；``[]`` = 拒绝所有订阅。
-    """
-
-    platforms: list[str] | None = None
-    subscription_refs: list[str] | None = None
-
-
-@dataclass
 class ApiTokenEntry:
     """API token 条目（``data/auth.toml`` 的 ``[[api_tokens]]`` AoT 行）。
 
     bot 友好的 HTTP API 鉴权用（``api/`` 包），存 SHA-256 hash 不存明文。
     与 ``EndpointConfig`` 同风格：所有字段无 default，dataclass 字段顺序灵活。
 
-    ``scopes`` 为空 list 表示拥有全部 scope（向后兼容老 token，spec §5）。
-    非 list 表示受限 —— 路由层通过 ``api.auth.require_scopes`` 强制校验。
+    ``scopes`` 空 list 在 #108 后**不再 = 全权限**（破坏性变更，见 spec §6.2）。
+    要成为 superuser 必须显式持 ``tokens:manage`` scope。
 
-    ``resource_rules`` 是行级过滤规则（issue #106）：默认 ``ResourceRules()``
-    两字段 ``None`` = 全权限（向后兼容老 token）。路由层通过
-    ``api.auth.get_resource_filter`` 拿到 ``TokenResourceFilter`` 视图。
+    issue #108 废弃 ``resource_rules`` 字段（趁 #107 未部署直接删）。
+    ownership 由 sub 上的 ``owner_token`` / ``assigned_tokens`` 表达。
     """
 
     name: str
     token_hash: str  # SHA-256 hexdigest
     created_at: float = 0.0  # unix ts；默认 0.0 允许老数据/手工编辑兼容
     scopes: list[str] = field(default_factory=list)
-    resource_rules: ResourceRules = field(default_factory=ResourceRules)
+    # resource_rules 字段删除（issue #108，趁 #107 未部署）
 
 
 @dataclass
