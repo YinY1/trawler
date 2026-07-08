@@ -463,3 +463,124 @@ class TestSubscriptionsScopes:
             "/api/v1/subscriptions/bilibili/123/endpoints/gotify-main"
         )
         assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════
+# 行级过滤（issue #106 — plan T4/T7）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def row_filtered_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 ``resource_rules`` 的 client（与 ``scoped_client`` 同模式）。"""
+    from httpx import ASGITransport
+
+    from web.app import create_app
+
+    params = request.param
+    scopes = params.get("scopes", [])
+    platforms = params.get("platforms")
+    subs = params.get("subscription_refs")
+
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+    from shared.config import ResourceRules
+
+    app = create_app()
+    plain = create_token(
+        "row-bot",
+        scopes=scopes,
+        resource_rules=ResourceRules(platforms=platforms, subscription_refs=subs),
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        yield c
+
+
+class TestRowLevelListSubs:
+    """``GET /subscriptions`` 行级过滤（plan T4）。"""
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:read"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_list_subs_filters_by_platform(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """token 只允许 bili → response 只含 ``bilibili`` section（排除 xhs/weibo）。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = {
+                "bilibili": [{"uid": 100, "name": "UP1"}],
+                "xiaohongshu": [{"user_id": "u456", "name": "XHS1"}],
+                "weibo": [{"user_id": "w1", "name": "W1"}],
+            }
+            resp = await row_filtered_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()
+        sections = set(data["platforms"].keys())
+        assert sections == {"bilibili"}
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:read"], "subscription_refs": ["bili:100"]}],
+        indirect=True,
+    )
+    async def test_list_subs_filters_by_subscription(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """token 只允许 ``bili:100`` → response.bilibili 列表只含 uid=100 那条。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = {
+                "bilibili": [
+                    {"uid": 100, "name": "UP-100"},
+                    {"uid": 200, "name": "UP-200"},
+                ],
+            }
+            resp = await row_filtered_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        bili_subs = resp.json()["platforms"]["bilibili"]
+        # 只剩 uid=100（uid=200 被过滤）
+        assert len(bili_subs) == 1
+        assert bili_subs[0]["uid"] == 100
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:read"]}],  # 全权限
+        indirect=True,
+    )
+    async def test_list_subs_unrestricted_returns_all(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """全权限 token 不过滤（兼容性回归）。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = {
+                "bilibili": [{"uid": 100, "name": "UP1"}],
+                "xiaohongshu": [{"user_id": "u456", "name": "XHS1"}],
+            }
+            resp = await row_filtered_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data["platforms"].keys()) == {"bilibili", "xiaohongshu"}

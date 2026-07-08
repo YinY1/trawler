@@ -16,7 +16,8 @@ import logging
 
 from fastapi import APIRouter, Query, Request, Security
 
-from api.auth import require_scopes
+from api.auth import get_resource_filter
+from api.resource_filter import TokenResourceFilter, filter_subscription_dict
 from api.schemas import (
     EndpointBindRequest,
     SubscriptionAddRequest,
@@ -40,10 +41,17 @@ router = APIRouter()
 async def list_subs(
     request: Request,
     platform: str | None = Query(default=None, description="按平台过滤 (bili/xhs/weibo)"),
-    _token_name: str = Security(require_scopes, scopes=["subscriptions:read"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["subscriptions:read"]
+    ),
 ) -> SubscriptionListResponse:
-    """列出订阅，可选 platform 过滤。透传 ``list_subscriptions`` 原始 dict。"""
+    """列出订阅，可选 platform 过滤。透传 ``list_subscriptions`` 原始 dict。
+
+    行级过滤（issue #106）：在 ``list_subscriptions`` 返回之上叠加 token 的
+    ``resource_rules``（``filter_subscription_dict``），越权订阅不返回。
+    """
     result = await list_subscriptions(platform=platform)
+    result = filter_subscription_dict(result, filt)
     return SubscriptionListResponse(platforms=result)
 
 
@@ -51,7 +59,9 @@ async def list_subs(
 async def add_sub(
     body: SubscriptionAddRequest,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["subscriptions:write"]
+    ),
 ) -> SubscriptionAddResponse:
     """添加订阅。
 
@@ -76,7 +86,9 @@ async def remove_sub(
     platform: str,
     identifier: str,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["subscriptions:write"]
+    ),
 ) -> SubscriptionRemoveResponse:
     """删除订阅。
 
@@ -100,7 +112,9 @@ async def bind_endpoint(
     identifier: str,
     body: EndpointBindRequest,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["subscriptions:write"]
+    ),
 ) -> SubscriptionAddResponse:
     """绑定 endpoint 到订阅。
 
@@ -127,7 +141,9 @@ async def unbind_endpoint(
     identifier: str,
     endpoint_name: str,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["subscriptions:write"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["subscriptions:write"]
+    ),
 ) -> SubscriptionAddResponse:
     """解绑 endpoint。订阅不存在返回 ``success=False``，其余（含幂等）返回 True。
 
