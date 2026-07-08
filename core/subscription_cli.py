@@ -125,8 +125,14 @@ async def add_subscription(
     name: str,
     path: str = "config/subscriptions.toml",
     default_notify_endpoint: str | None = None,
+    owner_token: str = "",  # issue #108: 创建者 token name
 ) -> tuple[bool, str]:
-    """Add a subscription. Returns (success, message)."""
+    """Add a subscription. Returns (success, message).
+
+    issue #108: ``owner_token`` 非空时写入新 sub 的 ``owner_token`` 字段，
+    标记创建者为 owner（全权 CRUD）。API 路由层注入当前 token name，
+    CLI 不传（留 '' 等同孤儿，由 superuser adopt）。
+    """
     if platform not in VALID_PLATFORMS:
         return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
 
@@ -156,6 +162,8 @@ async def add_subscription(
     new_entry = tomlkit.table()
     new_entry[key] = typed_id
     new_entry["name"] = name
+    if owner_token:  # issue #108: 非空才写（默认 '' 不落盘，保持老格式）
+        new_entry["owner_token"] = owner_token
     arr.append(new_entry)
 
     # Write back
@@ -520,3 +528,189 @@ async def _search_xhs(name: str, config_path: str) -> tuple[bool, str, list[dict
         return False, f"未找到名为「{name}」的用户", []
 
     return True, f"找到 {len(candidates)} 个匹配", candidates
+
+
+# ═══════════════════════════════════════════════════════════
+# Ownership helpers (issue #108)
+# ═══════════════════════════════════════════════════════════
+
+
+async def assign_token_to_subscription(
+    platform: str,
+    identifier: int | str,
+    token_name: str,
+    path: str = "config/subscriptions.toml",
+) -> tuple[bool, str]:
+    """把 ``token_name`` 加到 sub.assigned_tokens（issue #108，幂等）。
+
+    返回值:
+      ``(True, "已分配: {token_name}")``     # 成功或已存在（幂等）
+      ``(False, "未找到订阅")``
+      ``(False, "未知 token: {token_name}")``
+      ``(False, "无效平台: ...")``
+    """
+    from web.auth import load_auth_config
+
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    # 校验 token 存在（auth.toml）
+    auth_cfg = load_auth_config()
+    if not any(t.name == token_name for t in auth_cfg.api_tokens):
+        return False, f"未知 token: {token_name}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)
+    plat_section_raw = doc_dict.get(section, {})
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            eps_arr = sub.get("assigned_tokens", [])
+            eps_list = [str(e) for e in eps_arr] if eps_arr else []
+            if token_name not in eps_list:
+                eps_list.append(token_name)
+                sub["assigned_tokens"] = eps_list
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 assign: %s/%s += %s", section, typed_id, token_name)
+    return True, f"已分配: {token_name}"
+
+
+async def unassign_token_from_subscription(
+    platform: str,
+    identifier: int | str,
+    token_name: str,
+    path: str = "config/subscriptions.toml",
+) -> tuple[bool, str]:
+    """从 sub.assigned_tokens 移除 token_name（issue #108，幂等）。
+
+    不校验 token 是否存在（解绑一个不存在的 token 引用无害）。
+    空列表时移除字段（与 remove_endpoint_from_subscription 一致）。
+    """
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)
+    plat_section_raw = doc_dict.get(section, {})
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            eps_arr = sub.get("assigned_tokens", [])
+            eps_list = [str(e) for e in eps_arr if str(e) != token_name]
+            if eps_list:
+                sub["assigned_tokens"] = eps_list
+            else:
+                sub.pop("assigned_tokens", None)
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 unassign: %s/%s -= %s", section, typed_id, token_name)
+    return True, f"已解绑: {token_name}"
+
+
+async def set_subscription_owner(
+    platform: str,
+    identifier: int | str,
+    owner_token: str,
+    path: str = "config/subscriptions.toml",
+) -> tuple[bool, str]:
+    """Set or replace ``owner_token`` on a subscription（issue #108）。
+
+    I1 修订（issue #108 review）：函数名 generic（``set_subscription_owner``），
+    docstring 旧版只说「给孤儿 sub 补 owner」误导 —— 实际功能是 **set/replace**：
+    无论 sub 当前 owner 是谁，都覆盖成 ``owner_token``。
+
+    主要调用方：
+      - ``adopt`` CLI（给孤儿 sub 补 owner，初始赋权场景）
+      - superuser 通过未来 assign-style 管理 endpoint 重 assign owner
+        （本 PR 不开 HTTP 路由，仅 CLI + 函数复用）
+
+    返回值:
+      ``(True, "已设置 owner: {owner_token}")``
+      ``(False, "未找到订阅")``
+      ``(False, "未知 token: {owner_token}")``
+      ``(False, "无效平台: ...")``
+    """
+    from web.auth import load_auth_config
+
+    if platform not in VALID_PLATFORMS:
+        return False, f"无效平台: {platform}，有效平台: {', '.join(sorted(VALID_PLATFORMS))}"
+
+    auth_cfg = load_auth_config()
+    if not any(t.name == owner_token for t in auth_cfg.api_tokens):
+        return False, f"未知 token: {owner_token}"
+
+    section = PLATFORM_TO_SECTION[platform]
+    key, typed_id = _key_value(platform, identifier)
+    p = Path(path)
+
+    doc = _load_doc(path)
+    if doc is None:
+        return False, "未找到订阅"
+
+    doc_dict = cast(dict[str, Any], doc)
+    plat_section_raw = doc_dict.get(section, {})
+    if not isinstance(plat_section_raw, dict):
+        plat_section_raw = {}
+    subs = plat_section_raw.get("subscriptions", [])
+    if not isinstance(subs, list):
+        return False, "未找到订阅"
+
+    found = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        sub_id = str(sub.get(key, ""))
+        if sub_id == str(typed_id):
+            sub["owner_token"] = owner_token
+            found = True
+            break
+
+    if not found:
+        return False, "未找到订阅"
+
+    p.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    logger.info("📋 adopt: %s/%s owner=%s", section, typed_id, owner_token)
+    return True, f"已设置 owner: {owner_token}"
