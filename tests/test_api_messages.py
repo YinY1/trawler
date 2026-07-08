@@ -779,3 +779,74 @@ class TestRowLevelRerun:
         # 清理锁
         app = row_filtered_client._app  # type: ignore[attr-defined]
         app.state.check_running = False
+
+
+class TestRowLevelCrossRoute:
+    """跨路由行级过滤一致性（plan T7 补全）。
+
+    覆盖 matrix 在 ``get_message`` / ``rerun`` 上的行为，与 ``list_messages``
+    matrix 形成对照（spec §10.3 / §10.4）。
+    """
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:read"], "platforms": []}],  # deny-all
+        indirect=True,
+    )
+    async def test_get_message_deny_all_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """``platforms=[]`` deny-all → ``get_message`` 任何 msg_id 都 404。"""
+        resp = await row_filtered_client.get("/api/v1/messages/bili:100")
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": []}],  # deny-all
+        indirect=True,
+    )
+    async def test_rerun_deny_all_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """``platforms=[]`` deny-all → ``rerun`` 任何 msg_id 都 404。"""
+        resp = await row_filtered_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["bili:100"], "from_phase": "discovered"},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [
+            {
+                "scopes": ["messages:read"],
+                "platforms": ["bili"],
+                "subscription_refs": ["bili:100"],
+            }
+        ],
+        indirect=True,
+    )
+    async def test_get_message_and_combination(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """AND 组合：``platforms=[bili]`` + ``subs=[bili:100]``。
+
+        - ``bili:100`` 通过（platform + sub 都允许）
+        - ``bili:200`` 404（platform 通过但 sub 拒绝）
+        - ``xhs:u456`` 404（platform 拒绝）
+        """
+        # bili:100 可见
+        resp = await row_filtered_client.get("/api/v1/messages/bili:100")
+        assert resp.status_code == 200
+        # bili:200 越权（sub 维度）
+        resp = await row_filtered_client.get("/api/v1/messages/bili:200")
+        assert resp.status_code == 404
+        # xhs:u456 越权（platform 维度）
+        resp = await row_filtered_client.get("/api/v1/messages/xhs:u456")
+        assert resp.status_code == 404
