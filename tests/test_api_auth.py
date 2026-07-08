@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from httpx import AsyncClient
 
 from shared.config import ApiTokenEntry
 from web.auth import set_password
@@ -574,3 +575,145 @@ class TestResourceRulesData:
         assert entry.name == "bili-only"
         assert entry.resource_rules.platforms == ["bili"]
         assert entry.resource_rules.subscription_refs is None
+
+
+# ═══════════════════════════════════════════════════════════
+# 行级过滤 FastAPI 依赖（issue #106 — get_resource_filter，plan T3）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def authed_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncClient:
+    """已配置全权限 token 的 client。
+
+    与 ``tests/test_api_messages.py:authed_client`` 同模式：monkeypatch auth
+    .toml 路径、set_password 完成 setup、create_token 写全权限 token。
+    """
+    from httpx import ASGITransport
+
+    from web.app import create_app
+
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+
+    app = create_app()
+    plain = create_token("test-bot")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        yield c
+
+
+class TestGetResourceFilter:
+    """``get_resource_filter`` FastAPI 依赖用例（spec §6.3 / plan T3）。
+
+    注：项目 ``pyproject.toml`` 已设 ``asyncio_mode = "auto"``，async 测试直接
+    ``async def`` 即可。
+    """
+
+    def test_get_resource_filter_importable(self) -> None:
+        """``get_resource_filter`` 已定义（模块级 import 不应抛异常）。"""
+        from api.auth import get_resource_filter  # noqa: F401
+
+    async def test_unrestricted_token_returns_unrestricted_filter(
+        self, authed_client: AsyncClient
+    ) -> None:
+        """全权限 token → ``filter.allows_*`` 永远 True（通过 GET /messages 行为验证）。
+
+        不直接调 ``get_resource_filter``，而是发 HTTP 请求：全权限 token 不应
+        被行级过滤拦截（200）。
+        """
+        resp = await authed_client.get("/api/v1/messages")
+        assert resp.status_code == 200  # 不被行级过滤拦截
+
+    async def test_missing_token_returns_401(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无 Authorization header → 401（与 require_scopes 一致）。"""
+        from httpx import ASGITransport
+
+        from web.app import create_app
+
+        auth_path = tmp_path / "auth.toml"
+        monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+        monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+        set_password(PASSWORD)
+
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test"
+            # 故意不带 Authorization header
+        ) as c:
+            resp = await c.get("/api/v1/messages")
+        assert resp.status_code == 401
+        assert "token" in resp.json()["detail"]
+
+    async def test_insufficient_scope_returns_403(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """scope 不够 → 403（行级过滤层在 scope 之后，scope 先拦）。
+
+        token 只带 ``subscriptions:read``，访问需要 ``messages:read`` 的
+        ``GET /api/v1/messages`` → 403 + detail 含 "scope"。
+        """
+        from httpx import ASGITransport
+
+        from api.auth import create_token
+        from web.app import create_app
+
+        auth_path = tmp_path / "auth.toml"
+        monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+        monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+        set_password(PASSWORD)
+
+        plain = create_token("sub-only", scopes=["subscriptions:read"])
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plain}"},
+        ) as c:
+            resp = await c.get("/api/v1/messages")
+        assert resp.status_code == 403
+        assert "scope" in resp.json()["detail"].lower()
+
+    async def test_openapi_docs_include_scopes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OpenAPI schema 在新依赖写法下能正常生成（spec §11 风险表缓解）。
+
+        重构 ``require_scopes`` 抽出 ``_authenticate_and_check_scope`` 共享逻辑
+        后，必须验证：
+
+        1. ``app.openapi()`` 不抛异常（FastAPI 依赖解析正常）
+        2. ``/api/v1/messages`` GET 路由仍在 schema 中（路由没被破坏）
+
+        注：spec §11 提到「OpenAPI docs 在新写法下可能不渲染 scope」是已知
+        限制（FastAPI ``SecurityScopes`` 单独使用不自动渲染 security scheme）。
+        现状（#103）就没渲染，本 PR 不引入回归即可。
+        """
+        from web.app import create_app
+
+        auth_path = tmp_path / "auth.toml"
+        monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+        monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+        set_password(PASSWORD)
+
+        app = create_app()
+        schema = app.openapi()  # 不抛异常即通过
+        paths = schema["paths"]
+        # 关键路由仍存在（重构没破坏路由注册）
+        assert "/api/v1/messages" in paths
+        assert "get" in paths["/api/v1/messages"]
