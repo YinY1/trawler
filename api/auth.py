@@ -25,7 +25,7 @@ from typing import Sequence
 from fastapi import HTTPException, Request
 from fastapi.security import SecurityScopes
 
-from api.resource_filter import TokenResourceFilter
+from api.resource_filter import TokenOwnership
 from shared.config import ApiTokenEntry
 from web.auth import AUTH_TOML_PATH, load_auth_config, save_auth_config
 
@@ -127,15 +127,15 @@ def _authenticate_and_check_scope(
 ) -> ApiTokenEntry:
     """身份校验 + scope 校验共享逻辑（spec §6.3 私有 helper）。
 
-    ``require_scopes`` 与 ``get_resource_filter`` 共用：抽出来避免 401/403
+    ``require_scopes`` 与 ``get_token_ownership`` 共用：抽出来避免 401/403
     处理逻辑两份复制（spec §6.3 风险表「重复」缓解措施）。
 
     - 无 header / token 不匹配 → 401 ``invalid or missing token``
     - 缺任一 required scope → 403 ``insufficient scope: requires xxx``
-    - 通过 → 返回匹配的 ``ApiTokenEntry``（含 ``resource_rules``）
+    - 通过 → 返回匹配的 ``ApiTokenEntry``（含 ``scopes``）
 
-    返回完整 ``ApiTokenEntry`` 而非 ``name``，让 ``get_resource_filter`` 能
-    一次性拿到 ``resource_rules`` 构造 ``TokenResourceFilter``。
+    返回完整 ``ApiTokenEntry`` 而非 ``name``，让 ``get_token_ownership`` 能
+    一次性拿到 ``scopes`` 构造 ``TokenOwnership``。
     """
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
@@ -183,24 +183,31 @@ async def require_scopes(
     return entry.name
 
 
-async def get_resource_filter(
+async def get_token_ownership(
     security_scopes: SecurityScopes,
     request: Request,
-) -> TokenResourceFilter:
-    """FastAPI 依赖：scope 校验 + 行级过滤视图构造（spec §6.3）。
+) -> TokenOwnership:
+    """FastAPI 依赖：scope 校验 + ownership 视图构造（issue #108）。
 
-    一个依赖同时承担两层职责（``Security(get_resource_filter, scopes=[...])``）：
+    一个依赖同时承担两层职责（``Security(get_token_ownership, scopes=[...])``）：
 
     - 无 header / token 不匹配 → 401（同 ``require_scopes``）
     - 缺 scope → 403（同 ``require_scopes``）
-    - 通过 → 返回 ``TokenResourceFilter.from_token(entry)``（含 token 的行级规则视图）
+    - 通过 → 返回 ``TokenOwnership.from_token(entry)``（含 token 的 ownership 视图）
 
-    路由层用 ``filt.allows_message(m)`` / ``filt.allows_subscription(p, r)`` 判断
-    可见性，不直接读 ``ApiTokenEntry.resource_rules``（避免路由层处理 list/None
-    分支，集中到 ``TokenResourceFilter``）。
+    路由层用 ``ownership.has_sub_access(sub)`` / ``has_sub_write(sub)`` 判断
+    可见性，不直接读 ``ApiTokenEntry.scopes``（避免路由层处理 scope 解析逻辑，
+    集中到 ``TokenOwnership``）。
+
+    issue #108 重命名自 ``get_resource_filter``（#106 命名），保留旧名别名
+    减少 import 改动，但内部返回 ``TokenOwnership``。
     """
     entry = _authenticate_and_check_scope(request, security_scopes.scopes)
-    return TokenResourceFilter.from_token(entry)
+    return TokenOwnership.from_token(entry)
+
+
+# 向后兼容别名（#106 历史命名，#108 重命名后保留别名减少 import 改动）
+get_resource_filter = get_token_ownership
 
 
 def create_token(

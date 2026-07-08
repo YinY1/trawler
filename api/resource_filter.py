@@ -1,15 +1,15 @@
-"""token 行级过滤视图与订阅可见性 helper（issue #106 — spec §6 / plan T2）。
+"""token ownership 视图与订阅/消息可见性 helper（issue #108）。
 
 本模块是路由层「消息 / 订阅可见性」判断的唯一集中点：
-- ``TokenResourceFilter``：token 行级规则的不可变视图（从 ``ApiTokenEntry``
-  一次性构造），路由层调 ``allows_*`` 三方法判断消息/订阅/平台可见性
-- ``SECTION_TO_SHORT`` / ``SHORT_TO_KEY_FIELD``：平台映射常量（全文唯一来源，
-  从 ``core.subscription_cli.PLATFORM_TO_SECTION`` 反推，禁止在路由文件里
-  inline 重定义同一映射）
+- ``TokenOwnership``：token 的 ownership 视图（是否 superuser + token name），
+  路由层调 ``has_sub_access`` / ``has_sub_write`` 判断
 - ``filter_subscription_dict`` / ``subscription_visible``：订阅可见性 helper
-  （路由层 GET /subscriptions / 写入路由越权处理用，避免重复 inline）
+- ``message_visible`` / ``msg_id_visible``：消息可见性 helper（需 config 反查 sub）
 
 所有 helper 都是纯逻辑（无 IO、无 LLM、无外部副作用）。
+
+issue #108 废弃 #106 的 ResourceRules（platforms + subscription_refs AND 过滤），
+改为更直观的 owner/assigned 模型（决策 #1/#2）。
 """
 
 from __future__ import annotations
@@ -21,126 +21,124 @@ from typing import TYPE_CHECKING
 from core.subscription_cli import PLATFORM_TO_SECTION
 
 if TYPE_CHECKING:
-    from shared.config import ApiTokenEntry
+    from shared.config import ApiTokenEntry, BiliSubscription, Config, UserSubscription
     from shared.protocols import MessageRecord
 
 
 # ═══════════════════════════════════════════════════════════
-# 平台映射常量（全文唯一来源，T4/T5 路由 import 复用，禁止 inline 重定义）
+# 平台映射常量（与 #106 保持一致，全文唯一来源）
 # ═══════════════════════════════════════════════════════════
 
-#: TOML section 全名 → CLI short name（``bilibili`` → ``bili``）。
-#: 从 ``core.subscription_cli.PLATFORM_TO_SECTION`` 反推，避免两处手写同一映射（DRY）。
+#: TOML section 全名 → CLI short name（bilibili → bili）。
 SECTION_TO_SHORT: dict[str, str] = {v: k for k, v in PLATFORM_TO_SECTION.items()}
 
 #: short name → 订阅主键字段（spec §7.3）。
-#: ``bili`` 主键是 ``uid``（int），``xhs`` / ``weibo`` 主键是 ``user_id``（str）。
 SHORT_TO_KEY_FIELD: dict[str, str] = {"bili": "uid", "xhs": "user_id", "weibo": "user_id"}
 
 
 # ═══════════════════════════════════════════════════════════
-# TokenResourceFilter — token 行级规则的不可变视图
+# TokenOwnership — token 的 ownership 视图
 # ═══════════════════════════════════════════════════════════
 
 
 @dataclass(frozen=True)
-class TokenResourceFilter:
-    """token 行级过滤视图（spec §6.2）。
+class TokenOwnership:
+    """token ownership 视图（issue #108）。
 
-    不可变（``frozen=True``），从 token ``ResourceRules`` 一次性构造，路由层
-    调 ``allows_*`` 方法判断可见性。``None`` 字段（``platforms`` /
-    ``subscription_refs``）表示**不限制**该维度；空 ``frozenset`` 表示
-    **拒绝一切**（与 ``None=全权限`` 相反，见 spec §5.3）。
+    不可变（``frozen=True``），从 ``ApiTokenEntry`` 一次性构造，路由层调
+    ``has_sub_access`` / ``has_sub_write`` 判断可见性。
+
+    - ``is_superuser``: token 是否持 ``tokens:manage`` scope（bypass 所有检查）
+    - ``token_name``: token 的 name（与 sub.owner_token / sub.assigned_tokens 比对）
     """
 
-    platforms: frozenset[str] | None
-    subscription_refs: frozenset[str] | None
+    is_superuser: bool
+    token_name: str
 
     @classmethod
-    def from_token(cls, token: ApiTokenEntry) -> TokenResourceFilter:
-        """从 token 的 ``ResourceRules`` 构造（``list`` → ``frozenset``）。"""
-        rules = token.resource_rules
+    def from_token(cls, token: ApiTokenEntry) -> TokenOwnership:
+        """从 ``ApiTokenEntry`` 构造（查 scopes 判断 superuser）。"""
+        from api.auth import SCOPE_TOKENS_MANAGE, token_has_scope
+
         return cls(
-            platforms=frozenset(rules.platforms)
-            if rules.platforms is not None
-            else None,
-            subscription_refs=frozenset(rules.subscription_refs)
-            if rules.subscription_refs is not None
-            else None,
+            is_superuser=token_has_scope(token, SCOPE_TOKENS_MANAGE),
+            token_name=token.name,
         )
 
     @classmethod
-    def unrestricted(cls) -> TokenResourceFilter:
-        """全权限视图（无任何限制）。"""
-        return cls(platforms=None, subscription_refs=None)
+    def unrestricted(cls, token_name: str = "") -> TokenOwnership:
+        """全权限视图（仅供测试 / Web session 等价场景使用）。
 
-    def allows_platform(self, platform: str) -> bool:
-        """platform 是否可见。
-
-        ``platforms is None`` → 不限平台（全可见）；否则 ``platform in self.platforms``。
-        空 ``frozenset`` → 任何平台都 False（拒绝一切，spec §5.3）。
+        生产中只有持 ``tokens:manage`` 的 token 才是 superuser，本工厂方法
+        用于测试 fixture 构造 superuser client，或 Web session 路由（session
+        登录 = admin = superuser 等价）。
         """
-        if self.platforms is None:
+        return cls(is_superuser=True, token_name=token_name)
+
+    def has_sub_access(self, sub: BiliSubscription | UserSubscription) -> bool:
+        """读权限：token 能否看到此 sub（spec §5.1）。
+
+        ``is_superuser OR sub.owner_token == token_name
+        OR token_name in sub.assigned_tokens``
+        """
+        if self.is_superuser:
             return True
-        return platform in self.platforms
-
-    def allows_subscription(self, platform: str, subscription_ref: str) -> bool:
-        """订阅是否可见。
-
-        ``subscription_ref`` 是 **detector 注入的原始值**（不带 ``<platform>:``
-        前缀，如 ``"100"`` / ``"u456"``）。内部拼 ``f"{platform}:{subscription_ref}"``
-        复合 key 再比对 token 的 ``subscription_refs`` 集合（spec §5.4）。
-        """
-        if self.subscription_refs is None:
+        if sub.owner_token == self.token_name:
             return True
-        composite = f"{platform}:{subscription_ref}"
-        return composite in self.subscription_refs
+        return self.token_name in sub.assigned_tokens
 
-    def allows_message(self, msg: MessageRecord) -> bool:
-        """消息是否可见（platform + subscription_ref 两维 AND 组合，spec §5.2）。
+    def has_sub_write(self, sub: BiliSubscription | UserSubscription) -> bool:
+        """写权限：token 能否改/删/绑 endpoint 此 sub（spec §5.1）。
 
-        两维都通过才可见：``platform`` 维度先粗筛，``subscription_ref`` 维度
-        细筛。``platforms=["bili"]`` + ``subscription_refs=["xhs:u456"]`` 这种
-        无意义组合会拒绝一切（CLI 创建时 warning 但不强制阻止，见 plan T6）。
+        ``is_superuser OR sub.owner_token == token_name``
+        （assigned 不能写！）
         """
-        return self.allows_platform(msg.platform) and self.allows_subscription(
-            msg.platform, msg.subscription_ref
-        )
+        if self.is_superuser:
+            return True
+        return sub.owner_token == self.token_name
+
+    def can_manage_assign(self) -> bool:
+        """assign/unassign 路由专用：仅 superuser（spec §5.2）。
+
+        连 owner 也不能分配自己的 sub 给别的 token，决策 #10。
+        """
+        return self.is_superuser
 
 
 # ═══════════════════════════════════════════════════════════
-# 订阅可见性 helper（路由层 GET /subscriptions 与写入路由越权处理复用）
+# 订阅可见性 helper（GET /subscriptions 过滤 + 写入路由越权判断）
 # ═══════════════════════════════════════════════════════════
 
 
 def filter_subscription_dict(
-    result: dict[str, list[dict]], filt: TokenResourceFilter
+    result: dict[str, list[dict]],
+    ownership: TokenOwnership,
+    config: Config,
 ) -> dict[str, list[dict]]:
-    """过滤 ``list_subscriptions`` 的原始返回（spec §7.3）。
+    """过滤 ``list_subscriptions`` 的原始返回（issue #108）。
 
-    ``result`` 的 key 是 TOML section 全名（``bilibili`` / ``xiaohongshu`` /
-    ``weibo``），通过 ``SECTION_TO_SHORT`` 反查 short name 后：
+    ``result`` 的 key 是 TOML section 全名（bilibili/xiaohongshu/weibo）。
+    对每条 sub dict，用主键反查 ``config`` 拿到真实 sub 对象（含 owner_token /
+    assigned_tokens），调 ``ownership.has_sub_access`` 判断可见性。
 
-    1. 平台维度：section 对应 short 不在 ``filt.platforms`` → 整个 section 丢弃
-    2. 订阅维度：section 内每条订阅的主键（``uid`` / ``user_id``）拼复合 key
-       比对 ``filt.subscription_refs``；空 section 不写出
-
-    ``filt.subscription_refs is None`` → 整个 section 全保留（不细筛）。
+    superuser 看全部；owner/assigned 看自己的；outvisitor 看不到。
+    越权 sub 不出现在响应里（不暴露存在性）。
     """
+    from shared.protocols import find_subscription_by_ref
+
     out: dict[str, list[dict]] = {}
     for section, subs in result.items():
         short = SECTION_TO_SHORT.get(section)
-        # 未知 section（非已知平台）→ 保守丢弃，避免越权泄漏
-        if short is None or not filt.allows_platform(short):
-            continue
-        if filt.subscription_refs is None:
-            out[section] = subs
-            continue
+        if short is None:
+            continue  # 未知 section 保守丢弃
         key_field = SHORT_TO_KEY_FIELD.get(short, "")
         kept: list[dict] = []
         for s in subs:
             sub_id = str(s.get(key_field, ""))
-            if filt.allows_subscription(short, sub_id):
+            sub_obj = find_subscription_by_ref(config, short, sub_id)
+            if sub_obj is None:
+                continue  # config 里查不到（数据不一致），保守丢弃避免越权泄漏
+            if ownership.has_sub_access(sub_obj):
                 kept.append(s)
         if kept:
             out[section] = kept
@@ -148,40 +146,76 @@ def filter_subscription_dict(
 
 
 def subscription_visible(
-    filt: TokenResourceFilter, platform_full: str, identifier: str | int
+    ownership: TokenOwnership,
+    config: Config,
+    platform_full: str,
+    identifier: str | int,
+    require_write: bool = False,
 ) -> bool:
-    """订阅是否在 token 的行级权限内（写入路由越权判断用，spec §8.3）。
+    """订阅是否在 token 的 ownership 内（写入路由越权判断用）。
 
-    ``platform_full`` 是路由 URL 段，**优先按 TOML section 全名解析**（如
-    ``bilibili``），fallback 接受 short name（``bili``）—— 与现有
-    ``DELETE /subscriptions/{platform}/{identifier}`` 路由历史兼容（早期 URL
-    用 short name，#104 PR 后期改全名，两种形式都被业务层接受）。
+    ``platform_full`` 是路由 URL 段，优先按 TOML section 全名解析（bilibili），
+    fallback 接受 short name（bili）—— 与 #106 历史兼容。
 
-    ``identifier`` 是订阅主键（``uid`` / ``user_id``）。
+    ``require_write=True`` 时用 ``has_sub_write``（assigned 不能写），
+    否则用 ``has_sub_access``（assigned 可读）。
 
-    两维 AND：platform 维度先粗筛，再 subscription_ref 维度细筛（spec §5.2）。
-    ``filt.allows_subscription`` 内部会先检查 ``subscription_refs is None`` → 不限订阅。
-
-    与 ``filter_subscription_dict`` 区别：本函数返回 ``bool``（单条订阅判断），
-    供 ``DELETE /subscriptions/...`` / ``bind/unbind endpoint`` 等写入路由
-    越权时合并成「未找到」语义，不暴露存在性。
+    越权时调用方合并成「未找到」语义（200 + success=False），不暴露存在性。
     """
-    # 优先按全名反查 short；找不到则尝试直接当 short name（兼容老 URL）
+    from shared.protocols import find_subscription_by_ref
+
     short = SECTION_TO_SHORT.get(platform_full)
     if short is None and platform_full in PLATFORM_TO_SECTION:
         short = platform_full
     if short is None:
         return False
-    return filt.allows_platform(short) and filt.allows_subscription(short, str(identifier))
+    sub_obj = find_subscription_by_ref(config, short, str(identifier))
+    if sub_obj is None:
+        return False
+    if require_write:
+        return ownership.has_sub_write(sub_obj)
+    return ownership.has_sub_access(sub_obj)
 
 
-def msg_id_platform_allowed(msg_id: str, filt: TokenResourceFilter) -> bool:
-    """``msg_id`` 前缀（platform short）是否在 token 行级权限内（spec §8.2）。
+# ═══════════════════════════════════════════════════════════
+# 消息可见性 helper（GET /messages 过滤 + rerun 越权判断）
+# ═══════════════════════════════════════════════════════════
 
-    ``msg_id`` 形如 ``"bili:BV1xx"`` / ``"xhs:note1"``，按 ``:`` 前的 short
-    name 判 platform 可见性。**只看 platform 维度**，不做 subscription_ref
-    维度过滤（fetch 时消息可能还没入库，detector 尚未注入 subscription_ref，
-    见 spec §8.2 已知限制）。
+
+def message_visible(
+    ownership: TokenOwnership,
+    config: Config,
+    msg: MessageRecord,
+) -> bool:
+    """单条消息是否可见（issue #108）。
+
+    msg → subscription_ref 反查 sub → ownership.has_sub_access。
+    **无主消息**（``msg.subscription_ref == ""`` 或反查不到 sub）：
+    - superuser 可见
+    - 非 superuser 不可见（404 / 过滤掉，不暴露存在性）
     """
-    short = msg_id.split(":", 1)[0] if ":" in msg_id else ""
-    return filt.allows_platform(short)
+    from shared.protocols import find_subscription_by_ref
+
+    if ownership.is_superuser:
+        return True
+    if not msg.subscription_ref:
+        return False  # 无主消息只 superuser 可见
+    sub_obj = find_subscription_by_ref(config, msg.platform, msg.subscription_ref)
+    if sub_obj is None:
+        return False  # 反查不到 sub，保守不可见
+    return ownership.has_sub_access(sub_obj)
+
+
+def msg_id_visible(
+    ownership: TokenOwnership,
+    msg_id: str,
+) -> bool:
+    """``msg_id`` 维度可见性（fetch 路由专用，issue #108）。
+
+    fetch 是按需抓取，消息可能还没入库，无法 msg→sub 反查。**只有 superuser
+    能调 fetch**（决策：无主消息无法判断 owner，普通 token 调 fetch 等同越权）。
+
+    普通 token 调 fetch → 403（路由层直接拦，不走到这里）。
+    本函数仅供 superuser 调用时做防御性检查（永远 True）。
+    """
+    return ownership.is_superuser
