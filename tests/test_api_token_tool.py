@@ -193,14 +193,14 @@ class TestCreateWithScopes:
         cfg = load_auth_config()
         assert cfg.api_tokens[0].scopes == ["messages:read", "check:read"]
 
-    def test_create_without_scope_warns_unrestricted(
+    def test_create_without_scope_warns_no_permissions(
         self, runner: CliRunner, auth_path: Path
     ) -> None:
-        """不带 --scope → 全权限，输出警告（spec §5.3）。"""
+        """不带 --scope → 无任何权限（#108 破坏性变更），输出 red warning。"""
         result = runner.invoke(cli, ["create", "bot"])
         assert result.exit_code == 0
-        # 警告文本含「无限制」或「unrestricted」
-        assert "无限制" in result.output or "unrestricted" in result.output.lower()
+        # warning 文本含「无任何权限」（#108 后空 scopes = 无权）
+        assert "无任何权限" in result.output
 
     def test_create_with_invalid_scope_fails(
         self, runner: CliRunner, auth_path: Path
@@ -230,7 +230,7 @@ class TestCreateWithScopes:
 
 
 class TestListWithScopes:
-    def test_list_shows_unrestricted_for_empty_scopes(
+    def test_list_shows_no_permissions_for_empty_scopes(
         self, runner: CliRunner, auth_path: Path
     ) -> None:
         from api.auth import create_token
@@ -239,7 +239,8 @@ class TestListWithScopes:
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
         assert "admin-bot" in result.output
-        assert "无限制" in result.output or "unrestricted" in result.output.lower()
+        # #108: 空 scopes 显示「无权限」而非「无限制」
+        assert "无权限" in result.output
 
     def test_list_shows_scope_list(
         self, runner: CliRunner, auth_path: Path
@@ -257,168 +258,167 @@ class TestListWithScopes:
         assert "check:read" in out
 
 
-# ── create --resource-platform / --resource-sub（issue #106 — plan T6）─────
 
 
-class TestCreateResourceRules:
-    """CLI ``create --resource-platform`` / ``--resource-sub`` multi-flag。"""
+# ── adopt 子命令 + create 空 scopes warning（issue #108）──────────────
 
-    def test_create_with_resource_platform(
-        self, runner: CliRunner, auth_path: Path
+
+class TestAdoptCommand:
+    """``trawler token adopt --platform --id --owner`` 一键给孤儿 sub 补 owner。"""
+
+    def test_adopt_success(
+        self,
+        runner: CliRunner,
+        auth_path: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from web.auth import load_auth_config
-
-        result = runner.invoke(
-            cli,
-            [
-                "create", "bili-bot",
-                "--scope", "messages:read",
-                "--resource-platform", "bili",
-            ],
-        )
-        assert result.exit_code == 0
-        cfg = load_auth_config()
-        token = next(t for t in cfg.api_tokens if t.name == "bili-bot")
-        assert token.resource_rules.platforms == ["bili"]
-        assert token.resource_rules.subscription_refs is None
-
-    def test_create_with_multiple_resource_platforms(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        from web.auth import load_auth_config
-
-        result = runner.invoke(
-            cli,
-            [
-                "create", "multi-bot",
-                "--resource-platform", "bili",
-                "--resource-platform", "xhs",
-            ],
-        )
-        assert result.exit_code == 0
-        cfg = load_auth_config()
-        token = next(t for t in cfg.api_tokens if t.name == "multi-bot")
-        assert set(token.resource_rules.platforms) == {"bili", "xhs"}
-
-    def test_create_with_multiple_resource_sub(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        from web.auth import load_auth_config
-
-        result = runner.invoke(
-            cli,
-            [
-                "create", "up-bot",
-                "--scope", "messages:read",
-                "--resource-sub", "bili:100",
-                "--resource-sub", "xhs:u456",
-            ],
-        )
-        assert result.exit_code == 0
-        cfg = load_auth_config()
-        token = next(t for t in cfg.api_tokens if t.name == "up-bot")
-        assert token.resource_rules.subscription_refs == ["bili:100", "xhs:u456"]
-        assert token.resource_rules.platforms is None
-
-    def test_create_invalid_platform_rejected(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        """``--resource-platform invalid`` → 退出码非 0，不落盘。"""
-        result = runner.invoke(
-            cli, ["create", "x", "--resource-platform", "invalid"]
-        )
-        assert result.exit_code != 0
-
-        from web.auth import load_auth_config
-
-        cfg = load_auth_config()
-        assert len(cfg.api_tokens) == 0  # 未落盘
-
-    def test_create_invalid_sub_format_rejected(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        """``--resource-sub no-colon`` → 退出码非 0，不落盘。"""
-        result = runner.invoke(
-            cli, ["create", "x", "--resource-sub", "no-colon"]
-        )
-        assert result.exit_code != 0
-
-        from web.auth import load_auth_config
-
-        cfg = load_auth_config()
-        assert len(cfg.api_tokens) == 0
-
-    def test_create_invalid_sub_platform_rejected(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        """``--resource-sub invalid:100`` （平台不合法）→ 退出码非 0。"""
-        result = runner.invoke(
-            cli, ["create", "x", "--resource-sub", "invalid:100"]
-        )
-        assert result.exit_code != 0
-
-    def test_create_warns_on_meaningless_combination(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        """``platforms=[bili]`` + ``subs=[xhs:u456]`` 无交集 → warning（不阻止创建）。
-
-        spec §11 风险表：这种组合 AND 后会拒绝一切，CLI 创建时提示但不强制拒绝。
-        """
-        result = runner.invoke(
-            cli,
-            [
-                "create", "x",
-                "--resource-platform", "bili",
-                "--resource-sub", "xhs:u456",
-            ],
-        )
-        assert result.exit_code == 0
-        # 输出含 warning（中文「⚠️」或英文「warning」均可）
-        assert "warning" in result.output.lower() or "⚠" in result.output
-
-
-class TestListResourceRules:
-    """``list`` 命令显示 ``Resource Rules`` 列（plan T6）。"""
-
-    def test_list_shows_resource_rules_column(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
+        """成功给 bili/100 补 owner。"""
+        # 先准备 auth.toml 含 owner-bot token
         from api.auth import create_token
-        from shared.config import ResourceRules
 
-        # 全权限 token
-        create_token("admin-bot")
-        # 受限 token
-        create_token(
-            "bili-bot",
-            scopes=["messages:read"],
-            resource_rules=ResourceRules(platforms=["bili"]),
+        create_token("owner-bot")
+
+        # 准备 subscriptions.toml 含一条无 owner 的 bili sub
+        subs_path = tmp_path / "subscriptions.toml"
+        subs_path.write_text(
+            '[[bilibili.subscriptions]]\n'
+            'uid = 100\n'
+            'name = "UP100"\n',
+            encoding="utf-8",
         )
+        # adopt 命令调 set_subscription_owner 时不传 path，默认查 cwd/config/...
+        # monkeypatch：让默认 path 指向 tmp 文件
+        from core import subscription_cli as cli_mod
 
+        async def patched_set_owner(
+            platform: str,
+            identifier: int | str,
+            owner_token: str,
+            path: str = str(subs_path),
+        ) -> tuple[bool, str]:
+            return await cli_mod._orig_set_owner(  # type: ignore[attr-defined]
+                platform=platform,
+                identifier=identifier,
+                owner_token=owner_token,
+                path=str(subs_path),
+            )
+
+        # 保存原函数引用（避免 monkeypatch 循环）
+        if not hasattr(cli_mod, "_orig_set_owner"):
+            cli_mod._orig_set_owner = cli_mod.set_subscription_owner  # type: ignore[attr-defined]
+        monkeypatch.setattr(cli_mod, "set_subscription_owner", patched_set_owner)
+        # adopt 命令通过 `from core.subscription_cli import set_subscription_owner`
+        # 在函数体内 import，patch cli_mod 的属性即可命中。
+
+        result = runner.invoke(
+            cli,
+            [
+                "adopt",
+                "--platform", "bili",
+                "--id", "100",
+                "--owner", "owner-bot",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "已设置 owner" in result.output
+        # 落盘验证
+        content = subs_path.read_text(encoding="utf-8")
+        assert 'owner_token = "owner-bot"' in content
+
+    def test_adopt_unknown_token_fails(
+        self,
+        runner: CliRunner,
+        auth_path: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """adopt 不存在的 token → 退出码非 0。"""
+        subs_path = tmp_path / "subscriptions.toml"
+        subs_path.write_text(
+            '[[bilibili.subscriptions]]\n'
+            'uid = 100\n'
+            'name = "UP100"\n',
+            encoding="utf-8",
+        )
+        from core import subscription_cli as cli_mod
+
+        async def patched_set_owner(
+            platform: str,
+            identifier: int | str,
+            owner_token: str,
+            path: str = str(subs_path),
+        ) -> tuple[bool, str]:
+            return await cli_mod._orig_set_owner(  # type: ignore[attr-defined]
+                platform=platform,
+                identifier=identifier,
+                owner_token=owner_token,
+                path=str(subs_path),
+            )
+
+        if not hasattr(cli_mod, "_orig_set_owner"):
+            cli_mod._orig_set_owner = cli_mod.set_subscription_owner  # type: ignore[attr-defined]
+        monkeypatch.setattr(cli_mod, "set_subscription_owner", patched_set_owner)
+
+        result = runner.invoke(
+            cli,
+            [
+                "adopt",
+                "--platform", "bili",
+                "--id", "100",
+                "--owner", "ghost-bot",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "未知 token" in result.output or "✗" in result.output
+
+
+class TestCreateNoScopesWarning:
+    """#108 后 create 空 scopes = 无权，CLI 必须明示。"""
+
+    def test_create_no_scopes_shows_red_warning(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """create 不传 --scope → 输出含 red warning 提示无权。"""
+        result = runner.invoke(cli, ["create", "empty-bot"])
+        assert result.exit_code == 0
+        # 输出含「无任何权限」提示
+        assert "无任何权限" in result.output
+
+
+class TestResourceFlagsRemoved:
+    """#108 删除 --resource-platform / --resource-sub flag。"""
+
+    def test_create_rejects_resource_platform_flag(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``--resource-platform`` 已删除 → Click 报未知 option。"""
+        result = runner.invoke(
+            cli,
+            ["create", "x", "--resource-platform", "bili"],
+        )
+        assert result.exit_code != 0
+        # Click 报错信息含 "no such option"
+        assert "no such option" in result.output.lower() or "resource-platform" in result.output.lower()
+
+    def test_create_rejects_resource_sub_flag(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``--resource-sub`` 已删除。"""
+        result = runner.invoke(
+            cli,
+            ["create", "x", "--resource-sub", "bili:100"],
+        )
+        assert result.exit_code != 0
+
+    def test_list_no_resource_rules_column(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``list`` 命令不再显示 Resource Rules 列。"""
+        from api.auth import create_token
+
+        create_token("bot1")
         result = runner.invoke(cli, ["list"])
         assert result.exit_code == 0
-        out = result.output
-        # 列标题
-        assert "Resource Rules" in out
-        # 全权限标记
-        assert "unrestricted" in out.lower()
-        # 受限 token 的 platforms 显示（Rich Table 可能因终端宽度截断，
-        # 只检查 "platforms=" 前缀出现即可）
-        assert "platforms=" in out
-
-    def test_list_shows_subscription_refs(
-        self, runner: CliRunner, auth_path: Path
-    ) -> None:
-        from api.auth import create_token
-        from shared.config import ResourceRules
-
-        create_token(
-            "up-bot",
-            scopes=["messages:read"],
-            resource_rules=ResourceRules(subscription_refs=["bili:100"]),
-        )
-        result = runner.invoke(cli, ["list"])
-        assert result.exit_code == 0
-        out = result.output
-        # subscription_refs 显示（Rich Table 可能截断，检查 "subs=" 前缀）
-        assert "subs=" in out
+        # 不含 "Resource Rules" 列标题
+        assert "Resource Rules" not in result.output
