@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Security
 from fastapi.responses import JSONResponse
 
 from api.auth import get_resource_filter
-from api.resource_filter import TokenResourceFilter
+from api.resource_filter import TokenResourceFilter, msg_id_platform_allowed
 from api.schemas import (
     FetchRequest,
     FetchResponse,
@@ -224,10 +224,18 @@ async def rerun_messages(
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
     # reset 数量：占锁前先查存在的消息数（reset_specific 在后台 task 内调）
-    existing = [m for m in (store.get_message(mid) for mid in body.msg_ids) if m is not None]
+    # 行级过滤（issue #106）：越权 msg_id 视为不存在（spec §8.1）。
+    # 部分越权 → 静默忽略越权 id（与 GET 过滤语义一致），全部越权才 404。
+    existing = [
+        m
+        for m in (store.get_message(mid) for mid in body.msg_ids)
+        if m is not None and filt.allows_message(m)
+    ]
     reset_count = len(existing)
     if reset_count == 0:
         raise HTTPException(status_code=404, detail="message not found")
+    # 越权 id 不传给后台 task（避免 pipeline 处理越权消息，spec §8.1）
+    authorized_msg_ids = [m.msg_id for m in existing]
 
     # ── 占锁 + 初始化 run state（与 /check/run 完全对称）──────────────
     task_id = uuid4().hex
@@ -241,7 +249,7 @@ async def rerun_messages(
     async def _rerun() -> None:
         try:
             await PipelineEngine.run_specific_messages(
-                msg_ids=body.msg_ids,
+                msg_ids=authorized_msg_ids,
                 from_phase=target_phase,
                 skip_push=body.skip_push,
                 config=cfg,
@@ -328,6 +336,15 @@ async def fetch_messages(
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
 
+    # 行级过滤（issue #106）：按 msg_id 前缀（platform short）过滤。
+    # fetch 是按需抓取，消息可能还没入库（不存在于 store），无法用
+    # ``filt.allows_message``（rec 不存在），只做 platform 维度过滤（spec §8.2）。
+    authorized_ids = [
+        mid for mid in body.msg_ids if msg_id_platform_allowed(mid, filt)
+    ]
+    if not authorized_ids:
+        raise HTTPException(status_code=404, detail="message not found")
+
     # 占锁 + 初始化 run state（与 /messages/rerun 完全对称）
     task_id = uuid4().hex
     state.check_running = True
@@ -340,7 +357,7 @@ async def fetch_messages(
     async def _fetch() -> None:
         try:
             await PipelineEngine.run_fetch_and_process(
-                msg_ids=body.msg_ids,
+                msg_ids=authorized_ids,
                 skip_push=body.skip_push,
                 config=cfg,
                 store=store,

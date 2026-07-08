@@ -17,7 +17,11 @@ import logging
 from fastapi import APIRouter, Query, Request, Security
 
 from api.auth import get_resource_filter
-from api.resource_filter import TokenResourceFilter, filter_subscription_dict
+from api.resource_filter import (
+    TokenResourceFilter,
+    filter_subscription_dict,
+    subscription_visible,
+)
 from api.schemas import (
     EndpointBindRequest,
     SubscriptionAddRequest,
@@ -93,7 +97,15 @@ async def remove_sub(
     """删除订阅。
 
     未找到返回 200 + ``success=False``（与 add 的"已存在"语义对称），不映射成 404。
+
+    行级过滤（issue #106）：越权删除（token 不允许该平台/订阅）合并成「未找到」
+    语义（spec §7 表 / §8.3），不暴露存在性。
     """
+    if not subscription_visible(filt, platform, identifier):
+        # 与「未找到」语义合并，不暴露存在性（spec §8.3）
+        return SubscriptionRemoveResponse(
+            success=False, message="未找到: 订阅不存在或无权访问"
+        )
     success, message = await remove_subscription(platform, identifier)
     return SubscriptionRemoveResponse(success=success, message=message)
 
@@ -125,7 +137,11 @@ async def bind_endpoint(
     - 成功（首次/幂等）→ ``success=True``
     - 订阅不存在 → ``success=False``，message="未找到订阅"
     - endpoint 不在 ``[[endpoints]]`` 中 → ``success=False``，message="未知 endpoint: ..."
+
+    行级过滤（issue #106）：越权绑定合并成「未找到订阅」语义（spec §7 表）。
     """
+    if not subscription_visible(filt, platform, identifier):
+        return SubscriptionAddResponse(success=False, message="未找到订阅")
     success, message = await add_endpoint_to_subscription(
         platform, identifier, body.endpoint_name
     )
@@ -148,7 +164,11 @@ async def unbind_endpoint(
     """解绑 endpoint。订阅不存在返回 ``success=False``，其余（含幂等）返回 True。
 
     不做 endpoint 存在性校验（解绑引用无害，能清理历史脏数据）。
+
+    行级过滤（issue #106）：越权解绑合并成「未找到订阅」语义（spec §7 表）。
     """
+    if not subscription_visible(filt, platform, identifier):
+        return SubscriptionAddResponse(success=False, message="未找到订阅")
     success, message = await remove_endpoint_from_subscription(
         platform, identifier, endpoint_name
     )

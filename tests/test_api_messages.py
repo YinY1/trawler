@@ -718,3 +718,64 @@ class TestRowLevelMatrix:
             "deny-all": set(),  # platforms=[] 拒绝一切
         }[case]
         assert msg_ids == expected
+
+
+class TestRowLevelRerun:
+    """``POST /messages/rerun`` 越权处理（plan T5）。"""
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": ["bili"]}],
+        indirect=["row_filtered_client"],
+    )
+    async def test_rerun_all_unauthorized_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """全部 msg_id 越权（token 只允许 bili，传 xhs）→ 404。
+
+        部分越权 plan 要求 202 + 只跑合法 id（见下一测试）。本测试是**全部**越权。
+        """
+        resp = await row_filtered_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["xhs:u456"], "from_phase": "discovered"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "message not found"
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_rerun_partial_unauthorized_silently_skipped(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """部分越权 → 202，reset_count 只含合法的，且只把合法 id 传给后台 task。
+
+        ``tmp_data_dir_with_mixed_msgs`` 含 ``bili:100`` / ``bili:200`` /
+        ``xhs:u456`` / ``bili:300``。token 只允许 bili，传
+        ``["bili:100", "xhs:u456"]`` → ``xhs:u456`` 越权被过滤，``reset_count=1``。
+        """
+        with patch("api.routes.messages.PipelineEngine") as mock_engine:
+            mock_engine.run_specific_messages = AsyncMock()
+            resp = await row_filtered_client.post(
+                "/api/v1/messages/rerun",
+                json={"msg_ids": ["bili:100", "xhs:u456"], "from_phase": "discovered"},
+            )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "started"
+        assert data["reset_count"] == 1
+        # 等后台 task 触发 run_specific_messages
+        await asyncio.sleep(0.05)
+        # 关键：只把 authorized id 传给后台 task（越权 id 被过滤掉，不泄漏到 pipeline）
+        mock_engine.run_specific_messages.assert_called_once()
+        called_kwargs = mock_engine.run_specific_messages.call_args.kwargs
+        assert called_kwargs["msg_ids"] == ["bili:100"]
+        # 清理锁
+        app = row_filtered_client._app  # type: ignore[attr-defined]
+        app.state.check_running = False

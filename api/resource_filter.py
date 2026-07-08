@@ -152,15 +152,36 @@ def subscription_visible(
 ) -> bool:
     """订阅是否在 token 的行级权限内（写入路由越权判断用，spec §8.3）。
 
-    ``platform_full`` 是路由 URL 段的 TOML section 全名（如 ``bilibili``），
-    ``identifier`` 是订阅主键（``uid`` / ``user_id``）。内部走
-    ``SECTION_TO_SHORT`` 反查 short name 再交给 ``filt.allows_subscription``。
+    ``platform_full`` 是路由 URL 段，**优先按 TOML section 全名解析**（如
+    ``bilibili``），fallback 接受 short name（``bili``）—— 与现有
+    ``DELETE /subscriptions/{platform}/{identifier}`` 路由历史兼容（早期 URL
+    用 short name，#104 PR 后期改全名，两种形式都被业务层接受）。
+
+    ``identifier`` 是订阅主键（``uid`` / ``user_id``）。
+
+    两维 AND：platform 维度先粗筛，再 subscription_ref 维度细筛（spec §5.2）。
+    ``filt.allows_subscription`` 内部会先检查 ``subscription_refs is None`` → 不限订阅。
 
     与 ``filter_subscription_dict`` 区别：本函数返回 ``bool``（单条订阅判断），
     供 ``DELETE /subscriptions/...`` / ``bind/unbind endpoint`` 等写入路由
     越权时合并成「未找到」语义，不暴露存在性。
     """
+    # 优先按全名反查 short；找不到则尝试直接当 short name（兼容老 URL）
     short = SECTION_TO_SHORT.get(platform_full)
+    if short is None and platform_full in PLATFORM_TO_SECTION:
+        short = platform_full
     if short is None:
         return False
-    return filt.allows_subscription(short, str(identifier))
+    return filt.allows_platform(short) and filt.allows_subscription(short, str(identifier))
+
+
+def msg_id_platform_allowed(msg_id: str, filt: TokenResourceFilter) -> bool:
+    """``msg_id`` 前缀（platform short）是否在 token 行级权限内（spec §8.2）。
+
+    ``msg_id`` 形如 ``"bili:BV1xx"`` / ``"xhs:note1"``，按 ``:`` 前的 short
+    name 判 platform 可见性。**只看 platform 维度**，不做 subscription_ref
+    维度过滤（fetch 时消息可能还没入库，detector 尚未注入 subscription_ref，
+    见 spec §8.2 已知限制）。
+    """
+    short = msg_id.split(":", 1)[0] if ":" in msg_id else ""
+    return filt.allows_platform(short)

@@ -126,3 +126,101 @@ class TestFetchMessages:
         finally:
             app.state.check_running = False
             app.state.api_task_id = None  # type: ignore[attr-defined]
+
+
+# ═══════════════════════════════════════════════════════════
+# 行级过滤（issue #106 — plan T5）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def row_filtered_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 ``resource_rules`` 的 client（与 ``scoped_client`` 同模式）。"""
+    from httpx import ASGITransport
+
+    from web.app import create_app
+
+    params = request.param
+    scopes = params.get("scopes", [])
+    platforms = params.get("platforms")
+    subs = params.get("subscription_refs")
+
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+    from shared.config import ResourceRules
+
+    app = create_app()
+    plain = create_token(
+        "row-bot",
+        scopes=scopes,
+        resource_rules=ResourceRules(platforms=platforms, subscription_refs=subs),
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        c._app = app  # type: ignore[attr-defined]
+        yield c
+
+
+class TestRowLevelFetch:
+    """``POST /messages/fetch`` 越权处理（plan T5）。
+
+    fetch 是按需抓取，消息可能还没入库（不存在于 store），所以行级过滤**只看
+    msg_id 前缀（platform short）**，不做 subscription_ref 维度过滤（spec §8.2）。
+    """
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_fetch_all_unauthorized_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """fetch msg_id 前缀平台全部被禁（token 只允许 bili，传 xhs）→ 404。"""
+        resp = await row_filtered_client.post(
+            "/api/v1/messages/fetch",
+            json={"msg_ids": ["xhs:note1"], "skip_push": False},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "message not found"
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_fetch_partial_unauthorized_filtered(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """部分越权 id 被静默过滤掉（只跑合法的，传给后台 task 的只有 authorized ids）。"""
+        with patch("api.routes.messages.PipelineEngine") as mock_engine:
+            mock_engine.run_fetch_and_process = AsyncMock(return_value=1)
+            resp = await row_filtered_client.post(
+                "/api/v1/messages/fetch",
+                json={
+                    "msg_ids": ["bili:BV1xx", "xhs:note1"],
+                    "skip_push": False,
+                },
+            )
+        assert resp.status_code == 202
+        # 等后台 task 触发 run_fetch_and_process
+        await asyncio.sleep(0.05)
+        # 关键：只把 authorized id 传给后台 task（xhs:note1 被过滤掉）
+        mock_engine.run_fetch_and_process.assert_called_once()
+        called_kwargs = mock_engine.run_fetch_and_process.call_args.kwargs
+        assert called_kwargs["msg_ids"] == ["bili:BV1xx"]
+        # 清理锁
+        app = row_filtered_client._app  # type: ignore[attr-defined]
+        app.state.check_running = False
