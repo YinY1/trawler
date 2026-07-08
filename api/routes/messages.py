@@ -25,7 +25,8 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, Security
 from fastapi.responses import JSONResponse
 
-from api.auth import require_scopes
+from api.auth import get_resource_filter
+from api.resource_filter import TokenResourceFilter, msg_id_platform_allowed
 from api.schemas import (
     FetchRequest,
     FetchResponse,
@@ -100,13 +101,18 @@ async def list_messages(
     author: str | None = Query(None),
     platform: str | None = Query(None),
     phase: str | None = Query(None),
-    _token_name: str = Security(require_scopes, scopes=["messages:read"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["messages:read"]
+    ),
 ) -> MessageListResponse:
     """多维度筛选消息。
 
     所有过滤参数 AND 组合，缺省不过滤。``since`` 接受 unix 时间戳或相对/绝对
     时间字符串（``parse_since`` 解析）。``phase`` 按枚举名匹配（大小写不敏感，
     内部 ``Phase[phase.upper()]``）。
+
+    行级过滤（issue #106）：在用户主动过滤结果之上叠加 token 的
+    ``resource_rules``（``filt.allows_message``），越权消息不返回（spec §7.1）。
     """
     phase_enum: Phase | None = None
     if phase:
@@ -132,6 +138,8 @@ async def list_messages(
     matched = store.query_messages(
         since=since_ts, title=title, author=author, platform=platform, phase=phase_enum
     )
+    # 行级过滤：在用户主动过滤结果之上叠加 token 的 resource_rules
+    matched = [m for m in matched if filt.allows_message(m)]
     return MessageListResponse(
         messages=[_record_to_out(m) for m in matched],
         count=len(matched),
@@ -147,13 +155,19 @@ async def list_messages(
 async def get_message(
     msg_id: str,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["messages:read"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["messages:read"]
+    ),
 ) -> MessageOut:
-    """单条消息详情。不存在 → 404 ``{"detail": "message not found"}``。"""
+    """单条消息详情。不存在 → 404 ``{"detail": "message not found"}``。
+
+    行级过滤（issue #106）：越权消息也返回 404，不区分「不存在」与「存在但
+    越权」（spec §7.2，不暴露存在性）。
+    """
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
     rec = store.get_message(msg_id)
-    if rec is None:
+    if rec is None or not filt.allows_message(rec):
         raise HTTPException(status_code=404, detail="message not found")
     return _record_to_out(rec)
 
@@ -167,7 +181,9 @@ async def get_message(
 async def rerun_messages(
     body: RerunRequest,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["messages:write"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["messages:write"]
+    ),
 ) -> RerunResponse | JSONResponse:
     """批量重跑指定消息。
 
@@ -208,10 +224,18 @@ async def rerun_messages(
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
     # reset 数量：占锁前先查存在的消息数（reset_specific 在后台 task 内调）
-    existing = [m for m in (store.get_message(mid) for mid in body.msg_ids) if m is not None]
+    # 行级过滤（issue #106）：越权 msg_id 视为不存在（spec §8.1）。
+    # 部分越权 → 静默忽略越权 id（与 GET 过滤语义一致），全部越权才 404。
+    existing = [
+        m
+        for m in (store.get_message(mid) for mid in body.msg_ids)
+        if m is not None and filt.allows_message(m)
+    ]
     reset_count = len(existing)
     if reset_count == 0:
         raise HTTPException(status_code=404, detail="message not found")
+    # 越权 id 不传给后台 task（避免 pipeline 处理越权消息，spec §8.1）
+    authorized_msg_ids = [m.msg_id for m in existing]
 
     # ── 占锁 + 初始化 run state（与 /check/run 完全对称）──────────────
     task_id = uuid4().hex
@@ -225,7 +249,7 @@ async def rerun_messages(
     async def _rerun() -> None:
         try:
             await PipelineEngine.run_specific_messages(
-                msg_ids=body.msg_ids,
+                msg_ids=authorized_msg_ids,
                 from_phase=target_phase,
                 skip_push=body.skip_push,
                 config=cfg,
@@ -272,7 +296,9 @@ async def rerun_messages(
 async def fetch_messages(
     body: FetchRequest,
     request: Request,
-    _token_name: str = Security(require_scopes, scopes=["messages:write"]),
+    filt: TokenResourceFilter = Security(
+        get_resource_filter, scopes=["messages:write"]
+    ),
 ) -> FetchResponse | JSONResponse:
     """按 ID 抓取并处理（不依赖订阅）。
 
@@ -310,6 +336,15 @@ async def fetch_messages(
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
 
+    # 行级过滤（issue #106）：按 msg_id 前缀（platform short）过滤。
+    # fetch 是按需抓取，消息可能还没入库（不存在于 store），无法用
+    # ``filt.allows_message``（rec 不存在），只做 platform 维度过滤（spec §8.2）。
+    authorized_ids = [
+        mid for mid in body.msg_ids if msg_id_platform_allowed(mid, filt)
+    ]
+    if not authorized_ids:
+        raise HTTPException(status_code=404, detail="message not found")
+
     # 占锁 + 初始化 run state（与 /messages/rerun 完全对称）
     task_id = uuid4().hex
     state.check_running = True
@@ -322,7 +357,7 @@ async def fetch_messages(
     async def _fetch() -> None:
         try:
             await PipelineEngine.run_fetch_and_process(
-                msg_ids=body.msg_ids,
+                msg_ids=authorized_ids,
                 skip_push=body.skip_push,
                 config=cfg,
                 store=store,

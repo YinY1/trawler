@@ -255,3 +255,170 @@ class TestListWithScopes:
         assert "notifier" in out
         assert "messages:read" in out
         assert "check:read" in out
+
+
+# ── create --resource-platform / --resource-sub（issue #106 — plan T6）─────
+
+
+class TestCreateResourceRules:
+    """CLI ``create --resource-platform`` / ``--resource-sub`` multi-flag。"""
+
+    def test_create_with_resource_platform(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from web.auth import load_auth_config
+
+        result = runner.invoke(
+            cli,
+            [
+                "create", "bili-bot",
+                "--scope", "messages:read",
+                "--resource-platform", "bili",
+            ],
+        )
+        assert result.exit_code == 0
+        cfg = load_auth_config()
+        token = next(t for t in cfg.api_tokens if t.name == "bili-bot")
+        assert token.resource_rules.platforms == ["bili"]
+        assert token.resource_rules.subscription_refs is None
+
+    def test_create_with_multiple_resource_platforms(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from web.auth import load_auth_config
+
+        result = runner.invoke(
+            cli,
+            [
+                "create", "multi-bot",
+                "--resource-platform", "bili",
+                "--resource-platform", "xhs",
+            ],
+        )
+        assert result.exit_code == 0
+        cfg = load_auth_config()
+        token = next(t for t in cfg.api_tokens if t.name == "multi-bot")
+        assert set(token.resource_rules.platforms) == {"bili", "xhs"}
+
+    def test_create_with_multiple_resource_sub(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from web.auth import load_auth_config
+
+        result = runner.invoke(
+            cli,
+            [
+                "create", "up-bot",
+                "--scope", "messages:read",
+                "--resource-sub", "bili:100",
+                "--resource-sub", "xhs:u456",
+            ],
+        )
+        assert result.exit_code == 0
+        cfg = load_auth_config()
+        token = next(t for t in cfg.api_tokens if t.name == "up-bot")
+        assert token.resource_rules.subscription_refs == ["bili:100", "xhs:u456"]
+        assert token.resource_rules.platforms is None
+
+    def test_create_invalid_platform_rejected(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``--resource-platform invalid`` → 退出码非 0，不落盘。"""
+        result = runner.invoke(
+            cli, ["create", "x", "--resource-platform", "invalid"]
+        )
+        assert result.exit_code != 0
+
+        from web.auth import load_auth_config
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 0  # 未落盘
+
+    def test_create_invalid_sub_format_rejected(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``--resource-sub no-colon`` → 退出码非 0，不落盘。"""
+        result = runner.invoke(
+            cli, ["create", "x", "--resource-sub", "no-colon"]
+        )
+        assert result.exit_code != 0
+
+        from web.auth import load_auth_config
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 0
+
+    def test_create_invalid_sub_platform_rejected(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``--resource-sub invalid:100`` （平台不合法）→ 退出码非 0。"""
+        result = runner.invoke(
+            cli, ["create", "x", "--resource-sub", "invalid:100"]
+        )
+        assert result.exit_code != 0
+
+    def test_create_warns_on_meaningless_combination(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        """``platforms=[bili]`` + ``subs=[xhs:u456]`` 无交集 → warning（不阻止创建）。
+
+        spec §11 风险表：这种组合 AND 后会拒绝一切，CLI 创建时提示但不强制拒绝。
+        """
+        result = runner.invoke(
+            cli,
+            [
+                "create", "x",
+                "--resource-platform", "bili",
+                "--resource-sub", "xhs:u456",
+            ],
+        )
+        assert result.exit_code == 0
+        # 输出含 warning（中文「⚠️」或英文「warning」均可）
+        assert "warning" in result.output.lower() or "⚠" in result.output
+
+
+class TestListResourceRules:
+    """``list`` 命令显示 ``Resource Rules`` 列（plan T6）。"""
+
+    def test_list_shows_resource_rules_column(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+        from shared.config import ResourceRules
+
+        # 全权限 token
+        create_token("admin-bot")
+        # 受限 token
+        create_token(
+            "bili-bot",
+            scopes=["messages:read"],
+            resource_rules=ResourceRules(platforms=["bili"]),
+        )
+
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        out = result.output
+        # 列标题
+        assert "Resource Rules" in out
+        # 全权限标记
+        assert "unrestricted" in out.lower()
+        # 受限 token 的 platforms 显示（Rich Table 可能因终端宽度截断，
+        # 只检查 "platforms=" 前缀出现即可）
+        assert "platforms=" in out
+
+    def test_list_shows_subscription_refs(
+        self, runner: CliRunner, auth_path: Path
+    ) -> None:
+        from api.auth import create_token
+        from shared.config import ResourceRules
+
+        create_token(
+            "up-bot",
+            scopes=["messages:read"],
+            resource_rules=ResourceRules(subscription_refs=["bili:100"]),
+        )
+        result = runner.invoke(cli, ["list"])
+        assert result.exit_code == 0
+        out = result.output
+        # subscription_refs 显示（Rich Table 可能截断，检查 "subs=" 前缀）
+        assert "subs=" in out

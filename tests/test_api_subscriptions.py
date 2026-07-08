@@ -463,3 +463,202 @@ class TestSubscriptionsScopes:
             "/api/v1/subscriptions/bilibili/123/endpoints/gotify-main"
         )
         assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════
+# 行级过滤（issue #106 — plan T4/T7）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def row_filtered_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 ``resource_rules`` 的 client（与 ``scoped_client`` 同模式）。"""
+    from httpx import ASGITransport
+
+    from web.app import create_app
+
+    params = request.param
+    scopes = params.get("scopes", [])
+    platforms = params.get("platforms")
+    subs = params.get("subscription_refs")
+
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+    from shared.config import ResourceRules
+
+    app = create_app()
+    plain = create_token(
+        "row-bot",
+        scopes=scopes,
+        resource_rules=ResourceRules(platforms=platforms, subscription_refs=subs),
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        yield c
+
+
+class TestRowLevelListSubs:
+    """``GET /subscriptions`` 行级过滤（plan T4）。"""
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:read"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_list_subs_filters_by_platform(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """token 只允许 bili → response 只含 ``bilibili`` section（排除 xhs/weibo）。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = {
+                "bilibili": [{"uid": 100, "name": "UP1"}],
+                "xiaohongshu": [{"user_id": "u456", "name": "XHS1"}],
+                "weibo": [{"user_id": "w1", "name": "W1"}],
+            }
+            resp = await row_filtered_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()
+        sections = set(data["platforms"].keys())
+        assert sections == {"bilibili"}
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:read"], "subscription_refs": ["bili:100"]}],
+        indirect=True,
+    )
+    async def test_list_subs_filters_by_subscription(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """token 只允许 ``bili:100`` → response.bilibili 列表只含 uid=100 那条。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = {
+                "bilibili": [
+                    {"uid": 100, "name": "UP-100"},
+                    {"uid": 200, "name": "UP-200"},
+                ],
+            }
+            resp = await row_filtered_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        bili_subs = resp.json()["platforms"]["bilibili"]
+        # 只剩 uid=100（uid=200 被过滤）
+        assert len(bili_subs) == 1
+        assert bili_subs[0]["uid"] == 100
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:read"]}],  # 全权限
+        indirect=True,
+    )
+    async def test_list_subs_unrestricted_returns_all(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """全权限 token 不过滤（兼容性回归）。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = {
+                "bilibili": [{"uid": 100, "name": "UP1"}],
+                "xiaohongshu": [{"user_id": "u456", "name": "XHS1"}],
+            }
+            resp = await row_filtered_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert set(data["platforms"].keys()) == {"bilibili", "xiaohongshu"}
+
+
+class TestRowLevelSubsWrite:
+    """订阅写入路由越权处理（plan T5）。
+
+    越权 → 200 + ``success=False``（与「未找到」语义合并，不暴露存在性，
+    spec §7 表 / §8.3）。三个写入路由（``remove_sub`` / ``bind_endpoint`` /
+    ``unbind_endpoint``）统一调 ``subscription_visible`` helper，避免重复 inline。
+    """
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_delete_sub_unauthorized_returns_success_false(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """越权删除（token 只允许 bili，删 xhs 订阅）→ 200 + success=False。"""
+        with patch(
+            "api.routes.subscriptions.remove_subscription",
+            new_callable=AsyncMock,
+        ) as mock_remove:
+            # mock 不会被调用（越权在路由层就被拦了）
+            resp = await row_filtered_client.delete(
+                "/api/v1/subscriptions/xiaohongshu/u456"
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "未找到" in data["message"]
+        mock_remove.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_bind_endpoint_unauthorized_returns_success_false(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """越权绑定（token 只允许 bili，绑到 xhs 订阅）→ 200 + success=False。"""
+        with patch(
+            "api.routes.subscriptions.add_endpoint_to_subscription",
+            new_callable=AsyncMock,
+        ) as mock_bind:
+            resp = await row_filtered_client.post(
+                "/api/v1/subscriptions/xiaohongshu/u456/endpoints",
+                json={"endpoint_name": "gotify-main"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        mock_bind.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["subscriptions:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_unbind_endpoint_unauthorized_returns_success_false(
+        self,
+        row_filtered_client: AsyncClient,
+    ) -> None:
+        """越权解绑（token 只允许 bili，解绑 xhs 订阅）→ 200 + success=False。"""
+        with patch(
+            "api.routes.subscriptions.remove_endpoint_from_subscription",
+            new_callable=AsyncMock,
+        ) as mock_unbind:
+            resp = await row_filtered_client.delete(
+                "/api/v1/subscriptions/xiaohongshu/u456/endpoints/gotify-main"
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        mock_unbind.assert_not_awaited()

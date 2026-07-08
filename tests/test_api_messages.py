@@ -469,3 +469,384 @@ class TestMessagesScopes:
             json={"platform": "bilibili", "msg_ids": ["123"]},
         )
         assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════
+# 行级过滤（issue #106 — plan T4/T7）
+# ═══════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+async def row_filtered_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> AsyncClient:
+    """带指定 ``resource_rules`` 的 client（与 ``scoped_client`` 同模式）。
+
+    ``request.param`` 是 dict，形如::
+
+        {"scopes": ["messages:read"], "platforms": ["bili"],
+         "subscription_refs": ["bili:100"]}
+
+    缺省字段（``platforms`` / ``subscription_refs``）= ``None``（不限）。
+    """
+    from httpx import ASGITransport
+
+    from web.app import create_app
+
+    params = request.param
+    scopes = params.get("scopes", [])
+    platforms = params.get("platforms")
+    subs = params.get("subscription_refs")
+
+    auth_path = tmp_path / "auth.toml"
+    monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
+    monkeypatch.setattr("api.auth.AUTH_TOML_PATH", auth_path)
+    set_password(PASSWORD)
+
+    from api.auth import create_token
+    from shared.config import ResourceRules
+
+    app = create_app()
+    plain = create_token(
+        "row-bot",
+        scopes=scopes,
+        resource_rules=ResourceRules(platforms=platforms, subscription_refs=subs),
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        c._app = app  # type: ignore[attr-defined]
+        yield c
+
+
+@pytest.fixture
+def tmp_data_dir_with_mixed_msgs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """落盘 4 条混合平台/订阅的 ``MessageRecord`` 到 ``messages.json``。
+
+    覆盖矩阵：
+      - ``bili:100`` （platform=bili, subscription_ref=100）
+      - ``bili:200`` （platform=bili, subscription_ref=200）
+      - ``xhs:u456`` （platform=xhs, subscription_ref=u456）
+      - ``bili:300`` （platform=bili, subscription_ref=300，用于「部分越权」场景）
+
+    这样 5 种 ``resource_rules`` 场景都能在返回集合上做出可区分断言。
+
+    注：``MessageStore._load`` 期望 ``{"messages": {msg_id: data}}`` 格式
+    （dict keyed by msg_id，不是 list）。``content_type`` / ``phase`` 字段写
+    enum 的 ``.value``（int），与 ``_msg_from_dict`` 反序列化逻辑对齐。
+    路由层调 ``MessageStore(cfg.general.data_dir)``，因此 fixture mock
+    ``load_config`` 让 ``cfg.general.data_dir`` 指向 tmp 目录（与现有测试
+    ``mock_load.return_value.general.data_dir = "/tmp"`` 同模式，但本 fixture
+    让 store 真读 fixture 写的 messages.json）。
+    """
+    import json
+    import time
+    from unittest.mock import AsyncMock
+
+    now = time.time()
+    messages: dict[str, dict[str, object]] = {
+        "bili:100": {
+            "platform": "bili", "content_type": ContentType.VIDEO.value,
+            "phase": Phase.SUMMARIZED.value, "pubdate": int(now),
+            "title": "bili-100", "author": "a", "subscription_ref": "100",
+            "created_at": now, "updated_at": now,
+        },
+        "bili:200": {
+            "platform": "bili", "content_type": ContentType.VIDEO.value,
+            "phase": Phase.SUMMARIZED.value, "pubdate": int(now),
+            "title": "bili-200", "author": "a", "subscription_ref": "200",
+            "created_at": now, "updated_at": now,
+        },
+        "xhs:u456": {
+            "platform": "xhs", "content_type": ContentType.TEXT.value,
+            "phase": Phase.SUMMARIZED.value, "pubdate": int(now),
+            "title": "xhs-u456", "author": "a", "subscription_ref": "u456",
+            "created_at": now, "updated_at": now,
+        },
+        "bili:300": {
+            "platform": "bili", "content_type": ContentType.VIDEO.value,
+            "phase": Phase.SUMMARIZED.value, "pubdate": int(now),
+            "title": "bili-300", "author": "a", "subscription_ref": "300",
+            "created_at": now, "updated_at": now,
+        },
+    }
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "messages.json").write_text(
+        json.dumps({"messages": messages}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    # mock load_config 让路由层 MessageStore(data_dir) 真读 fixture 文件
+    from shared.config import Config, GeneralConfig
+
+    fake_cfg = Config(general=GeneralConfig(data_dir=str(data_dir)))
+    mock_load = AsyncMock(return_value=fake_cfg)
+    monkeypatch.setattr("api.routes.messages.load_config", mock_load)
+    return data_dir
+
+
+class TestRowLevelGet:
+    """``GET /messages`` 与 ``GET /messages/{msg_id}`` 行级过滤（plan T4）。"""
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:read"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_list_messages_filters_by_platform(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """token 只允许 bili → response 只含 bili 消息（排除 xhs）。"""
+        resp = await row_filtered_client.get("/api/v1/messages")
+        assert resp.status_code == 200
+        platforms = {m["platform"] for m in resp.json()["messages"]}
+        assert platforms == {"bili"}
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:read"], "subscription_refs": ["bili:100"]}],
+        indirect=True,
+    )
+    async def test_list_messages_filters_by_subscription(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """token 只允许 ``bili:100`` → response 只含 subscription_ref=100 的消息。"""
+        resp = await row_filtered_client.get("/api/v1/messages")
+        assert resp.status_code == 200
+        msg_ids = {m["msg_id"] for m in resp.json()["messages"]}
+        assert msg_ids == {"bili:100"}
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:read"], "platforms": ["xhs"]}],
+        indirect=True,
+    )
+    async def test_get_message_unauthorized_platform_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """越权平台 → 404（不暴露存在性，spec §7.2）。"""
+        # tmp_data_dir_with_mixed_msgs 含 bili:100 消息，但 token 只允许 xhs
+        resp = await row_filtered_client.get("/api/v1/messages/bili:100")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "message not found"
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:read"], "subscription_refs": ["bili:200"]}],
+        indirect=True,
+    )
+    async def test_get_message_unauthorized_subscription_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """越权订阅 → 404（``bili:100`` 不在 token 允许的 ``bili:200`` 中）。"""
+        resp = await row_filtered_client.get("/api/v1/messages/bili:100")
+        assert resp.status_code == 404
+
+    async def test_unrestricted_token_no_filter(
+        self,
+        authed_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """全权限 token 不过滤（兼容性回归，spec §10.5）。"""
+        resp = await authed_client.get("/api/v1/messages")
+        assert resp.status_code == 200
+        msg_ids = {m["msg_id"] for m in resp.json()["messages"]}
+        assert msg_ids == {"bili:100", "bili:200", "xhs:u456", "bili:300"}
+
+
+class TestRowLevelMatrix:
+    """5 种 ``resource_rules`` 场景下 ``list_messages`` 的行为矩阵（plan T7）。"""
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [
+            pytest.param({"scopes": ["messages:read"]}, id="unrestricted"),
+            pytest.param(
+                {"scopes": ["messages:read"], "platforms": ["bili"]}, id="platform-bili"
+            ),
+            pytest.param(
+                {"scopes": ["messages:read"], "subscription_refs": ["bili:100"]},
+                id="sub-bili-100",
+            ),
+            pytest.param(
+                {
+                    "scopes": ["messages:read"],
+                    "platforms": ["bili"],
+                    "subscription_refs": ["bili:100"],
+                },
+                id="platform-and-sub",
+            ),
+            pytest.param(
+                {"scopes": ["messages:read"], "platforms": []}, id="deny-all"
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_list_messages_row_level_matrix(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+        request: pytest.FixtureRequest,
+    ) -> None:
+        """5 种 resource_rules 场景下 list_messages 的返回集合。
+
+        ``tmp_data_dir_with_mixed_msgs`` 含 4 条: bili:100 / bili:200 / xhs:u456 / bili:300。
+        """
+        resp = await row_filtered_client.get("/api/v1/messages")
+        assert resp.status_code == 200
+        msg_ids = {m["msg_id"] for m in resp.json()["messages"]}
+
+        case = request.node.callspec.id
+        expected = {
+            "unrestricted": {"bili:100", "bili:200", "xhs:u456", "bili:300"},
+            "platform-bili": {"bili:100", "bili:200", "bili:300"},  # 排除 xhs
+            "sub-bili-100": {"bili:100"},  # 只剩 uid=100
+            "platform-and-sub": {"bili:100"},  # bili AND uid=100
+            "deny-all": set(),  # platforms=[] 拒绝一切
+        }[case]
+        assert msg_ids == expected
+
+
+class TestRowLevelRerun:
+    """``POST /messages/rerun`` 越权处理（plan T5）。"""
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": ["bili"]}],
+        indirect=["row_filtered_client"],
+    )
+    async def test_rerun_all_unauthorized_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """全部 msg_id 越权（token 只允许 bili，传 xhs）→ 404。
+
+        部分越权 plan 要求 202 + 只跑合法 id（见下一测试）。本测试是**全部**越权。
+        """
+        resp = await row_filtered_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["xhs:u456"], "from_phase": "discovered"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "message not found"
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": ["bili"]}],
+        indirect=True,
+    )
+    async def test_rerun_partial_unauthorized_silently_skipped(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """部分越权 → 202，reset_count 只含合法的，且只把合法 id 传给后台 task。
+
+        ``tmp_data_dir_with_mixed_msgs`` 含 ``bili:100`` / ``bili:200`` /
+        ``xhs:u456`` / ``bili:300``。token 只允许 bili，传
+        ``["bili:100", "xhs:u456"]`` → ``xhs:u456`` 越权被过滤，``reset_count=1``。
+        """
+        with patch("api.routes.messages.PipelineEngine") as mock_engine:
+            mock_engine.run_specific_messages = AsyncMock()
+            resp = await row_filtered_client.post(
+                "/api/v1/messages/rerun",
+                json={"msg_ids": ["bili:100", "xhs:u456"], "from_phase": "discovered"},
+            )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "started"
+        assert data["reset_count"] == 1
+        # 等后台 task 触发 run_specific_messages
+        await asyncio.sleep(0.05)
+        # 关键：只把 authorized id 传给后台 task（越权 id 被过滤掉，不泄漏到 pipeline）
+        mock_engine.run_specific_messages.assert_called_once()
+        called_kwargs = mock_engine.run_specific_messages.call_args.kwargs
+        assert called_kwargs["msg_ids"] == ["bili:100"]
+        # 清理锁
+        app = row_filtered_client._app  # type: ignore[attr-defined]
+        app.state.check_running = False
+
+
+class TestRowLevelCrossRoute:
+    """跨路由行级过滤一致性（plan T7 补全）。
+
+    覆盖 matrix 在 ``get_message`` / ``rerun`` 上的行为，与 ``list_messages``
+    matrix 形成对照（spec §10.3 / §10.4）。
+    """
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:read"], "platforms": []}],  # deny-all
+        indirect=True,
+    )
+    async def test_get_message_deny_all_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """``platforms=[]`` deny-all → ``get_message`` 任何 msg_id 都 404。"""
+        resp = await row_filtered_client.get("/api/v1/messages/bili:100")
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [{"scopes": ["messages:write"], "platforms": []}],  # deny-all
+        indirect=True,
+    )
+    async def test_rerun_deny_all_returns_404(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """``platforms=[]`` deny-all → ``rerun`` 任何 msg_id 都 404。"""
+        resp = await row_filtered_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["bili:100"], "from_phase": "discovered"},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize(
+        "row_filtered_client",
+        [
+            {
+                "scopes": ["messages:read"],
+                "platforms": ["bili"],
+                "subscription_refs": ["bili:100"],
+            }
+        ],
+        indirect=True,
+    )
+    async def test_get_message_and_combination(
+        self,
+        row_filtered_client: AsyncClient,
+        tmp_data_dir_with_mixed_msgs: Path,
+    ) -> None:
+        """AND 组合：``platforms=[bili]`` + ``subs=[bili:100]``。
+
+        - ``bili:100`` 通过（platform + sub 都允许）
+        - ``bili:200`` 404（platform 通过但 sub 拒绝）
+        - ``xhs:u456`` 404（platform 拒绝）
+        """
+        # bili:100 可见
+        resp = await row_filtered_client.get("/api/v1/messages/bili:100")
+        assert resp.status_code == 200
+        # bili:200 越权（sub 维度）
+        resp = await row_filtered_client.get("/api/v1/messages/bili:200")
+        assert resp.status_code == 404
+        # xhs:u456 越权（platform 维度）
+        resp = await row_filtered_client.get("/api/v1/messages/xhs:u456")
+        assert resp.status_code == 404

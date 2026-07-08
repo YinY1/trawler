@@ -20,11 +20,13 @@ import logging
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Sequence
 
 from fastapi import HTTPException, Request
 from fastapi.security import SecurityScopes
 
-from shared.config import ApiTokenEntry
+from api.resource_filter import TokenResourceFilter
+from shared.config import ApiTokenEntry, ResourceRules
 from web.auth import AUTH_TOML_PATH, load_auth_config, save_auth_config
 
 logger = logging.getLogger(__name__)
@@ -118,6 +120,39 @@ async def require_token(request: Request) -> str:
     raise HTTPException(status_code=401, detail="invalid or missing token")
 
 
+def _authenticate_and_check_scope(
+    request: Request, required_scopes: Sequence[str]
+) -> ApiTokenEntry:
+    """身份校验 + scope 校验共享逻辑（spec §6.3 私有 helper）。
+
+    ``require_scopes`` 与 ``get_resource_filter`` 共用：抽出来避免 401/403
+    处理逻辑两份复制（spec §6.3 风险表「重复」缓解措施）。
+
+    - 无 header / token 不匹配 → 401 ``invalid or missing token``
+    - 缺任一 required scope → 403 ``insufficient scope: requires xxx``
+    - 通过 → 返回匹配的 ``ApiTokenEntry``（含 ``resource_rules``）
+
+    返回完整 ``ApiTokenEntry`` 而非 ``name``，让 ``get_resource_filter`` 能
+    一次性拿到 ``resource_rules`` 构造 ``TokenResourceFilter``。
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="invalid or missing token")
+    plain = auth[len("Bearer ") :]
+    cfg = load_auth_config()
+    for entry in cfg.api_tokens:
+        if _verify_token(plain, entry.token_hash):
+            # 身份通过，校验 scope
+            for required in required_scopes:
+                if not token_has_scope(entry, required):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"insufficient scope: requires {required}",
+                    )
+            return entry
+    raise HTTPException(status_code=401, detail="invalid or missing token")
+
+
 async def require_scopes(
     security_scopes: SecurityScopes,
     request: Request,
@@ -136,34 +171,46 @@ async def require_scopes(
     特殊情况：
     - ``security_scopes.scopes == ()``（路由不要求 scope）→ 行为等价 ``require_token``
     - ``token.scopes == []``（空 list）= 全权限（spec §5），任何 required 都放行
+
+    保留供「不需要行级过滤」的路由（如 check）使用，与 ``get_resource_filter``
+    共享 ``_authenticate_and_check_scope`` 私有 helper 避免 401/403 逻辑重复。
     """
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="invalid or missing token")
-    plain = auth[len("Bearer ") :]
-    cfg = load_auth_config()
-    for entry in cfg.api_tokens:
-        if _verify_token(plain, entry.token_hash):
-            # 身份通过，校验 scope
-            for required in security_scopes.scopes:
-                if not token_has_scope(entry, required):
-                    raise HTTPException(
-                        status_code=403,
-                        detail=f"insufficient scope: requires {required}",
-                    )
-            return entry.name
-    raise HTTPException(status_code=401, detail="invalid or missing token")
+    entry = _authenticate_and_check_scope(request, security_scopes.scopes)
+    return entry.name
+
+
+async def get_resource_filter(
+    security_scopes: SecurityScopes,
+    request: Request,
+) -> TokenResourceFilter:
+    """FastAPI 依赖：scope 校验 + 行级过滤视图构造（spec §6.3）。
+
+    一个依赖同时承担两层职责（``Security(get_resource_filter, scopes=[...])``）：
+
+    - 无 header / token 不匹配 → 401（同 ``require_scopes``）
+    - 缺 scope → 403（同 ``require_scopes``）
+    - 通过 → 返回 ``TokenResourceFilter.from_token(entry)``（含 token 的行级规则视图）
+
+    路由层用 ``filt.allows_message(m)`` / ``filt.allows_subscription(p, r)`` 判断
+    可见性，不直接读 ``ApiTokenEntry.resource_rules``（避免路由层处理 list/None
+    分支，集中到 ``TokenResourceFilter``）。
+    """
+    entry = _authenticate_and_check_scope(request, security_scopes.scopes)
+    return TokenResourceFilter.from_token(entry)
 
 
 def create_token(
     name: str,
     scopes: list[str] | None = None,
+    resource_rules: ResourceRules | None = None,
     auth_path: Path = AUTH_TOML_PATH,
 ) -> str:
     """生成新 token，hash 后存 ``data/auth.toml``，返回明文（仅此一次）。
 
     同名 token 覆盖（先删后加），保证唯一性。
     ``scopes`` 为 None 或空 list → 空 list 落盘（= 全权限，spec §5）。
+    ``resource_rules`` 为 None → 默认 ``ResourceRules()``（两字段 None = 全权限，
+    兼容老 token）。受限规则会序列化到 ``[resource_rules]`` 嵌套 table。
     ``auth_path`` 参数供测试 monkeypatch。
     """
     plain = secrets.token_urlsafe(32)
@@ -175,6 +222,7 @@ def create_token(
             token_hash=_hash_token(plain),
             created_at=datetime.now(timezone.utc).timestamp(),
             scopes=list(scopes) if scopes else [],
+            resource_rules=resource_rules or ResourceRules(),
         )
     )
     save_auth_config(cfg)
