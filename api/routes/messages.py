@@ -25,8 +25,8 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, Security
 from fastapi.responses import JSONResponse
 
-from api.auth import get_resource_filter
-from api.resource_filter import TokenResourceFilter, msg_id_platform_allowed
+from api.auth import get_token_ownership
+from api.resource_filter import TokenOwnership, message_visible
 from api.schemas import (
     FetchRequest,
     FetchResponse,
@@ -101,8 +101,8 @@ async def list_messages(
     author: str | None = Query(None),
     platform: str | None = Query(None),
     phase: str | None = Query(None),
-    filt: TokenResourceFilter = Security(
-        get_resource_filter, scopes=["messages:read"]
+    ownership: TokenOwnership = Security(
+        get_token_ownership, scopes=["messages:read"]
     ),
 ) -> MessageListResponse:
     """多维度筛选消息。
@@ -111,8 +111,8 @@ async def list_messages(
     时间字符串（``parse_since`` 解析）。``phase`` 按枚举名匹配（大小写不敏感，
     内部 ``Phase[phase.upper()]``）。
 
-    行级过滤（issue #106）：在用户主动过滤结果之上叠加 token 的
-    ``resource_rules``（``filt.allows_message``），越权消息不返回（spec §7.1）。
+    ownership 过滤（issue #108）：msg → subscription_ref 反查 sub →
+    ``ownership.has_sub_access(sub)``。无主消息只 superuser 可见。
     """
     phase_enum: Phase | None = None
     if phase:
@@ -138,8 +138,8 @@ async def list_messages(
     matched = store.query_messages(
         since=since_ts, title=title, author=author, platform=platform, phase=phase_enum
     )
-    # 行级过滤：在用户主动过滤结果之上叠加 token 的 resource_rules
-    matched = [m for m in matched if filt.allows_message(m)]
+    # ownership 过滤（issue #108）：msg → sub → has_sub_access
+    matched = [m for m in matched if message_visible(ownership, cfg, m)]
     return MessageListResponse(
         messages=[_record_to_out(m) for m in matched],
         count=len(matched),
@@ -155,19 +155,19 @@ async def list_messages(
 async def get_message(
     msg_id: str,
     request: Request,
-    filt: TokenResourceFilter = Security(
-        get_resource_filter, scopes=["messages:read"]
+    ownership: TokenOwnership = Security(
+        get_token_ownership, scopes=["messages:read"]
     ),
 ) -> MessageOut:
-    """单条消息详情。不存在 → 404 ``{"detail": "message not found"}``。
+    """单条消息详情。不存在或越权 → 404。
 
-    行级过滤（issue #106）：越权消息也返回 404，不区分「不存在」与「存在但
-    越权」（spec §7.2，不暴露存在性）。
+    ownership 校验（issue #108）：越权消息也返回 404，不区分「不存在」与
+    「存在但越权」（不暴露存在性）。
     """
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
     rec = store.get_message(msg_id)
-    if rec is None or not filt.allows_message(rec):
+    if rec is None or not message_visible(ownership, cfg, rec):
         raise HTTPException(status_code=404, detail="message not found")
     return _record_to_out(rec)
 
@@ -181,8 +181,8 @@ async def get_message(
 async def rerun_messages(
     body: RerunRequest,
     request: Request,
-    filt: TokenResourceFilter = Security(
-        get_resource_filter, scopes=["messages:write"]
+    ownership: TokenOwnership = Security(
+        get_token_ownership, scopes=["messages:write"]
     ),
 ) -> RerunResponse | JSONResponse:
     """批量重跑指定消息。
@@ -224,12 +224,13 @@ async def rerun_messages(
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
     # reset 数量：占锁前先查存在的消息数（reset_specific 在后台 task 内调）
-    # 行级过滤（issue #106）：越权 msg_id 视为不存在（spec §8.1）。
+    # ownership 过滤（issue #108）：越权 msg_id 视为不存在（spec §8.1）。
     # 部分越权 → 静默忽略越权 id（与 GET 过滤语义一致），全部越权才 404。
+    # I3 修订（issue #108 review）：cfg 已在上方加载，本 step 复用，不重复 load。
     existing = [
         m
         for m in (store.get_message(mid) for mid in body.msg_ids)
-        if m is not None and filt.allows_message(m)
+        if m is not None and message_visible(ownership, cfg, m)
     ]
     reset_count = len(existing)
     if reset_count == 0:
@@ -296,8 +297,8 @@ async def rerun_messages(
 async def fetch_messages(
     body: FetchRequest,
     request: Request,
-    filt: TokenResourceFilter = Security(
-        get_resource_filter, scopes=["messages:write"]
+    ownership: TokenOwnership = Security(
+        get_token_ownership, scopes=["messages:write"]
     ),
 ) -> FetchResponse | JSONResponse:
     """按 ID 抓取并处理（不依赖订阅）。
@@ -306,6 +307,8 @@ async def fetch_messages(
     完全对称、互斥）。
 
     - ``msg_ids`` 空 → 422
+    - 非 superuser（无 ``tokens:manage`` scope）→ 403（issue #108：fetch
+      抓取的消息可能无主，无法归属 owner，只 superuser 能调）
     - 已有 run 在跑 → 409 ``{"status": "already_running", "task_id": ...}``
     - 成功 → 202 + ``{"status": "started", "task_id": ..., "fetch_count": null}``
 
@@ -325,6 +328,14 @@ async def fetch_messages(
             status_code=422, detail="msg_ids 不能为空"
         )
 
+    # issue #108: fetch 抓取的消息可能 subscription_ref 为空（无主），
+    # 无法判断 owner，只允许 superuser 调用
+    if not ownership.is_superuser:
+        raise HTTPException(
+            status_code=403,
+            detail="fetch requires tokens:manage (superuser only)",
+        )
+
     state = request.app.state
     if state.check_running:
         existing_task_id = getattr(state, "api_task_id", None)
@@ -335,15 +346,6 @@ async def fetch_messages(
 
     cfg = await load_config()
     store = MessageStore(cfg.general.data_dir)
-
-    # 行级过滤（issue #106）：按 msg_id 前缀（platform short）过滤。
-    # fetch 是按需抓取，消息可能还没入库（不存在于 store），无法用
-    # ``filt.allows_message``（rec 不存在），只做 platform 维度过滤（spec §8.2）。
-    authorized_ids = [
-        mid for mid in body.msg_ids if msg_id_platform_allowed(mid, filt)
-    ]
-    if not authorized_ids:
-        raise HTTPException(status_code=404, detail="message not found")
 
     # 占锁 + 初始化 run state（与 /messages/rerun 完全对称）
     task_id = uuid4().hex
@@ -357,7 +359,7 @@ async def fetch_messages(
     async def _fetch() -> None:
         try:
             await PipelineEngine.run_fetch_and_process(
-                msg_ids=authorized_ids,
+                msg_ids=body.msg_ids,
                 skip_push=body.skip_push,
                 config=cfg,
                 store=store,
