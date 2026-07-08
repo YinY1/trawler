@@ -497,7 +497,6 @@ class TestResourceRulesData:
     ) -> None:
         """默认 ``ResourceRules()`` 不写出 ``[resource_rules]`` section（diff 干净）。"""
         from shared.config import ApiTokenEntry, ResourceRules, WebAuthConfig
-
         from web.auth import save_auth_config
 
         cfg = WebAuthConfig(
@@ -527,7 +526,6 @@ class TestResourceRulesData:
             ResourceRules,
             WebAuthConfig,
         )
-
         from web.auth import load_auth_config, save_auth_config
 
         cases: list[tuple[str, ResourceRules]] = [
@@ -559,9 +557,8 @@ class TestResourceRulesData:
 
     def test_create_token_with_resource_rules(self, auth_path: Path) -> None:
         """``create_token(resource_rules=...)`` 落盘后能读回。"""
-        from shared.config import ResourceRules
-
         from api.auth import create_token
+        from shared.config import ResourceRules
         from web.auth import load_auth_config
 
         plain = create_token(
