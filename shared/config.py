@@ -246,6 +246,24 @@ class WeiboConfig:
 
 
 @dataclass
+class ResourceRules:
+    """token 行级过滤规则（issue #106 spec §4）。
+
+    所有字段 ``None`` 表示**不限制**该维度；空 list 表示**禁止一切**（与
+    ``scopes == []`` 的「全权限」语义**相反**，见 spec §5.3）。
+
+    - ``platforms``: 允许的平台 short name 列表（``"bili"`` / ``"xhs"`` /
+      ``"weibo"``）。``None`` = 不限平台；``[]`` = 拒绝所有平台。
+    - ``subscription_refs``: 允许的订阅复合 key 列表，格式
+      ``<platform_short>:<id>``（如 ``"bili:100"`` / ``"xhs:u456"``）。
+      ``None`` = 不限订阅；``[]`` = 拒绝所有订阅。
+    """
+
+    platforms: list[str] | None = None
+    subscription_refs: list[str] | None = None
+
+
+@dataclass
 class ApiTokenEntry:
     """API token 条目（``data/auth.toml`` 的 ``[[api_tokens]]`` AoT 行）。
 
@@ -254,12 +272,17 @@ class ApiTokenEntry:
 
     ``scopes`` 为空 list 表示拥有全部 scope（向后兼容老 token，spec §5）。
     非 list 表示受限 —— 路由层通过 ``api.auth.require_scopes`` 强制校验。
+
+    ``resource_rules`` 是行级过滤规则（issue #106）：默认 ``ResourceRules()``
+    两字段 ``None`` = 全权限（向后兼容老 token）。路由层通过
+    ``api.auth.get_resource_filter`` 拿到 ``TokenResourceFilter`` 视图。
     """
 
     name: str
     token_hash: str  # SHA-256 hexdigest
     created_at: float = 0.0  # unix ts；默认 0.0 允许老数据/手工编辑兼容
     scopes: list[str] = field(default_factory=list)
+    resource_rules: ResourceRules = field(default_factory=ResourceRules)
 
 
 @dataclass

@@ -24,7 +24,7 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.security import SecurityScopes
 
-from shared.config import ApiTokenEntry
+from shared.config import ApiTokenEntry, ResourceRules
 from web.auth import AUTH_TOML_PATH, load_auth_config, save_auth_config
 
 logger = logging.getLogger(__name__)
@@ -158,12 +158,15 @@ async def require_scopes(
 def create_token(
     name: str,
     scopes: list[str] | None = None,
+    resource_rules: ResourceRules | None = None,
     auth_path: Path = AUTH_TOML_PATH,
 ) -> str:
     """生成新 token，hash 后存 ``data/auth.toml``，返回明文（仅此一次）。
 
     同名 token 覆盖（先删后加），保证唯一性。
     ``scopes`` 为 None 或空 list → 空 list 落盘（= 全权限，spec §5）。
+    ``resource_rules`` 为 None → 默认 ``ResourceRules()``（两字段 None = 全权限，
+    兼容老 token）。受限规则会序列化到 ``[resource_rules]`` 嵌套 table。
     ``auth_path`` 参数供测试 monkeypatch。
     """
     plain = secrets.token_urlsafe(32)
@@ -175,6 +178,7 @@ def create_token(
             token_hash=_hash_token(plain),
             created_at=datetime.now(timezone.utc).timestamp(),
             scopes=list(scopes) if scopes else [],
+            resource_rules=resource_rules or ResourceRules(),
         )
     )
     save_auth_config(cfg)

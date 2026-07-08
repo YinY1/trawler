@@ -419,3 +419,158 @@ class TestRequireScopes:
         request = self._make_request(plain)
         name = await require_scopes(security, request)
         assert name == "any-bot"
+
+
+# ═══════════════════════════════════════════════════════════
+# 行级过滤数据层（issue #106 — ResourceRules + auth.toml 嵌套）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestResourceRulesData:
+    """``ResourceRules`` dataclass + ``ApiTokenEntry.resource_rules`` + auth.toml
+    嵌套 table 读写（spec §4 / plan T1）。
+
+    注：项目 ``pyproject.toml`` 已设 ``asyncio_mode = "auto"``，async 测试直接
+    ``async def`` 即可，无需 ``@pytest.mark.asyncio``。
+    """
+
+    def test_resource_rules_default_is_unrestricted(self) -> None:
+        """新 ``ApiTokenEntry`` 默认 ``resource_rules`` 两字段 None（全权限）。"""
+        from shared.config import ApiTokenEntry
+
+        entry = ApiTokenEntry(name="x", token_hash="h")
+        assert entry.resource_rules.platforms is None
+        assert entry.resource_rules.subscription_refs is None
+
+    def test_resource_rules_with_platforms(self) -> None:
+        from shared.config import ApiTokenEntry, ResourceRules
+
+        entry = ApiTokenEntry(
+            name="x",
+            token_hash="h",
+            resource_rules=ResourceRules(platforms=["bili"]),
+        )
+        assert entry.resource_rules.platforms == ["bili"]
+        assert entry.resource_rules.subscription_refs is None
+
+    def test_load_auth_config_legacy_no_resource_rules(self, auth_path: Path) -> None:
+        """老 auth.toml 无 ``resource_rules`` 字段 → 加载为默认全权限。"""
+        # 写入一条老格式 token（无 resource_rules）
+        auth_path.write_text(
+            '[[api_tokens]]\n'
+            'name = "legacy"\n'
+            f'token_hash = "{"a" * 64}"\n'
+            "created_at = 1717500000.0\n",
+            encoding="utf-8",
+        )
+        from web.auth import load_auth_config
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 1
+        assert cfg.api_tokens[0].resource_rules.platforms is None
+        assert cfg.api_tokens[0].resource_rules.subscription_refs is None
+
+    def test_load_auth_config_with_resource_rules(self, auth_path: Path) -> None:
+        """新格式含 ``[resource_rules]`` → 正确加载嵌套字段。"""
+        auth_path.write_text(
+            '[[api_tokens]]\n'
+            'name = "bili-bot"\n'
+            f'token_hash = "{"a" * 64}"\n'
+            "created_at = 1717500000.0\n"
+            "scopes = [\"messages:read\"]\n"
+            "[api_tokens.resource_rules]\n"
+            "platforms = [\"bili\"]\n"
+            "subscription_refs = [\"bili:100\", \"bili:200\"]\n",
+            encoding="utf-8",
+        )
+        from web.auth import load_auth_config
+
+        cfg = load_auth_config()
+        assert len(cfg.api_tokens) == 1
+        entry = cfg.api_tokens[0]
+        assert entry.resource_rules.platforms == ["bili"]
+        assert entry.resource_rules.subscription_refs == ["bili:100", "bili:200"]
+
+    def test_save_auth_config_default_omits_resource_rules(
+        self, auth_path: Path
+    ) -> None:
+        """默认 ``ResourceRules()`` 不写出 ``[resource_rules]`` section（diff 干净）。"""
+        from shared.config import ApiTokenEntry, ResourceRules, WebAuthConfig
+
+        from web.auth import save_auth_config
+
+        cfg = WebAuthConfig(
+            admin_password_hash="x",
+            session_secret="s",
+            api_tokens=[
+                ApiTokenEntry(
+                    name="default",
+                    token_hash="abc",
+                    resource_rules=ResourceRules(),  # 两字段 None
+                )
+            ],
+        )
+        save_auth_config(cfg)
+        text = auth_path.read_text(encoding="utf-8")
+        assert "resource_rules" not in text
+
+    def test_save_auth_config_round_trip(self, auth_path: Path) -> None:
+        """非默认 rules 写出后再加载，字段一致（5 种形态覆盖）。
+
+        形态: platforms only / subs only / both / both None / platforms=[]（空 list）。
+        特别：``platforms=[]`` 写盘再读回必须仍是 ``[]``（不是 None）—— 空 list
+        是「拒绝一切」语义，与 None=全权限 相反，不能被 tomlkit 丢失。
+        """
+        from shared.config import (
+            ApiTokenEntry,
+            ResourceRules,
+            WebAuthConfig,
+        )
+
+        from web.auth import load_auth_config, save_auth_config
+
+        cases: list[tuple[str, ResourceRules]] = [
+            ("platforms-only", ResourceRules(platforms=["bili"])),
+            ("subs-only", ResourceRules(subscription_refs=["bili:100", "xhs:u456"])),
+            (
+                "both",
+                ResourceRules(platforms=["bili", "xhs"], subscription_refs=["bili:100"]),
+            ),
+            ("both-none", ResourceRules(platforms=None, subscription_refs=None)),
+            ("empty-platforms", ResourceRules(platforms=[])),
+        ]
+        for name, rules in cases:
+            cfg = WebAuthConfig(
+                admin_password_hash="x",
+                session_secret="s",
+                api_tokens=[
+                    ApiTokenEntry(name=name, token_hash="abc", resource_rules=rules)
+                ],
+            )
+            save_auth_config(cfg)
+            reloaded = load_auth_config()
+            assert len(reloaded.api_tokens) == 1, f"case={name}"
+            got = reloaded.api_tokens[0].resource_rules
+            assert got.platforms == rules.platforms, f"case={name} platforms mismatch"
+            assert (
+                got.subscription_refs == rules.subscription_refs
+            ), f"case={name} subscription_refs mismatch"
+
+    def test_create_token_with_resource_rules(self, auth_path: Path) -> None:
+        """``create_token(resource_rules=...)`` 落盘后能读回。"""
+        from shared.config import ResourceRules
+
+        from api.auth import create_token
+        from web.auth import load_auth_config
+
+        plain = create_token(
+            "bili-only",
+            scopes=["messages:read"],
+            resource_rules=ResourceRules(platforms=["bili"]),
+        )
+        assert plain  # 明文非空
+        cfg = load_auth_config()
+        entry = cfg.api_tokens[0]
+        assert entry.name == "bili-only"
+        assert entry.resource_rules.platforms == ["bili"]
+        assert entry.resource_rules.subscription_refs is None
