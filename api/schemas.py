@@ -206,3 +206,12 @@ class EndpointBindRequest(BaseModel):
     """
 
     endpoint_name: str
+
+
+class AssignRequest(BaseModel):
+    """``POST /subscriptions/{p}/{id}/assign`` 请求体（issue #108）。
+
+    仅一个字段 —— ``token_name``。响应复用 ``SubscriptionAddResponse``。
+    """
+
+    token_name: str

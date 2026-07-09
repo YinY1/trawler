@@ -30,16 +30,15 @@ PASSWORD = "test12345"
 
 
 @pytest.fixture
-async def authed_client(
+async def superuser_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncClient:
-    """已配置 token 的 client（带 ``Authorization: Bearer`` header）。
+    """持 tokens:manage + 全部消费 scope 的 superuser client（#108 后空 scopes 无权）。
 
-    - monkeypatch ``web.auth.AUTH_TOML_PATH`` 与 ``api.auth.AUTH_TOML_PATH`` 到 tmp
-      （与 test_api_auth.py:26-32 一致，隔离 data/auth.toml）
-    - set_password 让 setup_complete=True（auth_guard 中间件需要）
-    - create_token 写一个明文 token，挂到 client default header
-    - ``c._app`` 暴露 app 实例供测试直接读/写 ``app.state``
+    #108 的 superuser bypass 只作用于 **ownership 检查**（has_sub_access / has_sub_write），
+    不 bypass **scope 检查**（require_scopes 仍按 scope 白名单匹配）。因此 fixture
+    需显式给 tokens:manage + 6 个消费 scope，让所有路由都能通过 scope 校验，
+    ownership 视图的 is_superuser=True 则由 tokens:manage 触发。
     """
     auth_path = tmp_path / "auth.toml"
     monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
@@ -49,7 +48,15 @@ async def authed_client(
     from api.auth import create_token
 
     app = create_app()
-    plain = create_token("test-bot")
+    plain = create_token(
+        "super-bot",
+        scopes=[
+            "tokens:manage",
+            "subscriptions:read", "subscriptions:write",
+            "messages:read", "messages:write",
+            "check:read", "check:run",
+        ],
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
@@ -67,11 +74,11 @@ class TestCheckRun:
         self,
         mock_load: AsyncMock,
         mock_run: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """mode=full + body={} → 202 + task_id（uuid4 hex 格式）+ mode=full。"""
         mock_load.return_value.general.data_dir = "/tmp"
-        resp = await authed_client.post("/api/v1/check/run", json={})
+        resp = await superuser_client.post("/api/v1/check/run", json={})
         assert resp.status_code == 202
         data = resp.json()
         assert data["status"] == "started"
@@ -83,7 +90,7 @@ class TestCheckRun:
         assert all(c in "0123456789abcdef" for c in task_id)
         # 清理 background task 状态（避免污染后续测试）
         await asyncio.sleep(0.05)
-        authed_client._app.state.check_running = False  # type: ignore[attr-defined]
+        superuser_client._app.state.check_running = False  # type: ignore[attr-defined]
 
     @patch("api.routes.check.PipelineEngine")
     @patch("api.routes.check.load_config", new_callable=AsyncMock)
@@ -91,7 +98,7 @@ class TestCheckRun:
         self,
         mock_load: AsyncMock,
         mock_engine: Any,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """mode=manual + since + title → 202 + 调用 run_specific_messages。"""
         mock_load.return_value.general.data_dir = "/tmp"
@@ -100,7 +107,7 @@ class TestCheckRun:
             mock_store_cls.return_value.query_messages.return_value = [
                 SimpleNamespace(msg_id="bili:test1")
             ]
-            resp = await authed_client.post(
+            resp = await superuser_client.post(
                 "/api/v1/check/run",
                 json={"mode": "manual", "since": "7d", "title": "测试"},
             )
@@ -114,15 +121,15 @@ class TestCheckRun:
             kwargs = mock_engine.run_specific_messages.call_args.kwargs
             assert kwargs["msg_ids"] == ["bili:test1"]
             assert kwargs["from_phase"] is Phase.SUMMARIZED  # 默认
-        authed_client._app.state.check_running = False  # type: ignore[attr-defined]
+        superuser_client._app.state.check_running = False  # type: ignore[attr-defined]
 
-    async def test_run_conflict_returns_409(self, authed_client: AsyncClient) -> None:
+    async def test_run_conflict_returns_409(self, superuser_client: AsyncClient) -> None:
         """已有 run 在跑（state.check_running=True）→ 409 + already_running。"""
-        app = authed_client._app  # type: ignore[attr-defined]
+        app = superuser_client._app  # type: ignore[attr-defined]
         app.state.check_running = True
         app.state.api_task_id = "existing-task-id"  # type: ignore[attr-defined]
         try:
-            resp = await authed_client.post("/api/v1/check/run", json={})
+            resp = await superuser_client.post("/api/v1/check/run", json={})
             assert resp.status_code == 409
             data = resp.json()
             # 扁平 shape（与 task spec 一致，非嵌套 detail）
@@ -132,10 +139,10 @@ class TestCheckRun:
             app.state.api_task_id = None  # type: ignore[attr-defined]
 
     async def test_run_invalid_reset_phase_returns_422(
-        self, authed_client: AsyncClient
+        self, superuser_client: AsyncClient
     ) -> None:
         """reset_phase="garbage" → 422（消息含未知阶段名）。"""
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/check/run",
             json={"mode": "manual", "reset_phase": "garbage", "title": "x"},
         )
@@ -144,10 +151,10 @@ class TestCheckRun:
         assert "garbage" in detail
 
     async def test_run_invalid_since_returns_422(
-        self, authed_client: AsyncClient
+        self, superuser_client: AsyncClient
     ) -> None:
         """since="garbage" → 422（消息含「无法解析」）。"""
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/check/run",
             json={"mode": "manual", "since": "garbage"},
         )
@@ -156,10 +163,10 @@ class TestCheckRun:
         assert "无法解析" in detail or "解析" in detail
 
     async def test_run_manual_mode_without_filters_returns_422(
-        self, authed_client: AsyncClient
+        self, superuser_client: AsyncClient
     ) -> None:
         """mode=manual 但无筛选参数 → 422（无意义的全量 reset 重跑）。"""
-        resp = await authed_client.post("/api/v1/check/run", json={"mode": "manual"})
+        resp = await superuser_client.post("/api/v1/check/run", json={"mode": "manual"})
         assert resp.status_code == 422
 
     async def test_run_no_token_returns_401(
@@ -181,10 +188,10 @@ class TestCheckRun:
 
 class TestCheckStatus:
     async def test_status_returns_current_run_state(
-        self, authed_client: AsyncClient
+        self, superuser_client: AsyncClient
     ) -> None:
         """预设 state.check_running=True + log_history 一条 → GET status 返回结构 + _ts 被 strip。"""
-        app = authed_client._app  # type: ignore[attr-defined]
+        app = superuser_client._app  # type: ignore[attr-defined]
         app.state.check_running = True
         app.state.check_processed_count = 7
         app.state.check_started_at = time.time()
@@ -198,7 +205,7 @@ class TestCheckStatus:
         app.state.log_history.clear()
         app.state.log_history.append(item)
         try:
-            resp = await authed_client.get("/api/v1/check/status")
+            resp = await superuser_client.get("/api/v1/check/status")
             assert resp.status_code == 200
             data = resp.json()
             assert data["running"] is True
@@ -214,14 +221,14 @@ class TestCheckStatus:
             app.state.log_history.clear()
 
     async def test_status_no_run_returns_idle(
-        self, authed_client: AsyncClient
+        self, superuser_client: AsyncClient
     ) -> None:
         """state.check_running=False + started_at=None → running=False + started_at=None。"""
-        app = authed_client._app  # type: ignore[attr-defined]
+        app = superuser_client._app  # type: ignore[attr-defined]
         app.state.check_running = False
         app.state.check_started_at = None
         app.state.log_history.clear()
-        resp = await authed_client.get("/api/v1/check/status")
+        resp = await superuser_client.get("/api/v1/check/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["running"] is False
@@ -260,14 +267,14 @@ class TestCheckStream:
             assert resp.json()["detail"] == "invalid or missing token"
 
     async def test_stream_returns_sse_with_token(
-        self, authed_client: AsyncClient
+        self, superuser_client: AsyncClient
     ) -> None:
         """带有效 token GET stream → content-type: text/event-stream。
 
         复用 test_web_check.py:53-76 的 producer 模式：连接建立后注入 EOF None
         让 generator 干净退出，避免测试挂死。
         """
-        app = authed_client._app  # type: ignore[attr-defined]
+        app = superuser_client._app  # type: ignore[attr-defined]
 
         async def producer() -> None:
             await asyncio.sleep(0)
@@ -281,7 +288,7 @@ class TestCheckStream:
 
         producer_task = asyncio.create_task(producer())
         try:
-            async with authed_client.stream("GET", "/api/v1/check/stream") as resp:
+            async with superuser_client.stream("GET", "/api/v1/check/stream") as resp:
                 assert resp.status_code == 200
                 assert "text/event-stream" in resp.headers.get("content-type", "")
         finally:

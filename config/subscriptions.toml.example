@@ -10,6 +10,8 @@
 # uid = 123456
 # name = "示例UP主"
 # notify_endpoints = ["default"]
+# owner_token = "bili-admin-bot"          # issue #108: 创建者 token name（全权 CRUD）
+# assigned_tokens = ["reader-bot-1"]      # issue #108: 被分配 token（只读访问）
 
 # ── 小红书（Xiaohongshu） ───────────────────────────────────────
 # 每个 [[xiaohongshu.subscriptions]] 代表一个订阅的用户
@@ -18,6 +20,8 @@
 # user_id = ""
 # name = ""
 # notify_endpoints = ["default"]
+# owner_token = ""
+# assigned_tokens = []
 
 # ── 微博（Weibo） ───────────────────────────────────────────────
 # 每个 [[weibo.subscriptions]] 代表一个订阅的用户
@@ -26,3 +30,5 @@
 # user_id = ""
 # name = ""
 # notify_endpoints = ["default"]
+# owner_token = ""
+# assigned_tokens = []

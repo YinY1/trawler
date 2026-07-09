@@ -275,14 +275,18 @@ class TestScopeUtils:
         assert scope_implies("messages:write", "subscriptions:read") is False
         assert scope_implies("messages:read", "messages:read") is True
 
-    def test_token_has_scope_empty_scopes_means_full(self) -> None:
-        """token.scopes == [] → 任何 required 都放行（spec §5）。"""
+    def test_token_has_scope_empty_scopes_denies_all(self) -> None:
+        """token.scopes == [] → 任何 required 都拒绝（issue #108 破坏性变更）。
+
+        旧版（#105）「空 = 全权限」已废弃，#108 后空 = 无权。
+        完整覆盖见 ``TestTokenHasScopeEmptyScopes``。
+        """
         from api.auth import ApiTokenEntry, token_has_scope
 
         token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
-        assert token_has_scope(token, "messages:read") is True
-        assert token_has_scope(token, "check:run") is True
-        assert token_has_scope(token, "subscriptions:write") is True
+        assert token_has_scope(token, "messages:read") is False
+        assert token_has_scope(token, "check:run") is False
+        assert token_has_scope(token, "subscriptions:write") is False
 
     def test_token_has_scope_explicit_grant(self) -> None:
         from api.auth import ApiTokenEntry, token_has_scope
@@ -391,22 +395,6 @@ class TestRequireScopes:
         name = await require_scopes(security, request)
         assert name == "writer"
 
-    async def test_empty_scopes_token_passes_any(
-        self, auth_path: Path
-    ) -> None:
-        """空 scope token = 全权限，任何 required scope 都放行（spec §5）。"""
-        from fastapi.security import SecurityScopes
-
-        from api.auth import create_token, require_scopes
-
-        plain = create_token("admin-like")  # 不传 scopes → []
-        for req in ["messages:read", "messages:write", "check:run",
-                    "subscriptions:write"]:
-            security = SecurityScopes(scopes=[req])
-            request = self._make_request(plain)
-            name = await require_scopes(security, request)
-            assert name == "admin-like"
-
     async def test_empty_security_scopes_acts_like_require_token(
         self, auth_path: Path
     ) -> None:
@@ -421,172 +409,79 @@ class TestRequireScopes:
         name = await require_scopes(security, request)
         assert name == "any-bot"
 
-
-# ═══════════════════════════════════════════════════════════
-# 行级过滤数据层（issue #106 — ResourceRules + auth.toml 嵌套）
-# ═══════════════════════════════════════════════════════════
-
-
-class TestResourceRulesData:
-    """``ResourceRules`` dataclass + ``ApiTokenEntry.resource_rules`` + auth.toml
-    嵌套 table 读写（spec §4 / plan T1）。
-
-    注：项目 ``pyproject.toml`` 已设 ``asyncio_mode = "auto"``，async 测试直接
-    ``async def`` 即可，无需 ``@pytest.mark.asyncio``。
-    """
-
-    def test_resource_rules_default_is_unrestricted(self) -> None:
-        """新 ``ApiTokenEntry`` 默认 ``resource_rules`` 两字段 None（全权限）。"""
-        from shared.config import ApiTokenEntry
-
-        entry = ApiTokenEntry(name="x", token_hash="h")
-        assert entry.resource_rules.platforms is None
-        assert entry.resource_rules.subscription_refs is None
-
-    def test_resource_rules_with_platforms(self) -> None:
-        from shared.config import ApiTokenEntry, ResourceRules
-
-        entry = ApiTokenEntry(
-            name="x",
-            token_hash="h",
-            resource_rules=ResourceRules(platforms=["bili"]),
-        )
-        assert entry.resource_rules.platforms == ["bili"]
-        assert entry.resource_rules.subscription_refs is None
-
-    def test_load_auth_config_legacy_no_resource_rules(self, auth_path: Path) -> None:
-        """老 auth.toml 无 ``resource_rules`` 字段 → 加载为默认全权限。"""
-        # 写入一条老格式 token（无 resource_rules）
-        auth_path.write_text(
-            '[[api_tokens]]\n'
-            'name = "legacy"\n'
-            f'token_hash = "{"a" * 64}"\n'
-            "created_at = 1717500000.0\n",
-            encoding="utf-8",
-        )
-        from web.auth import load_auth_config
-
-        cfg = load_auth_config()
-        assert len(cfg.api_tokens) == 1
-        assert cfg.api_tokens[0].resource_rules.platforms is None
-        assert cfg.api_tokens[0].resource_rules.subscription_refs is None
-
-    def test_load_auth_config_with_resource_rules(self, auth_path: Path) -> None:
-        """新格式含 ``[resource_rules]`` → 正确加载嵌套字段。"""
-        auth_path.write_text(
-            '[[api_tokens]]\n'
-            'name = "bili-bot"\n'
-            f'token_hash = "{"a" * 64}"\n'
-            "created_at = 1717500000.0\n"
-            "scopes = [\"messages:read\"]\n"
-            "[api_tokens.resource_rules]\n"
-            "platforms = [\"bili\"]\n"
-            "subscription_refs = [\"bili:100\", \"bili:200\"]\n",
-            encoding="utf-8",
-        )
-        from web.auth import load_auth_config
-
-        cfg = load_auth_config()
-        assert len(cfg.api_tokens) == 1
-        entry = cfg.api_tokens[0]
-        assert entry.resource_rules.platforms == ["bili"]
-        assert entry.resource_rules.subscription_refs == ["bili:100", "bili:200"]
-
-    def test_save_auth_config_default_omits_resource_rules(
+    async def test_empty_scopes_token_denied(
         self, auth_path: Path
     ) -> None:
-        """默认 ``ResourceRules()`` 不写出 ``[resource_rules]`` section（diff 干净）。"""
-        from shared.config import ApiTokenEntry, ResourceRules, WebAuthConfig
-        from web.auth import save_auth_config
+        """空 scope token 在 #108 后任何 required scope 都被拒（403）。"""
+        from fastapi.security import SecurityScopes
 
-        cfg = WebAuthConfig(
-            admin_password_hash="x",
-            session_secret="s",
-            api_tokens=[
-                ApiTokenEntry(
-                    name="default",
-                    token_hash="abc",
-                    resource_rules=ResourceRules(),  # 两字段 None
-                )
-            ],
-        )
-        save_auth_config(cfg)
-        text = auth_path.read_text(encoding="utf-8")
-        assert "resource_rules" not in text
+        from api.auth import create_token, require_scopes
 
-    def test_save_auth_config_round_trip(self, auth_path: Path) -> None:
-        """非默认 rules 写出后再加载，字段一致（5 种形态覆盖）。
-
-        形态: platforms only / subs only / both / both None / platforms=[]（空 list）。
-        特别：``platforms=[]`` 写盘再读回必须仍是 ``[]``（不是 None）—— 空 list
-        是「拒绝一切」语义，与 None=全权限 相反，不能被 tomlkit 丢失。
-        """
-        from shared.config import (
-            ApiTokenEntry,
-            ResourceRules,
-            WebAuthConfig,
-        )
-        from web.auth import load_auth_config, save_auth_config
-
-        cases: list[tuple[str, ResourceRules]] = [
-            ("platforms-only", ResourceRules(platforms=["bili"])),
-            ("subs-only", ResourceRules(subscription_refs=["bili:100", "xhs:u456"])),
-            (
-                "both",
-                ResourceRules(platforms=["bili", "xhs"], subscription_refs=["bili:100"]),
-            ),
-            ("both-none", ResourceRules(platforms=None, subscription_refs=None)),
-            ("empty-platforms", ResourceRules(platforms=[])),
-        ]
-        for name, rules in cases:
-            cfg = WebAuthConfig(
-                admin_password_hash="x",
-                session_secret="s",
-                api_tokens=[
-                    ApiTokenEntry(name=name, token_hash="abc", resource_rules=rules)
-                ],
-            )
-            save_auth_config(cfg)
-            reloaded = load_auth_config()
-            assert len(reloaded.api_tokens) == 1, f"case={name}"
-            got = reloaded.api_tokens[0].resource_rules
-            assert got.platforms == rules.platforms, f"case={name} platforms mismatch"
-            assert (
-                got.subscription_refs == rules.subscription_refs
-            ), f"case={name} subscription_refs mismatch"
-
-    def test_create_token_with_resource_rules(self, auth_path: Path) -> None:
-        """``create_token(resource_rules=...)`` 落盘后能读回。"""
-        from api.auth import create_token
-        from shared.config import ResourceRules
-        from web.auth import load_auth_config
-
-        plain = create_token(
-            "bili-only",
-            scopes=["messages:read"],
-            resource_rules=ResourceRules(platforms=["bili"]),
-        )
-        assert plain  # 明文非空
-        cfg = load_auth_config()
-        entry = cfg.api_tokens[0]
-        assert entry.name == "bili-only"
-        assert entry.resource_rules.platforms == ["bili"]
-        assert entry.resource_rules.subscription_refs is None
+        plain = create_token("empty-bot")  # 不传 scopes → []
+        for req in ["messages:read", "messages:write", "check:run",
+                    "subscriptions:write"]:
+            security = SecurityScopes(scopes=[req])
+            request = self._make_request(plain)
+            with pytest.raises(HTTPException) as exc:
+                await require_scopes(security, request)
+            assert exc.value.status_code == 403
 
 
 # ═══════════════════════════════════════════════════════════
-# 行级过滤 FastAPI 依赖（issue #106 — get_resource_filter，plan T3）
+# token_has_scope 空 scopes 语义（issue #108 破坏性变更）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestTokenHasScopeEmptyScopes:
+    """#108 后空 scopes 不再 = 全权限（spec §6.2）。"""
+
+    def test_empty_scopes_denies_messages_read(self) -> None:
+        """空 scopes token 对 messages:read 返回 False（#105 是 True，#108 改 False）。"""
+        from api.auth import SCOPE_MESSAGES_READ, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, SCOPE_MESSAGES_READ) is False
+
+    def test_empty_scopes_denies_subscriptions_write(self) -> None:
+        from api.auth import SCOPE_SUBSCRIPTIONS_WRITE, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, SCOPE_SUBSCRIPTIONS_WRITE) is False
+
+    def test_empty_scopes_denies_tokens_manage(self) -> None:
+        """空 scopes 连 tokens:manage 都没有 → 不是 superuser。"""
+        from api.auth import SCOPE_TOKENS_MANAGE, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(name="x", token_hash="h", scopes=[])
+        assert token_has_scope(token, SCOPE_TOKENS_MANAGE) is False
+
+    def test_tokens_manage_grants_superuser_scope(self) -> None:
+        """持 tokens:manage 的 token 对 tokens:manage 返回 True（superuser 标识）。"""
+        from api.auth import SCOPE_TOKENS_MANAGE, token_has_scope
+        from shared.config import ApiTokenEntry
+
+        token = ApiTokenEntry(
+            name="admin", token_hash="h", scopes=["tokens:manage"]
+        )
+        assert token_has_scope(token, SCOPE_TOKENS_MANAGE) is True
+
+
+# ═══════════════════════════════════════════════════════════
+# get_token_ownership FastAPI 依赖（issue #108，替代 #106 get_resource_filter）
 # ═══════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-async def authed_client(
+async def superuser_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncClient:
-    """已配置全权限 token 的 client。
+    """持 tokens:manage 的 superuser client（#108 后空 scopes 无权）。
 
-    与 ``tests/test_api_messages.py:authed_client`` 同模式：monkeypatch auth
-    .toml 路径、set_password 完成 setup、create_token 写全权限 token。
+    附带 ``messages:read`` scope：``/api/v1/messages`` GET 需要 messages:read，
+    tokens:manage 本身不隐含 messages:read（scope 是独立维度）。
     """
     from httpx import ASGITransport
 
@@ -600,37 +495,30 @@ async def authed_client(
     from api.auth import create_token
 
     app = create_app()
-    plain = create_token("test-bot")
+    plain = create_token("super-bot", scopes=["tokens:manage", "messages:read"])
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Authorization": f"Bearer {plain}"},
     ) as c:
+        c._app = app  # type: ignore[attr-defined]
         yield c
 
 
-class TestGetResourceFilter:
-    """``get_resource_filter`` FastAPI 依赖用例（spec §6.3 / plan T3）。
+class TestGetTokenOwnership:
+    """``get_token_ownership`` FastAPI 依赖用例（issue #108，替代 #106 get_resource_filter）。"""
 
-    注：项目 ``pyproject.toml`` 已设 ``asyncio_mode = "auto"``，async 测试直接
-    ``async def`` 即可。
-    """
+    def test_get_token_ownership_importable(self) -> None:
+        """``get_token_ownership`` 已定义（模块级 import 不应抛异常）。"""
+        from api.auth import get_token_ownership  # noqa: F401
 
-    def test_get_resource_filter_importable(self) -> None:
-        """``get_resource_filter`` 已定义（模块级 import 不应抛异常）。"""
-        from api.auth import get_resource_filter  # noqa: F401
-
-    async def test_unrestricted_token_returns_unrestricted_filter(
-        self, authed_client: AsyncClient
+    async def test_superuser_token_passes_ownership(
+        self, superuser_client: AsyncClient
     ) -> None:
-        """全权限 token → ``filter.allows_*`` 永远 True（通过 GET /messages 行为验证）。
-
-        不直接调 ``get_resource_filter``，而是发 HTTP 请求：全权限 token 不应
-        被行级过滤拦截（200）。
-        """
-        resp = await authed_client.get("/api/v1/messages")
-        assert resp.status_code == 200  # 不被行级过滤拦截
+        """持 tokens:manage + messages:read 的 superuser → 不被 ownership 拦截（200）。"""
+        resp = await superuser_client.get("/api/v1/messages")
+        assert resp.status_code == 200  # 不被 ownership 拦截
 
     async def test_missing_token_returns_401(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -659,11 +547,7 @@ class TestGetResourceFilter:
     async def test_insufficient_scope_returns_403(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """scope 不够 → 403（行级过滤层在 scope 之后，scope 先拦）。
-
-        token 只带 ``subscriptions:read``，访问需要 ``messages:read`` 的
-        ``GET /api/v1/messages`` → 403 + detail 含 "scope"。
-        """
+        """scope 不够 → 403（ownership 层在 scope 之后，scope 先拦）。"""
         from httpx import ASGITransport
 
         from api.auth import create_token
@@ -689,18 +573,9 @@ class TestGetResourceFilter:
     async def test_openapi_docs_include_scopes(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OpenAPI schema 在新依赖写法下能正常生成（spec §11 风险表缓解）。
+        """OpenAPI schema 在新依赖写法下能正常生成。"""
+        from httpx import ASGITransport  # noqa: F401
 
-        重构 ``require_scopes`` 抽出 ``_authenticate_and_check_scope`` 共享逻辑
-        后，必须验证：
-
-        1. ``app.openapi()`` 不抛异常（FastAPI 依赖解析正常）
-        2. ``/api/v1/messages`` GET 路由仍在 schema 中（路由没被破坏）
-
-        注：spec §11 提到「OpenAPI docs 在新写法下可能不渲染 scope」是已知
-        限制（FastAPI ``SecurityScopes`` 单独使用不自动渲染 security scheme）。
-        现状（#103）就没渲染，本 PR 不引入回归即可。
-        """
         from web.app import create_app
 
         auth_path = tmp_path / "auth.toml"
@@ -709,8 +584,7 @@ class TestGetResourceFilter:
         set_password(PASSWORD)
 
         app = create_app()
-        schema = app.openapi()  # 不抛异常即通过
+        schema = app.openapi()
         paths = schema["paths"]
-        # 关键路由仍存在（重构没破坏路由注册）
         assert "/api/v1/messages" in paths
         assert "get" in paths["/api/v1/messages"]
