@@ -83,7 +83,14 @@ async def list_subs(
 
     ownership 过滤（issue #108）：在 ``list_subscriptions`` 返回之上叠加 token 的
     ownership（``filter_subscription_dict``），越权订阅不返回。
+
+    I3 修订（issue #108 review）：``?platform=`` 查询参数经 ``_normalize_platform``
+    归一化（与 URL ``{platform}`` 路径参数一致）。传全名（``bilibili``）或无效值
+    （``ghost``）不再触发 ``list_subscriptions`` 内部 ``PLATFORM_TO_SECTION[platform]``
+    的 KeyError；归一化为 ``None`` 时按宽容行为返空 200。
     """
+    if platform:
+        platform = _normalize_platform(platform)  # type: ignore[assignment]
     result = await list_subscriptions(platform=platform)
     config = await load_config()
     result = filter_subscription_dict(result, ownership, config)

@@ -496,8 +496,10 @@ def tmp_config_with_owned_sub(
     Auth tokens:
       - super-bot: scopes=['tokens:manage', 'messages:read', 'messages:write']
       - owner-bot: scopes=['messages:read', 'messages:write']
-      - assigned-bot: scopes=['messages:read']
-      - outsider-bot: scopes=['messages:read']
+      - assigned-bot: scopes=['messages:read', 'messages:write']
+        （write scope 全开以让 rerun 请求通过 Security scope 检查，到达 ownership
+        层验证 ``message_visible`` 的过滤行为）
+      - outsider-bot: scopes=['messages:read', 'messages:write']
     """
     import json
 
@@ -568,8 +570,8 @@ def tmp_config_with_owned_sub(
     from api.auth import create_token
     create_token("super-bot", scopes=["tokens:manage", "messages:read", "messages:write"])
     create_token("owner-bot", scopes=["messages:read", "messages:write"])
-    create_token("assigned-bot", scopes=["messages:read"])
-    create_token("outsider-bot", scopes=["messages:read"])
+    create_token("assigned-bot", scopes=["messages:read", "messages:write"])
+    create_token("outsider-bot", scopes=["messages:read", "messages:write"])
 
     return tmp_path
 
@@ -601,10 +603,14 @@ async def owner_client(
 async def assigned_client(
     tmp_config_with_owned_sub: Path,
 ) -> AsyncClient:
-    """assigned-bot 的 client（被分配只读 bili/100）。"""
+    """assigned-bot 的 client（被分配只读 bili/100）。
+
+    ``message_visible`` 用 ``has_sub_access``（读权限），assigned 对 bili/100 可读 →
+    rerun 可见；xhs/u456 不属于 assigned → rerun 404。
+    """
     from api.auth import create_token
 
-    plain = create_token("assigned-bot", scopes=["messages:read"])
+    plain = create_token("assigned-bot", scopes=["messages:read", "messages:write"])
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -623,7 +629,7 @@ async def outsider_client(
     """outsider-bot 的 client（无任何 sub 关系）。"""
     from api.auth import create_token
 
-    plain = create_token("outsider-bot", scopes=["messages:read"])
+    plain = create_token("outsider-bot", scopes=["messages:read", "messages:write"])
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -749,5 +755,155 @@ class TestOwnershipGetMessage:
         ) as c:
             resp_super = await c.get("/api/v1/messages/weibo:no_sub")
         assert resp_super.status_code == 200
+
+
+class TestOwnershipRerunMessages:
+    """POST /messages/rerun ownership 矩阵（issue #108 spec §9.4）。
+
+    ``message_visible`` 用 ``has_sub_access``（读权限），assigned 对自己被分配的
+    sub 有读权限 → rerun 可见（spec §9.4 矩阵：assigned 看「分配 sub 的」msg）。
+    全部 msg_id 越权 → 404；部分越权 → 202 + ``authorized_msg_ids`` 只含授权项。
+    """
+
+    @patch("api.routes.messages.PipelineEngine")
+    async def test_owner_reruns_own_msg(
+        self,
+        mock_engine: Any,
+        owner_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """owner-bot rerun bili:100（自己 sub 的）→ 202 + reset_count=1。"""
+        mock_engine.run_specific_messages = AsyncMock()
+        app = owner_client._app  # type: ignore[attr-defined]
+        try:
+            resp = await owner_client.post(
+                "/api/v1/messages/rerun",
+                json={"msg_ids": ["bili:100"]},
+            )
+            assert resp.status_code == 202
+            data = resp.json()
+            assert data["status"] == "started"
+            assert data["reset_count"] == 1
+            await asyncio.sleep(0.05)
+            # 后台 task 应只跑授权 msg（authorized_msg_ids=["bili:100"]）
+            mock_engine.run_specific_messages.assert_called_once()
+            assert mock_engine.run_specific_messages.call_args.kwargs[
+                "msg_ids"
+            ] == ["bili:100"]
+        finally:
+            app.state.check_running = False
+            app.state.api_task_id = None  # type: ignore[attr-defined]
+
+    @patch("api.routes.messages.PipelineEngine")
+    async def test_assigned_reruns_assigned_msg(
+        self,
+        mock_engine: Any,
+        assigned_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """assigned-bot rerun bili:100（被分配，有读权限）→ 202。
+
+        ``message_visible`` 用 ``has_sub_access``（读），assigned 对 bili/100 可读
+        → rerun 可见（spec §9.4：assigned 看「分配 sub 的」msg）。rerun 不是写 sub，
+        是重跑消息处理，权限等同消息读可见性。
+        """
+        mock_engine.run_specific_messages = AsyncMock()
+        app = assigned_client._app  # type: ignore[attr-defined]
+        try:
+            resp = await assigned_client.post(
+                "/api/v1/messages/rerun",
+                json={"msg_ids": ["bili:100"]},
+            )
+            assert resp.status_code == 202
+            assert resp.json()["reset_count"] == 1
+            await asyncio.sleep(0.05)
+            mock_engine.run_specific_messages.assert_called_once()
+        finally:
+            app.state.check_running = False
+            app.state.api_task_id = None  # type: ignore[attr-defined]
+
+    @patch("api.routes.messages.PipelineEngine")
+    async def test_assigned_rerun_unauthorized_msg_404(
+        self,
+        mock_engine: Any,
+        assigned_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """assigned-bot rerun xhs:u456（未分配）→ 404，后台 task 不启动。"""
+        mock_engine.run_specific_messages = AsyncMock()
+        resp = await assigned_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["xhs:u456"]},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "message not found"
+        mock_engine.run_specific_messages.assert_not_called()
+
+    @patch("api.routes.messages.PipelineEngine")
+    async def test_outsider_rerun_404(
+        self,
+        mock_engine: Any,
+        outsider_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """outsider-bot rerun bili:100 → 404（越权，不暴露存在性）。"""
+        mock_engine.run_specific_messages = AsyncMock()
+        resp = await outsider_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["bili:100"]},
+        )
+        assert resp.status_code == 404
+        mock_engine.run_specific_messages.assert_not_called()
+
+    @patch("api.routes.messages.PipelineEngine")
+    async def test_partial_unauthorized_filtered_to_authorized(
+        self,
+        mock_engine: Any,
+        owner_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """部分越权：owner rerun [bili:100（own）, xhs:u456（own）, bili:200（孤儿）,
+        weibo:no_sub（无主）] → 202, reset_count=2（只 own 的 2 条），后台 task 只跑
+        授权的 [bili:100, xhs:u456]（验证 messages.py:239 authorized_msg_ids 过滤）。
+        """
+        mock_engine.run_specific_messages = AsyncMock()
+        app = owner_client._app  # type: ignore[attr-defined]
+        try:
+            resp = await owner_client.post(
+                "/api/v1/messages/rerun",
+                json={
+                    "msg_ids": [
+                        "bili:100", "xhs:u456", "bili:200", "weibo:no_sub",
+                    ]
+                },
+            )
+            assert resp.status_code == 202
+            assert resp.json()["reset_count"] == 2
+            await asyncio.sleep(0.05)
+            mock_engine.run_specific_messages.assert_called_once()
+            authorized = mock_engine.run_specific_messages.call_args.kwargs[
+                "msg_ids"
+            ]
+            # 越权 id（孤儿 + 无主）被过滤掉，只剩 owner 有权的两条
+            assert sorted(authorized) == ["bili:100", "xhs:u456"]
+        finally:
+            app.state.check_running = False
+            app.state.api_task_id = None  # type: ignore[attr-defined]
+
+    @patch("api.routes.messages.PipelineEngine")
+    async def test_full_unauthorized_404(
+        self,
+        mock_engine: Any,
+        outsider_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """全部越权：outsider rerun [bili:100, xhs:u456] → 404，无 reset。"""
+        mock_engine.run_specific_messages = AsyncMock()
+        resp = await outsider_client.post(
+            "/api/v1/messages/rerun",
+            json={"msg_ids": ["bili:100", "xhs:u456"]},
+        )
+        assert resp.status_code == 404
+        mock_engine.run_specific_messages.assert_not_called()
 
 

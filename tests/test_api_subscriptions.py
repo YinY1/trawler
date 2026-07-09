@@ -807,3 +807,125 @@ class TestOwnershipAssignRoutes:
         mock_unassign.assert_awaited_once()
 
 
+class TestOwnershipBindEndpoint:
+    """POST /subscriptions/{p}/{id}/endpoints ownership 矩阵（require_write=True）。
+
+    I1 修订（issue #108 review）：原 ``TestBindEndpoint`` 只用 superuser_client，
+    绕过 ownership 层。本 class mirror ``TestOwnershipDeleteSub`` 模式，覆盖
+    owner / assigned（被 require_write=True 拒）/ outsider 三角色。
+    """
+
+    async def test_owner_binds_own(
+        self,
+        owner_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        with patch(
+            "api.routes.subscriptions.add_endpoint_to_subscription",
+            new_callable=AsyncMock,
+        ) as mock_bind:
+            mock_bind.return_value = (True, "已绑定: gotify-main")
+            resp = await owner_client.post(
+                "/api/v1/subscriptions/bili/100/endpoints",
+                json={"endpoint_name": "gotify-main"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_bind.assert_awaited_once_with("bili", "100", "gotify-main")
+
+    async def test_assigned_cannot_bind(
+        self,
+        assigned_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """assigned 调 bind → success=False（require_write=True，assigned 只读）。"""
+        with patch(
+            "api.routes.subscriptions.add_endpoint_to_subscription",
+            new_callable=AsyncMock,
+        ) as mock_bind:
+            resp = await assigned_client.post(
+                "/api/v1/subscriptions/bili/100/endpoints",
+                json={"endpoint_name": "gotify-main"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        assert "未找到" in resp.json()["message"]
+        mock_bind.assert_not_awaited()
+
+    async def test_outsider_cannot_bind(
+        self,
+        outsider_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        with patch(
+            "api.routes.subscriptions.add_endpoint_to_subscription",
+            new_callable=AsyncMock,
+        ) as mock_bind:
+            resp = await outsider_client.post(
+                "/api/v1/subscriptions/bili/100/endpoints",
+                json={"endpoint_name": "gotify-main"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        mock_bind.assert_not_awaited()
+
+
+class TestOwnershipUnbindEndpoint:
+    """DELETE /subscriptions/{p}/{id}/endpoints/{name} ownership 矩阵（require_write=True）。
+
+    I1 修订（issue #108 review）：原 ``TestUnbindEndpoint`` 只用 superuser_client。
+    本 class mirror ``TestOwnershipBindEndpoint`` / ``TestOwnershipDeleteSub`` 模式。
+    """
+
+    async def test_owner_unbinds_own(
+        self,
+        owner_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        with patch(
+            "api.routes.subscriptions.remove_endpoint_from_subscription",
+            new_callable=AsyncMock,
+        ) as mock_unbind:
+            mock_unbind.return_value = (True, "已解绑: gotify-main")
+            resp = await owner_client.delete(
+                "/api/v1/subscriptions/bili/100/endpoints/gotify-main"
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_unbind.assert_awaited_once_with("bili", "100", "gotify-main")
+
+    async def test_assigned_cannot_unbind(
+        self,
+        assigned_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        """assigned 调 unbind → success=False（require_write=True）。"""
+        with patch(
+            "api.routes.subscriptions.remove_endpoint_from_subscription",
+            new_callable=AsyncMock,
+        ) as mock_unbind:
+            resp = await assigned_client.delete(
+                "/api/v1/subscriptions/bili/100/endpoints/gotify-main"
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        assert "未找到" in resp.json()["message"]
+        mock_unbind.assert_not_awaited()
+
+    async def test_outsider_cannot_unbind(
+        self,
+        outsider_client: AsyncClient,
+        tmp_config_with_owned_sub: Path,
+    ) -> None:
+        with patch(
+            "api.routes.subscriptions.remove_endpoint_from_subscription",
+            new_callable=AsyncMock,
+        ) as mock_unbind:
+            resp = await outsider_client.delete(
+                "/api/v1/subscriptions/bili/100/endpoints/gotify-main"
+            )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        mock_unbind.assert_not_awaited()
+
+

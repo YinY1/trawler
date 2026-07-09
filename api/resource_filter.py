@@ -4,7 +4,7 @@
 - ``TokenOwnership``：token 的 ownership 视图（是否 superuser + token name），
   路由层调 ``has_sub_access`` / ``has_sub_write`` 判断
 - ``filter_subscription_dict`` / ``subscription_visible``：订阅可见性 helper
-- ``message_visible`` / ``msg_id_visible``：消息可见性 helper（需 config 反查 sub）
+- ``message_visible``：消息可见性 helper（需 config 反查 sub）
 
 所有 helper 都是纯逻辑（无 IO、无 LLM、无外部副作用）。
 
@@ -214,18 +214,3 @@ def message_visible(
     if sub_obj is None:
         return False  # 反查不到 sub，保守不可见
     return ownership.has_sub_access(sub_obj)
-
-
-def msg_id_visible(
-    ownership: TokenOwnership,
-    msg_id: str,
-) -> bool:
-    """``msg_id`` 维度可见性（fetch 路由专用，issue #108）。
-
-    fetch 是按需抓取，消息可能还没入库，无法 msg→sub 反查。**只有 superuser
-    能调 fetch**（决策：无主消息无法判断 owner，普通 token 调 fetch 等同越权）。
-
-    普通 token 调 fetch → 403（路由层直接拦，不走到这里）。
-    本函数仅供 superuser 调用时做防御性检查（永远 True）。
-    """
-    return ownership.is_superuser
