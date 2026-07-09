@@ -1,6 +1,6 @@
 [project]
 name = "trawler"
-version = "1.1.0"
+version = "1.2.0"
 description = "多平台创作者内容追更自动化工作流"
 requires-python = ">=3.14"
 dependencies = [
