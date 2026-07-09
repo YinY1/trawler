@@ -678,6 +678,64 @@ class TestOwnershipListSubs:
         assert resp.status_code == 200
         assert resp.json()["platforms"] == {}
 
+    async def test_superuser_sees_owner_fields(
+        self, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """superuser 保留 owner_token / assigned_tokens 字段（issue #108 spec §11）。"""
+        c = await _make_superuser_client_owned()
+        try:
+            with patch(
+                "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+            ) as mock_list:
+                # deep copy 避免模块级常量被脱敏 path 改写影响后续 test
+                mock_list.return_value = {
+                    k: [dict(s) for s in v] for k, v in _MOCK_LIST_RETURN.items()
+                }
+                resp = await c.get("/api/v1/subscriptions")
+        finally:
+            await c.__aexit__(None, None, None)
+        assert resp.status_code == 200
+        bili100 = next(
+            s for s in resp.json()["platforms"]["bilibili"] if s["uid"] == 100
+        )
+        assert bili100["owner_token"] == "owner-bot"
+        assert bili100["assigned_tokens"] == ["assigned-bot"]
+
+    async def test_owner_fields_stripped_for_owner(
+        self, owner_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """owner 视图脱敏：owner_token / assigned_tokens 字段不存在（issue #108 spec §11）。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+        ) as mock_list:
+            mock_list.return_value = {
+                k: [dict(s) for s in v] for k, v in _MOCK_LIST_RETURN.items()
+            }
+            resp = await owner_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        for sub in resp.json()["platforms"]["bilibili"]:
+            assert "owner_token" not in sub
+            assert "assigned_tokens" not in sub
+        for sub in resp.json()["platforms"]["xiaohongshu"]:
+            assert "owner_token" not in sub
+            assert "assigned_tokens" not in sub
+
+    async def test_owner_fields_stripped_for_assigned(
+        self, assigned_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """assigned 视图同样脱敏（assigned 也看不到 owner/assigned_tokens）。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+        ) as mock_list:
+            mock_list.return_value = {
+                k: [dict(s) for s in v] for k, v in _MOCK_LIST_RETURN.items()
+            }
+            resp = await assigned_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        for sub in resp.json()["platforms"]["bilibili"]:
+            assert "owner_token" not in sub
+            assert "assigned_tokens" not in sub
+
 
 class TestOwnershipDeleteSub:
     """DELETE /subscriptions/{p}/{id} ownership 矩阵（require_write=True）。"""

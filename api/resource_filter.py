@@ -125,7 +125,14 @@ def filter_subscription_dict(
     越权 sub 不出现在响应里（不暴露存在性）。
 
     superuser bypass：``ownership.is_superuser`` 直接返回原始 ``result``，
-    不反查 sub（让响应完整透传 superuser 看到的全部 sub）。
+    不反查 sub（让响应完整透传 superuser 看到的全部 sub，含
+    owner_token / assigned_tokens 字段）。
+
+    非 superuser 脱敏：在返回前删掉每条 sub 的 ``owner_token`` 和
+    ``assigned_tokens`` 字段（issue #108 spec §11 风险表）。
+    任何持 ``subscriptions:read`` 的 token 都能看到 sub 的 owner 是谁、
+    被分配给谁会让外部反推整个权限拓扑，故对 owner/assigned 一视同仁
+    strip 这两字段（只有 superuser 才能看）。
     """
     from shared.protocols import find_subscription_by_ref
 
@@ -147,7 +154,27 @@ def filter_subscription_dict(
                 kept.append(s)
         if kept:
             out[section] = kept
+    _strip_owner_fields(out)
     return out
+
+
+def _strip_owner_fields(result: dict[str, list[dict]]) -> None:
+    """删除所有 sub dict 的 ``owner_token`` / ``assigned_tokens`` 字段。
+
+    返回新 dict 替换原 sub（不就地 pop 原 dict）——避免共享原对象引用的
+    调用方（如测试中模块级 mock 常量、tomlkit Table）被污染。``result``
+    的 list 整体替换为新 list，``result`` 本身是 ``filter_subscription_dict``
+    内部构造的 ``out``，安全。
+
+    兼容普通 dict 和 tomlkit Table：``list_subscriptions`` 返回的 sub 是
+    ``dict(tomlkit_table)`` 浅拷贝（key 已是 str），comprehension 正常工作。
+    老 sub 可能没这两字段，comprehension 天然容错。
+    """
+    for section, subs in result.items():
+        result[section] = [
+            {k: v for k, v in s.items() if k not in ("owner_token", "assigned_tokens")}
+            for s in subs
+        ]
 
 
 def subscription_visible(
