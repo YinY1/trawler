@@ -929,3 +929,56 @@ class TestOwnershipUnbindEndpoint:
         mock_unbind.assert_not_awaited()
 
 
+# ── ID 校验：bili 非数字 identifier 不再 500（issue #108 e2e） ────────
+
+
+class TestSubscriptionIdValidation:
+    """非数字 identifier 传 bili（uid 是 int）触发 ValueError → 200 + success=False。
+
+    历史 bug：路由层不捕获 ``_key_value`` 内部 ``int(identifier)`` 抛的
+    ``ValueError``，FastAPI 兜底成 500。修复后路由层统一 try/except 返
+    ``success=False, message="无效 identifier: ..."``，与其它业务失败风格一致
+    （200 + success 字段，不是 RESTful 4xx）。
+    """
+
+    @patch("api.routes.subscriptions.add_subscription", new_callable=AsyncMock)
+    async def test_post_bili_non_numeric_id_returns_success_false(
+        self,
+        mock_add: AsyncMock,
+        superuser_client: AsyncClient,
+    ) -> None:
+        """POST /subscriptions bili + identifier="abc" → 200 success=False（不 500）。
+
+        ``_key_value("bili", "abc")`` 内 ``int("abc")`` 抛 ValueError，
+        路由层捕获后返 ``success=False, message="无效 identifier: ..."``。
+        """
+        mock_add.side_effect = ValueError("invalid literal for int() with base 10: 'abc'")
+        resp = await superuser_client.post(
+            "/api/v1/subscriptions",
+            json={"platform": "bili", "identifier": "abc", "name": "X"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "无效 identifier" in data["message"]
+
+    @patch("api.routes.subscriptions.remove_subscription", new_callable=AsyncMock)
+    async def test_delete_bili_non_numeric_id_returns_success_false(
+        self,
+        mock_remove: AsyncMock,
+        superuser_client: AsyncClient,
+    ) -> None:
+        """DELETE /subscriptions/bili/abc → 200 success=False（不 500）。
+
+        superuser_client 是 superuser，``subscription_visible`` 直接放行；
+        ``remove_subscription("bili", "abc")`` 内 ``int("abc")`` 抛 ValueError，
+        路由层捕获后返 ``success=False, message="无效 identifier: ..."``。
+        """
+        mock_remove.side_effect = ValueError("invalid literal for int() with base 10: 'abc'")
+        resp = await superuser_client.delete("/api/v1/subscriptions/bili/abc")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "无效 identifier" in data["message"]
+
+

@@ -120,13 +120,18 @@ async def add_sub(
         return SubscriptionAddResponse(
             success=False, message=f"无效平台: {body.platform}"
         )
-    success, message = await add_subscription(
-        normalized_platform,
-        body.identifier,
-        body.name,
-        default_notify_endpoint=body.default_notify_endpoint,
-        owner_token=ownership.token_name,
-    )
+    try:
+        success, message = await add_subscription(
+            normalized_platform,
+            body.identifier,
+            body.name,
+            default_notify_endpoint=body.default_notify_endpoint,
+            owner_token=ownership.token_name,
+        )
+    except ValueError as e:
+        return SubscriptionAddResponse(
+            success=False, message=f"无效 identifier: {e}"
+        )
     return SubscriptionAddResponse(success=success, message=message)
 
 
@@ -159,7 +164,12 @@ async def remove_sub(
         return SubscriptionRemoveResponse(
             success=False, message="未找到: 订阅不存在或无权访问"
         )
-    success, message = await remove_subscription(platform, identifier)
+    try:
+        success, message = await remove_subscription(platform, identifier)
+    except ValueError as e:
+        return SubscriptionRemoveResponse(
+            success=False, message=f"无效 identifier: {e}"
+        )
     return SubscriptionRemoveResponse(success=success, message=message)
 
 
@@ -192,9 +202,14 @@ async def bind_endpoint(
     config = await load_config()
     if not subscription_visible(ownership, config, platform, identifier, require_write=True):
         return SubscriptionAddResponse(success=False, message="未找到订阅")
-    success, message = await add_endpoint_to_subscription(
-        platform, identifier, body.endpoint_name
-    )
+    try:
+        success, message = await add_endpoint_to_subscription(
+            platform, identifier, body.endpoint_name
+        )
+    except ValueError as e:
+        return SubscriptionAddResponse(
+            success=False, message=f"无效 identifier: {e}"
+        )
     return SubscriptionAddResponse(success=success, message=message)
 
 
@@ -223,9 +238,14 @@ async def unbind_endpoint(
     config = await load_config()
     if not subscription_visible(ownership, config, platform, identifier, require_write=True):
         return SubscriptionAddResponse(success=False, message="未找到订阅")
-    success, message = await remove_endpoint_from_subscription(
-        platform, identifier, endpoint_name
-    )
+    try:
+        success, message = await remove_endpoint_from_subscription(
+            platform, identifier, endpoint_name
+        )
+    except ValueError as e:
+        return SubscriptionAddResponse(
+            success=False, message=f"无效 identifier: {e}"
+        )
     return SubscriptionAddResponse(success=success, message=message)
 
 
@@ -264,11 +284,16 @@ async def assign_token(
     platform = _normalize_platform(platform)  # type: ignore[assignment]
     if platform is None:
         return SubscriptionAddResponse(success=False, message="未找到订阅")
-    success, message = await assign_token_to_subscription(
-        platform=platform,
-        identifier=identifier,
-        token_name=body.token_name,
-    )
+    try:
+        success, message = await assign_token_to_subscription(
+            platform=platform,
+            identifier=identifier,
+            token_name=body.token_name,
+        )
+    except ValueError as e:
+        return SubscriptionAddResponse(
+            success=False, message=f"无效 identifier: {e}"
+        )
     return SubscriptionAddResponse(success=success, message=message)
 
 
@@ -292,7 +317,12 @@ async def unassign_token(
     platform = _normalize_platform(platform)  # type: ignore[assignment]
     if platform is None:
         return SubscriptionAddResponse(success=False, message="未找到订阅")
-    success, message = await unassign_token_from_subscription(
-        platform=platform, identifier=identifier, token_name=token_name,
-    )
+    try:
+        success, message = await unassign_token_from_subscription(
+            platform=platform, identifier=identifier, token_name=token_name,
+        )
+    except ValueError as e:
+        return SubscriptionAddResponse(
+            success=False, message=f"无效 identifier: {e}"
+        )
     return SubscriptionAddResponse(success=success, message=message)
