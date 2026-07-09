@@ -382,6 +382,27 @@ def _refresh_single_platform(platform: str, config: Config, force: bool = False)
         return False
 
 
+# ═══════════════════════════════════════════════════════════
+# 命令组: api-token（API token 管理，访问 REST API 的 bearer token）
+# 与 trawler token（平台登录 token）分开，避免混淆。
+# 复用 api/token_tool.py 的 click 子命令，注册到本 group 下；
+# python -m api.token_tool 仍向后兼容。
+# ═══════════════════════════════════════════════════════════
+
+
+@cli.group("api-token")
+def api_token() -> None:
+    """API token 管理（访问 REST API 的 bearer token）"""
+    pass
+
+
+# 复用 api.token_tool.cli 的子命令（create / list / revoke / adopt）
+from api.token_tool import cli as api_token_cli  # noqa: E402
+
+for _name, _cmd in api_token_cli.commands.items():
+    api_token.add_command(_cmd, name=_name)
+
+
 @cli.group()
 def subscription() -> None:
     """订阅管理命令"""

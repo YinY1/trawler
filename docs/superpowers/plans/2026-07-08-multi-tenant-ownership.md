@@ -2022,7 +2022,7 @@ Edit `tests/test_api_token_tool.py`:
 
 
 class TestAdoptCommand:
-    """``python -m api.token_tool adopt --platform --id --owner`` 一键给孤儿 sub 补 owner。"""
+    """``trawler api-token adopt --platform --id --owner`` 一键给孤儿 sub 补 owner。"""
 
     def test_adopt_success(
         self, runner: CliRunner, auth_path: Path, tmp_path: Path, monkeypatch
@@ -2313,7 +2313,7 @@ def adopt(platform: str, identifier: str, owner_token: str) -> None:
 
     示例::
 
-        python -m api.token_tool adopt --platform bili --id 123456 --owner bili-admin-bot
+        trawler api-token adopt --platform bili --id 123456 --owner bili-admin-bot
     """
     from core.subscription_cli import set_subscription_owner
 

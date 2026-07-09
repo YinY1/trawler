@@ -1,6 +1,14 @@
 """API token 管理 CLI（T5 + issue #108 ownership）。
 
-Usage:
+Usage（推荐，挂在 trawler 主 CLI 下）::
+
+    trawler api-token create <name> [--force]
+    trawler api-token list
+    trawler api-token revoke <name>
+    trawler api-token adopt --platform <p> --id <id> --owner <token_name>
+
+向后兼容仍可直接以模块方式调用::
+
     python -m api.token_tool create <name> [--force]
     python -m api.token_tool list
     python -m api.token_tool revoke <name>
@@ -166,7 +174,7 @@ def adopt(platform: str, identifier: str, owner_token: str) -> None:
 
     示例::
 
-        python -m api.token_tool adopt --platform bili --id 123456 --owner bili-admin-bot
+        trawler api-token adopt --platform bili --id 123456 --owner bili-admin-bot
     """
     from core.subscription_cli import set_subscription_owner
 
