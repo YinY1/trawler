@@ -123,9 +123,14 @@ def filter_subscription_dict(
 
     superuser 看全部；owner/assigned 看自己的；outvisitor 看不到。
     越权 sub 不出现在响应里（不暴露存在性）。
+
+    superuser bypass：``ownership.is_superuser`` 直接返回原始 ``result``，
+    不反查 sub（让响应完整透传 superuser 看到的全部 sub）。
     """
     from shared.protocols import find_subscription_by_ref
 
+    if ownership.is_superuser:
+        return result
     out: dict[str, list[dict]] = {}
     for section, subs in result.items():
         short = SECTION_TO_SHORT.get(section)
@@ -161,9 +166,14 @@ def subscription_visible(
     否则用 ``has_sub_access``（assigned 可读）。
 
     越权时调用方合并成「未找到」语义（200 + success=False），不暴露存在性。
+
+    superuser bypass：``ownership.is_superuser`` 直接返回 True，不反查 sub
+    （让业务函数自行报「未找到」，superuser 不被 ownership 层拦）。
     """
     from shared.protocols import find_subscription_by_ref
 
+    if ownership.is_superuser:
+        return True
     short = SECTION_TO_SHORT.get(platform_full)
     if short is None and platform_full in PLATFORM_TO_SECTION:
         short = platform_full

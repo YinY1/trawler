@@ -1,6 +1,6 @@
 """Tests for /api/v1/subscriptions endpoints (T4).
 
-学习 ``tests/test_api_check.py`` 的 ``authed_client`` fixture 风格 +
+学习 ``tests/test_api_check.py`` 的 ``superuser_client`` fixture 风格 +
 ``tests/test_subscription_cli.py`` 的业务函数返回 ``tuple[bool, str]`` 习惯。
 
 覆盖：
@@ -27,15 +27,13 @@ PASSWORD = "test12345"
 
 
 @pytest.fixture
-async def authed_client(
+async def superuser_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncClient:
-    """已配置 token 的 client（带 ``Authorization: Bearer`` header）。
+    """持 tokens:manage 的 superuser client（#108 后空 scopes 无权）。
 
-    与 ``tests/test_api_check.py:authed_client`` 完全一致：
-    - monkeypatch ``web.auth.AUTH_TOML_PATH`` 与 ``api.auth.AUTH_TOML_PATH`` 到 tmp
-    - set_password 让 setup_complete=True（auth_guard 中间件需要）
-    - create_token 写一个明文 token，挂到 client default header
+    附带 ``subscriptions:read`` / ``subscriptions:write`` scope：路由入口 scope 校验
+    在 ownership 层之前，tokens:manage 本身不隐含 subscriptions:*。
     """
     auth_path = tmp_path / "auth.toml"
     monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
@@ -45,13 +43,21 @@ async def authed_client(
     from api.auth import create_token
 
     app = create_app()
-    plain = create_token("test-bot")
+    plain = create_token(
+        "super-bot",
+        scopes=[
+            "tokens:manage",
+            "subscriptions:read",
+            "subscriptions:write",
+        ],
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Authorization": f"Bearer {plain}"},
     ) as c:
+        c._app = app  # type: ignore[attr-defined]
         yield c
 
 
@@ -78,11 +84,11 @@ class TestListSubscriptions:
     async def test_list_subscriptions_empty(
         self,
         mock_list: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """list_subscriptions 返回 ``{}`` → 200 + ``{"platforms": {}}``。"""
         mock_list.return_value = {}
-        resp = await authed_client.get("/api/v1/subscriptions")
+        resp = await superuser_client.get("/api/v1/subscriptions")
         assert resp.status_code == 200
         assert resp.json() == {"platforms": {}}
         mock_list.assert_awaited_once_with(platform=None)
@@ -91,14 +97,14 @@ class TestListSubscriptions:
     async def test_list_subscriptions_with_data(
         self,
         mock_list: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """list_subscriptions 返回多平台 → 透传为 ``platforms`` 字段。"""
         mock_list.return_value = {
             "bilibili": [{"uid": 123, "name": "UP1"}],
             "xiaohongshu": [{"user_id": "abc", "name": "XHS1"}],
         }
-        resp = await authed_client.get("/api/v1/subscriptions")
+        resp = await superuser_client.get("/api/v1/subscriptions")
         assert resp.status_code == 200
         data = resp.json()
         assert data["platforms"]["bilibili"] == [{"uid": 123, "name": "UP1"}]
@@ -110,11 +116,11 @@ class TestListSubscriptions:
     async def test_list_subscriptions_filter_by_platform(
         self,
         mock_list: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """query ``?platform=bili`` → 透传给 list_subscriptions(platform="bili")。"""
         mock_list.return_value = {"bilibili": [{"uid": 123, "name": "UP1"}]}
-        resp = await authed_client.get("/api/v1/subscriptions?platform=bili")
+        resp = await superuser_client.get("/api/v1/subscriptions?platform=bili")
         assert resp.status_code == 200
         mock_list.assert_awaited_once_with(platform="bili")
 
@@ -139,11 +145,11 @@ class TestAddSubscription:
     async def test_add_subscription_success(
         self,
         mock_add: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """add_subscription 返回 ``(True, "已添加: X")`` → 200 + success=True。"""
         mock_add.return_value = (True, "已添加: UP1")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions",
             json={"platform": "bili", "identifier": "123", "name": "UP1"},
         )
@@ -152,14 +158,16 @@ class TestAddSubscription:
         assert data["success"] is True
         assert data["message"] == "已添加: UP1"
         mock_add.assert_awaited_once_with(
-            "bili", "123", "UP1", default_notify_endpoint=None
+            "bili", "123", "UP1",
+            default_notify_endpoint=None,
+            owner_token="super-bot",
         )
 
     @patch("api.routes.subscriptions.add_subscription", new_callable=AsyncMock)
     async def test_add_subscription_duplicate_returns_success_false(
         self,
         mock_add: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """重复添加 ``(False, "已存在: ...")`` → 200 + success=False（**不是** 4xx）。
 
@@ -167,7 +175,7 @@ class TestAddSubscription:
         映射成 200 + ``success=False``，调用方靠字段判断。
         """
         mock_add.return_value = (False, "已存在: UP1")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions",
             json={"platform": "bili", "identifier": "123", "name": "UP1"},
         )
@@ -199,11 +207,11 @@ class TestRemoveSubscription:
     async def test_remove_subscription_success(
         self,
         mock_remove: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """remove_subscription 返回 ``(True, "已删除: ...")`` → 200 + success=True。"""
         mock_remove.return_value = (True, "已删除: UP1")
-        resp = await authed_client.delete("/api/v1/subscriptions/bili/123")
+        resp = await superuser_client.delete("/api/v1/subscriptions/bili/123")
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
@@ -214,11 +222,11 @@ class TestRemoveSubscription:
     async def test_remove_subscription_not_found_returns_success_false(
         self,
         mock_remove: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """未找到 ``(False, "未找到: ...")`` → 200 + success=False（**不是** 404）。"""
         mock_remove.return_value = (False, "未找到: bili 平台未找到匹配的订阅")
-        resp = await authed_client.delete("/api/v1/subscriptions/bili/999")
+        resp = await superuser_client.delete("/api/v1/subscriptions/bili/999")
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is False
@@ -244,11 +252,11 @@ class TestBindEndpoint:
     async def test_api_bind_endpoint_ok(
         self,
         mock_bind: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """add_endpoint_to_subscription 返回 (True, "已绑定: ...") → 200 success=True。"""
         mock_bind.return_value = (True, "已绑定: gotify-main")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions/bilibili/123/endpoints",
             json={"endpoint_name": "gotify-main"},
         )
@@ -256,17 +264,17 @@ class TestBindEndpoint:
         data = resp.json()
         assert data["success"] is True
         assert "已绑定" in data["message"]
-        mock_bind.assert_awaited_once_with("bilibili", "123", "gotify-main")
+        mock_bind.assert_awaited_once_with("bili", "123", "gotify-main")
 
     @patch("api.routes.subscriptions.add_endpoint_to_subscription", new_callable=AsyncMock)
     async def test_api_bind_endpoint_unknown(
         self,
         mock_bind: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """未知 endpoint → 200 success=False（不映射 4xx）。"""
         mock_bind.return_value = (False, "未知 endpoint: bad-ep")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions/bilibili/123/endpoints",
             json={"endpoint_name": "bad-ep"},
         )
@@ -279,11 +287,11 @@ class TestBindEndpoint:
     async def test_api_bind_endpoint_no_sub(
         self,
         mock_bind: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """订阅不存在 → 200 success=False。"""
         mock_bind.return_value = (False, "未找到订阅")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions/bilibili/9999/endpoints",
             json={"endpoint_name": "gotify-main"},
         )
@@ -315,18 +323,18 @@ class TestUnbindEndpoint:
     async def test_api_unbind_endpoint_ok(
         self,
         mock_unbind: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """remove 返回 (True, "已解绑: ...") → 200 success=True。"""
         mock_unbind.return_value = (True, "已解绑: gotify-main")
-        resp = await authed_client.delete(
+        resp = await superuser_client.delete(
             "/api/v1/subscriptions/bilibili/123/endpoints/gotify-main"
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
         assert "已解绑" in data["message"]
-        mock_unbind.assert_awaited_once_with("bilibili", "123", "gotify-main")
+        mock_unbind.assert_awaited_once_with("bili", "123", "gotify-main")
 
 
 # ── POST /subscriptions with default_notify_endpoint ─────────────────
@@ -337,11 +345,11 @@ class TestAddSubscriptionWithDefault:
     async def test_api_add_subscription_with_default(
         self,
         mock_add: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """请求体含 default_notify_endpoint → 透传给 add_subscription。"""
         mock_add.return_value = (True, "已添加: UP1")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions",
             json={
                 "platform": "bili",
@@ -354,25 +362,29 @@ class TestAddSubscriptionWithDefault:
         assert resp.json()["success"] is True
         # 关键：default_notify_endpoint 透传到 core
         mock_add.assert_awaited_once_with(
-            "bili", "123", "UP1", default_notify_endpoint="gotify-main"
+            "bili", "123", "UP1",
+            default_notify_endpoint="gotify-main",
+            owner_token="super-bot",
         )
 
     @patch("api.routes.subscriptions.add_subscription", new_callable=AsyncMock)
     async def test_api_add_subscription_without_default_omits_kwarg(
         self,
         mock_add: AsyncMock,
-        authed_client: AsyncClient,
+        superuser_client: AsyncClient,
     ) -> None:
         """请求体不含 default_notify_endpoint → pydantic 默认 None，
         add_subscription 仍被以关键字参数形式调用（值为 None）。"""
         mock_add.return_value = (True, "已添加: UP1")
-        resp = await authed_client.post(
+        resp = await superuser_client.post(
             "/api/v1/subscriptions",
             json={"platform": "bili", "identifier": "123", "name": "UP1"},
         )
         assert resp.status_code == 200
         mock_add.assert_awaited_once_with(
-            "bili", "123", "UP1", default_notify_endpoint=None
+            "bili", "123", "UP1",
+            default_notify_endpoint=None,
+            owner_token="super-bot",
         )
 
 
@@ -466,23 +478,45 @@ class TestSubscriptionsScopes:
 
 
 # ═══════════════════════════════════════════════════════════
-# 行级过滤（issue #106 — plan T4/T7）
+# ownership 矩阵（issue #108）
 # ═══════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-async def row_filtered_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> AsyncClient:
-    """带指定 ``resource_rules`` 的 client（与 ``scoped_client`` 同模式）。"""
-    from httpx import ASGITransport
+def tmp_config_with_owned_sub(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """写盘 subscriptions.toml + auth.toml + mock load_config，sub 路由共用。
 
-    from web.app import create_app
+    Subscriptions:
+      - bili uid=100, owner_token='owner-bot', assigned_tokens=['assigned-bot']
+      - bili uid=200, owner_token='' (孤儿)
+      - xhs user_id='u456', owner_token='owner-bot'
+    """
+    from shared.config import (
+        BilibiliConfig,
+        BiliSubscription,
+        Config,
+        GeneralConfig,
+        UserSubscription,
+        WeiboConfig,
+        XhsConfig,
+    )
 
-    params = request.param
-    scopes = params.get("scopes", [])
-    platforms = params.get("platforms")
-    subs = params.get("subscription_refs")
+    fake_cfg = Config(
+        general=GeneralConfig(data_dir=str(tmp_path)),
+        bilibili=BilibiliConfig(subscriptions=[
+            BiliSubscription(uid=100, name="UP100", owner_token="owner-bot",
+                             assigned_tokens=["assigned-bot"]),
+            BiliSubscription(uid=200, name="OrphanUP"),
+        ]),
+        xiaohongshu=XhsConfig(subscriptions=[
+            UserSubscription(user_id="u456", name="XHS1", owner_token="owner-bot"),
+        ]),
+        weibo=WeiboConfig(),
+    )
+    mock_load = AsyncMock(return_value=fake_cfg)
+    monkeypatch.setattr("api.routes.subscriptions.load_config", mock_load)
 
     auth_path = tmp_path / "auth.toml"
     monkeypatch.setattr("web.auth.AUTH_TOML_PATH", auth_path)
@@ -490,175 +524,286 @@ async def row_filtered_client(
     set_password(PASSWORD)
 
     from api.auth import create_token
-    from shared.config import ResourceRules
+    create_token("super-bot", scopes=["tokens:manage", "subscriptions:read", "subscriptions:write"])
+    create_token("owner-bot", scopes=["subscriptions:write", "subscriptions:read"])
+    create_token("assigned-bot", scopes=["subscriptions:read", "subscriptions:write"])
+    create_token("outsider-bot", scopes=["subscriptions:read", "subscriptions:write"])
+    return tmp_path
 
-    app = create_app()
+
+@pytest.fixture
+async def owner_client(tmp_config_with_owned_sub: Path) -> AsyncClient:
+    """owner-bot client（重新 create 拿明文，name 不变 ownership 关系成立）。"""
+    from api.auth import create_token
     plain = create_token(
-        "row-bot",
-        scopes=scopes,
-        resource_rules=ResourceRules(platforms=platforms, subscription_refs=subs),
+        "owner-bot", scopes=["subscriptions:write", "subscriptions:read"]
     )
+    app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
-        transport=transport,
-        base_url="http://test",
+        transport=transport, base_url="http://test",
         headers={"Authorization": f"Bearer {plain}"},
     ) as c:
+        c._app = app  # type: ignore[attr-defined]
         yield c
 
 
-class TestRowLevelListSubs:
-    """``GET /subscriptions`` 行级过滤（plan T4）。"""
+@pytest.fixture
+async def assigned_client(tmp_config_with_owned_sub: Path) -> AsyncClient:
+    """assigned-bot：scope 全开（read+write），但 ownership 层 assigned 只读。
 
-    @pytest.mark.parametrize(
-        "row_filtered_client",
-        [{"scopes": ["subscriptions:read"], "platforms": ["bili"]}],
-        indirect=True,
-    )
-    async def test_list_subs_filters_by_platform(
-        self,
-        row_filtered_client: AsyncClient,
-    ) -> None:
-        """token 只允许 bili → response 只含 ``bilibili`` section（排除 xhs/weibo）。"""
-        with patch(
-            "api.routes.subscriptions.list_subscriptions",
-            new_callable=AsyncMock,
-        ) as mock_list:
-            mock_list.return_value = {
-                "bilibili": [{"uid": 100, "name": "UP1"}],
-                "xiaohongshu": [{"user_id": "u456", "name": "XHS1"}],
-                "weibo": [{"user_id": "w1", "name": "W1"}],
-            }
-            resp = await row_filtered_client.get("/api/v1/subscriptions")
-        assert resp.status_code == 200
-        data = resp.json()
-        sections = set(data["platforms"].keys())
-        assert sections == {"bilibili"}
-
-    @pytest.mark.parametrize(
-        "row_filtered_client",
-        [{"scopes": ["subscriptions:read"], "subscription_refs": ["bili:100"]}],
-        indirect=True,
-    )
-    async def test_list_subs_filters_by_subscription(
-        self,
-        row_filtered_client: AsyncClient,
-    ) -> None:
-        """token 只允许 ``bili:100`` → response.bilibili 列表只含 uid=100 那条。"""
-        with patch(
-            "api.routes.subscriptions.list_subscriptions",
-            new_callable=AsyncMock,
-        ) as mock_list:
-            mock_list.return_value = {
-                "bilibili": [
-                    {"uid": 100, "name": "UP-100"},
-                    {"uid": 200, "name": "UP-200"},
-                ],
-            }
-            resp = await row_filtered_client.get("/api/v1/subscriptions")
-        assert resp.status_code == 200
-        bili_subs = resp.json()["platforms"]["bilibili"]
-        # 只剩 uid=100（uid=200 被过滤）
-        assert len(bili_subs) == 1
-        assert bili_subs[0]["uid"] == 100
-
-    @pytest.mark.parametrize(
-        "row_filtered_client",
-        [{"scopes": ["subscriptions:read"]}],  # 全权限
-        indirect=True,
-    )
-    async def test_list_subs_unrestricted_returns_all(
-        self,
-        row_filtered_client: AsyncClient,
-    ) -> None:
-        """全权限 token 不过滤（兼容性回归）。"""
-        with patch(
-            "api.routes.subscriptions.list_subscriptions",
-            new_callable=AsyncMock,
-        ) as mock_list:
-            mock_list.return_value = {
-                "bilibili": [{"uid": 100, "name": "UP1"}],
-                "xiaohongshu": [{"user_id": "u456", "name": "XHS1"}],
-            }
-            resp = await row_filtered_client.get("/api/v1/subscriptions")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert set(data["platforms"].keys()) == {"bilibili", "xiaohongshu"}
-
-
-class TestRowLevelSubsWrite:
-    """订阅写入路由越权处理（plan T5）。
-
-    越权 → 200 + ``success=False``（与「未找到」语义合并，不暴露存在性，
-    spec §7 表 / §8.3）。三个写入路由（``remove_sub`` / ``bind_endpoint`` /
-    ``unbind_endpoint``）统一调 ``subscription_visible`` helper，避免重复 inline。
+    scope 全开是为绕过 FastAPI Security scope 检查，让请求到达 ownership 层
+    验证 assigned 不能写（require_write=True → has_sub_write=False）。
     """
+    from api.auth import create_token
+    plain = create_token("assigned-bot", scopes=["subscriptions:read", "subscriptions:write"])
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        c._app = app  # type: ignore[attr-defined]
+        yield c
 
-    @pytest.mark.parametrize(
-        "row_filtered_client",
-        [{"scopes": ["subscriptions:write"], "platforms": ["bili"]}],
-        indirect=True,
+
+@pytest.fixture
+async def outsider_client(tmp_config_with_owned_sub: Path) -> AsyncClient:
+    """outsider-bot：scope 全开，但 ownership 层无任何 sub 关系。"""
+    from api.auth import create_token
+    plain = create_token("outsider-bot", scopes=["subscriptions:read", "subscriptions:write"])
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    ) as c:
+        c._app = app  # type: ignore[attr-defined]
+        yield c
+
+
+async def _make_superuser_client_owned() -> AsyncClient:
+    """在 ``tmp_config_with_owned_sub`` 上下文中构造 superuser client。
+
+    复用 fixture 已 monkeypatch 的 AUTH_TOML_PATH，重新 create_token 拿明文。
+    """
+    from api.auth import create_token
+    plain = create_token(
+        "super-bot",
+        scopes=["tokens:manage", "subscriptions:read", "subscriptions:write"],
     )
-    async def test_delete_sub_unauthorized_returns_success_false(
-        self,
-        row_filtered_client: AsyncClient,
+    app = create_app()
+    transport = ASGITransport(app=app)
+    c = AsyncClient(
+        transport=transport, base_url="http://test",
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    await c.__aenter__()
+    c._app = app  # type: ignore[attr-defined]
+    return c
+
+
+_MOCK_LIST_RETURN = {
+    "bilibili": [
+        {"uid": 100, "name": "UP100", "owner_token": "owner-bot",
+         "assigned_tokens": ["assigned-bot"]},
+        {"uid": 200, "name": "OrphanUP"},
+    ],
+    "xiaohongshu": [
+        {"user_id": "u456", "name": "XHS1", "owner_token": "owner-bot"},
+    ],
+}
+
+
+class TestOwnershipListSubs:
+    """GET /subscriptions ownership 矩阵（issue #108）。"""
+
+    async def test_superuser_sees_all(
+        self, tmp_config_with_owned_sub: Path
     ) -> None:
-        """越权删除（token 只允许 bili，删 xhs 订阅）→ 200 + success=False。"""
-        with patch(
-            "api.routes.subscriptions.remove_subscription",
-            new_callable=AsyncMock,
-        ) as mock_remove:
-            # mock 不会被调用（越权在路由层就被拦了）
-            resp = await row_filtered_client.delete(
-                "/api/v1/subscriptions/xiaohongshu/u456"
-            )
+        """superuser 看全部 sub（含孤儿 bili/200）。"""
+        c = await _make_superuser_client_owned()
+        try:
+            with patch(
+                "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+            ) as mock_list:
+                mock_list.return_value = _MOCK_LIST_RETURN
+                resp = await c.get("/api/v1/subscriptions")
+        finally:
+            await c.__aexit__(None, None, None)
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is False
-        assert "未找到" in data["message"]
+        data = resp.json()["platforms"]
+        assert len(data["bilibili"]) == 2
+        assert len(data["xiaohongshu"]) == 1
+
+    async def test_owner_sees_own(
+        self, owner_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """owner-bot 看 bili/100 + xhs/u456（自己 own 的），不看 bili/200 孤儿。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+        ) as mock_list:
+            mock_list.return_value = _MOCK_LIST_RETURN
+            resp = await owner_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()["platforms"]
+        bili_uids = {s["uid"] for s in data["bilibili"]}
+        assert bili_uids == {100}
+        assert len(data["xiaohongshu"]) == 1
+
+    async def test_assigned_sees_assigned_only(
+        self, assigned_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """assigned-bot 只看 bili/100。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+        ) as mock_list:
+            mock_list.return_value = _MOCK_LIST_RETURN
+            resp = await assigned_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        data = resp.json()["platforms"]
+        bili_uids = {s["uid"] for s in data["bilibili"]}
+        assert bili_uids == {100}
+        assert "xiaohongshu" not in data
+
+    async def test_outsider_sees_empty(
+        self, outsider_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """outsider-bot 看不到任何 sub → platforms={} 空 dict。"""
+        with patch(
+            "api.routes.subscriptions.list_subscriptions", new_callable=AsyncMock
+        ) as mock_list:
+            mock_list.return_value = _MOCK_LIST_RETURN
+            resp = await outsider_client.get("/api/v1/subscriptions")
+        assert resp.status_code == 200
+        assert resp.json()["platforms"] == {}
+
+
+class TestOwnershipDeleteSub:
+    """DELETE /subscriptions/{p}/{id} ownership 矩阵（require_write=True）。"""
+
+    async def test_owner_deletes_own(
+        self, owner_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        with patch(
+            "api.routes.subscriptions.remove_subscription", new_callable=AsyncMock
+        ) as mock_remove:
+            mock_remove.return_value = (True, "已删除: UP100")
+            resp = await owner_client.delete("/api/v1/subscriptions/bili/100")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_remove.assert_awaited_once()
+
+    async def test_assigned_cannot_delete(
+        self, assigned_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        with patch(
+            "api.routes.subscriptions.remove_subscription", new_callable=AsyncMock
+        ) as mock_remove:
+            resp = await assigned_client.delete("/api/v1/subscriptions/bili/100")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        assert "未找到" in resp.json()["message"]
         mock_remove.assert_not_awaited()
 
-    @pytest.mark.parametrize(
-        "row_filtered_client",
-        [{"scopes": ["subscriptions:write"], "platforms": ["bili"]}],
-        indirect=True,
-    )
-    async def test_bind_endpoint_unauthorized_returns_success_false(
-        self,
-        row_filtered_client: AsyncClient,
+    async def test_outsider_cannot_delete(
+        self, outsider_client: AsyncClient, tmp_config_with_owned_sub: Path
     ) -> None:
-        """越权绑定（token 只允许 bili，绑到 xhs 订阅）→ 200 + success=False。"""
         with patch(
-            "api.routes.subscriptions.add_endpoint_to_subscription",
-            new_callable=AsyncMock,
-        ) as mock_bind:
-            resp = await row_filtered_client.post(
-                "/api/v1/subscriptions/xiaohongshu/u456/endpoints",
-                json={"endpoint_name": "gotify-main"},
-            )
+            "api.routes.subscriptions.remove_subscription", new_callable=AsyncMock
+        ) as mock_remove:
+            resp = await outsider_client.delete("/api/v1/subscriptions/bili/100")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is False
-        mock_bind.assert_not_awaited()
+        assert resp.json()["success"] is False
+        mock_remove.assert_not_awaited()
 
-    @pytest.mark.parametrize(
-        "row_filtered_client",
-        [{"scopes": ["subscriptions:write"], "platforms": ["bili"]}],
-        indirect=True,
-    )
-    async def test_unbind_endpoint_unauthorized_returns_success_false(
-        self,
-        row_filtered_client: AsyncClient,
+    async def test_owner_cannot_delete_orphan(
+        self, owner_client: AsyncClient, tmp_config_with_owned_sub: Path
     ) -> None:
-        """越权解绑（token 只允许 bili，解绑 xhs 订阅）→ 200 + success=False。"""
+        """owner-bot 删 bili/200（孤儿 sub，非自己 own）→ success=False。"""
         with patch(
-            "api.routes.subscriptions.remove_endpoint_from_subscription",
-            new_callable=AsyncMock,
-        ) as mock_unbind:
-            resp = await row_filtered_client.delete(
-                "/api/v1/subscriptions/xiaohongshu/u456/endpoints/gotify-main"
-            )
+            "api.routes.subscriptions.remove_subscription", new_callable=AsyncMock
+        ) as mock_remove:
+            resp = await owner_client.delete("/api/v1/subscriptions/bili/200")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is False
-        mock_unbind.assert_not_awaited()
+        assert resp.json()["success"] is False
+        mock_remove.assert_not_awaited()
+
+    async def test_invalid_platform_returns_not_found(
+        self, owner_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """C1 修订：无效平台 → success=False（合并「未找到」语义）。"""
+        with patch(
+            "api.routes.subscriptions.remove_subscription", new_callable=AsyncMock
+        ) as mock_remove:
+            resp = await owner_client.delete("/api/v1/subscriptions/ghost/100")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+        mock_remove.assert_not_awaited()
+
+
+class TestOwnershipAssignRoutes:
+    """assign/unassign 路由 superuser 专用（issue #108 §7.6）。"""
+
+    async def test_owner_cannot_assign_403(
+        self, owner_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """owner 调 assign 路由 → 403（缺 tokens:manage scope）。"""
+        resp = await owner_client.post(
+            "/api/v1/subscriptions/bili/100/assign",
+            json={"token_name": "outsider-bot"},
+        )
+        assert resp.status_code == 403
+        assert "scope" in resp.json()["detail"].lower()
+
+    async def test_assigned_cannot_assign_403(
+        self, assigned_client: AsyncClient, tmp_config_with_owned_sub: Path
+    ) -> None:
+        resp = await assigned_client.post(
+            "/api/v1/subscriptions/bili/100/assign",
+            json={"token_name": "outsider-bot"},
+        )
+        assert resp.status_code == 403
+
+    async def test_superuser_assigns_successfully(
+        self, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """superuser 调 assign → 200 + success=True。"""
+        c = await _make_superuser_client_owned()
+        try:
+            with patch(
+                "api.routes.subscriptions.assign_token_to_subscription",
+                new_callable=AsyncMock,
+            ) as mock_assign:
+                mock_assign.return_value = (True, "已分配: outsider-bot")
+                resp = await c.post(
+                    "/api/v1/subscriptions/bili/100/assign",
+                    json={"token_name": "outsider-bot"},
+                )
+        finally:
+            await c.__aexit__(None, None, None)
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_assign.assert_awaited_once()
+
+    async def test_superuser_unassign_successfully(
+        self, tmp_config_with_owned_sub: Path
+    ) -> None:
+        """superuser 调 unassign → 200 + success=True（幂等）。"""
+        c = await _make_superuser_client_owned()
+        try:
+            with patch(
+                "api.routes.subscriptions.unassign_token_from_subscription",
+                new_callable=AsyncMock,
+            ) as mock_unassign:
+                mock_unassign.return_value = (True, "已解绑: assigned-bot")
+                resp = await c.delete(
+                    "/api/v1/subscriptions/bili/100/assign/assigned-bot"
+                )
+        finally:
+            await c.__aexit__(None, None, None)
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_unassign.assert_awaited_once()
+
+
