@@ -109,9 +109,19 @@ async def add_sub(
 
     issue #108: 注入 ``owner_token=ownership.token_name``，创建者自动成为 owner。
     任何持 ``subscriptions:write`` 的 token 都能创建 sub（决策 #7）。
+
+    C2 修订：``body.platform`` 经 ``_normalize_platform`` 归一化为短名，
+    与其余 5 个 sub 路由行为一致。业务层 ``VALID_PLATFORMS`` 只认短名
+    （``bili``），传全名（``bilibili``）会被拒；归一化在路由入口做一次，
+    业务层永远拿到短名。
     """
+    normalized_platform = _normalize_platform(body.platform)
+    if normalized_platform is None:
+        return SubscriptionAddResponse(
+            success=False, message=f"无效平台: {body.platform}"
+        )
     success, message = await add_subscription(
-        body.platform,
+        normalized_platform,
         body.identifier,
         body.name,
         default_notify_endpoint=body.default_notify_endpoint,

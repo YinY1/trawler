@@ -88,7 +88,13 @@ def token_has_scope(token: ApiTokenEntry, required: str) -> bool:
     #108 把 superuser 收紧为「显式持 tokens:manage」，空 scopes token 无任何权限。
 
     要成为 superuser：token.scopes 必须包含 ``tokens:manage``。
+
+    superuser bypass（spec §5.1）：持 ``tokens:manage`` 的 token 隐含满足
+    所有 required scope，FastAPI Security 层直接放行（不让 scope 检查先把
+    superuser 在 403 层拦下，导致到不了 ownership 层）。
     """
+    if SCOPE_TOKENS_MANAGE in token.scopes:
+        return True
     return any(scope_implies(g, required) for g in token.scopes)
 
 
