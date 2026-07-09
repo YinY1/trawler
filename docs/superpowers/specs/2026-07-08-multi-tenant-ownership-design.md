@@ -86,7 +86,7 @@ can_write(token, sub)  = is_superuser(token) OR sub.owner_token == token.name
 5. **#106 清理**：废弃 `ResourceRules` dataclass + 相关 I/O + 路由过滤 + CLI flag + 测试
 6. **破坏性变更明示**：空 scopes 不再 = 全权限（必须显式持 `tokens:manage` 才是
    superuser）；老 sub 无 `owner_token` 字段加载为 `""` = 孤儿，只有 superuser 能管
-7. **CLI adopt**：提供 `trawler token adopt` 一键给孤儿 sub 补 owner
+7. **CLI adopt**：提供 `python -m api.token_tool adopt` 一键给孤儿 sub 补 owner
 
 ## 3. 非目标
 
@@ -271,7 +271,7 @@ class ApiTokenEntry:
   assigned token 仍能只读访问
 - **outvisitor 看不到**：非 superuser / 非 assigned token 看孤儿 sub = 看不到
   （GET 过滤掉、写入路由返回「未找到」语义）
-- **adopt CLI**：`trawler token adopt --platform <p> --id <id> --owner <token_name>`
+- **adopt CLI**：`python -m api.token_tool adopt --platform <p> --id <id> --owner <token_name>`
   一键给孤儿补 owner（只 superuser 调用，但 CLI 本身 = 管理员 = superuser）
 
 ### 5.4 越权不暴露存在性（与 #106 一致）
@@ -813,11 +813,11 @@ async def fetch_messages(
 
 `list` 命令的 `Resource Rules` 列（line 189, 196-208）删除。
 
-### 8.2 新增 `trawler token adopt` 子命令
+### 8.2 新增 `python -m api.token_tool adopt` 子命令
 
 ```bash
 # 给孤儿 sub 补 owner
-trawler token adopt --platform bili --id 123456 --owner bili-admin-bot
+python -m api.token_tool adopt --platform bili --id 123456 --owner bili-admin-bot
 ```
 
 Click 实现：

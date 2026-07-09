@@ -52,7 +52,7 @@ def cli() -> None:
     "scopes",
     multiple=True,
     help="限制 token scope（可多次指定，如 --scope messages:read --scope check:read）。"
-    "不指定 = [red]无任何权限[/]（#108 破坏性变更）。"
+    "不指定 = 无任何权限（#108 破坏性变更）。"
     "合法 scope 见 ALL_SCOPES 常量。要创建 superuser 加 --scope tokens:manage。",
 )
 def create(
@@ -166,7 +166,7 @@ def adopt(platform: str, identifier: str, owner_token: str) -> None:
 
     示例::
 
-        trawler token adopt --platform bili --id 123456 --owner bili-admin-bot
+        python -m api.token_tool adopt --platform bili --id 123456 --owner bili-admin-bot
     """
     from core.subscription_cli import set_subscription_owner
 
