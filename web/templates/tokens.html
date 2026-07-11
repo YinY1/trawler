@@ -7,6 +7,53 @@
 <h1 class="text-2xl font-semibold tracking-tight mb-1">API Token 管理</h1>
 <p class="text-sm text-[var(--text-secondary)] mb-6">创建、查看和撤销 API token</p>
 
+<div class="mb-6 bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-card border border-[var(--card-border)] p-5">
+  <h2 class="text-base font-medium mb-4">创建 Token</h2>
+  <form hx-post="/tokens/create" hx-target="body" class="space-y-4">
+    <div>
+      <label class="block text-sm font-medium mb-1.5">名称</label>
+      <input type="text" name="name" required
+             class="w-full max-w-xs px-3 py-2 rounded-[8px] border border-[var(--card-border)] bg-[var(--bg-base)] text-sm focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] outline-none transition-all"
+             placeholder="my-token">
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-2">权限（Scope）</label>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[var(--card-border)] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="subscriptions:read" class="rounded border-gray-300">
+          <span class="text-sm">subscriptions:read</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[var(--card-border)] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="subscriptions:write" class="rounded border-gray-300">
+          <span class="text-sm">subscriptions:write</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[var(--card-border)] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="messages:read" class="rounded border-gray-300">
+          <span class="text-sm">messages:read</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[var(--card-border)] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="messages:write" class="rounded border-gray-300">
+          <span class="text-sm">messages:write</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[var(--card-border)] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="check:read" class="rounded border-gray-300">
+          <span class="text-sm">check:read</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[var(--card-border)] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="check:run" class="rounded border-gray-300">
+          <span class="text-sm">check:run</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-red-100 dark:border-red-900/30 hover:bg-red-50/50 dark:hover:bg-red-900/20 cursor-pointer transition-colors">
+          <input type="checkbox" name="scopes" value="tokens:manage" class="rounded border-red-300">
+          <span class="text-sm text-red-600 dark:text-red-400">tokens:manage ⚠️ superuser</span>
+        </label>
+      </div>
+    </div>
+    <button type="submit"
+            class="px-5 py-2 bg-apple-blue text-white rounded-[8px] text-sm font-medium hover:bg-blue-600 transition-colors">创建</button>
+  </form>
+</div>
+
 {% if plaintext_name and plaintext_value %}
 <div class="mb-6 p-4 rounded-[12px] border border-yellow-200 bg-yellow-50/80 dark:border-yellow-800/40 dark:bg-yellow-900/20">
   <p class="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-2">⚠️ Token「{{ plaintext_name }}」明文（仅此一次，刷新后丢失）：</p>

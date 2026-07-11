@@ -61,3 +61,40 @@ class TestTokensPage:
         assert "a1b2c3d4" in resp.text  # hash 前 8 位
         assert "tokens:manage" in resp.text
         assert "subscriptions:read" in resp.text
+
+
+class TestTokenCreate:
+    @patch("web.routes.tokens.create_token")
+    async def test_create_redirects_to_tokens(self, mock_create, client: AsyncClient) -> None:
+        mock_create.return_value = "trawler_abc123def456"
+        resp = await client.post(
+            "/tokens/create",
+            data={"name": "test-token", "scopes": ["subscriptions:read"]},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/tokens?toast_key=token.created&type=success"
+        mock_create.assert_called_once_with("test-token", ["subscriptions:read"])
+
+    @patch("web.routes.tokens.create_token")
+    async def test_create_multiple_scopes(self, mock_create, client: AsyncClient) -> None:
+        mock_create.return_value = "trawler_xyz789"
+        resp = await client.post(
+            "/tokens/create",
+            data={"name": "multi", "scopes": ["subscriptions:read", "messages:read", "messages:write"]},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/tokens?toast_key=token.created&type=success"
+        mock_create.assert_called_once_with("multi", ["subscriptions:read", "messages:read", "messages:write"])
+
+    async def test_create_empty_name_rejected(self, client: AsyncClient) -> None:
+        resp = await client.post(
+            "/tokens/create",
+            data={"name": "", "scopes": ["subscriptions:read"]},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.name_invalid" in loc
+        assert "type=error" in loc
