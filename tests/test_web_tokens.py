@@ -62,6 +62,28 @@ class TestTokensPage:
         assert "tokens:manage" in resp.text
         assert "subscriptions:read" in resp.text
 
+    @patch("web.routes.tokens.create_token", return_value="trawler_test_plain")
+    async def test_plaintext_banner_appears_with_session(self, mock_create, client: AsyncClient) -> None:
+        """POST /tokens/create 写入 session flash，首次 GET 渲染明文 banner，
+        第二次 GET banner 消失（session pop，一次性显示）。
+        覆盖 Task 2 的模板 banner block + Task 3 的 session flash 写入。"""
+        # POST 触发 create → session flash 写入
+        resp = await client.post(
+            "/tokens/create",
+            data={"name": "flash-test", "scopes": ["subscriptions:read"]},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        # 跟随 redirect：cookies 携带 session，首次 GET 渲染 banner
+        follow = await client.get("/tokens")
+        assert follow.status_code == 200
+        assert "trawler_test_plain" in follow.text
+        assert "flash-test" in follow.text
+        # 第二次 GET：session 已 pop，banner 消失（一次性显示）
+        follow2 = await client.get("/tokens")
+        assert follow2.status_code == 200
+        assert "trawler_test_plain" not in follow2.text
+
 
 class TestTokenCreate:
     @patch("web.routes.tokens.create_token")
