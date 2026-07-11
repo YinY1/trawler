@@ -149,3 +149,31 @@ class TestTokenRevoke:
         loc = resp.headers["location"]
         assert "toast_key=token.not_found" in loc
         assert "type=error" in loc
+
+
+class TestTokenToastKeys:
+    """验证新 token.* toast key 在 JS TOAST_KEY_MAP 中存在。
+
+    ``base.html`` 的 TOAST_KEY_MAP 是纯前端 JS 对象；route 层把 toast_key
+    拼到 redirect URL 里，前端 JS 查表转中文。如果表里漏了某个 key，
+    用户会看到「完成」fallback，体验降级。本测试锁定 8 个新增 token.* key。
+    """
+
+    def test_toast_keys_exist(self) -> None:
+        import re
+
+        content = Path("web/templates/base.html").read_text()
+        # 匹配 TOAST_KEY_MAP 内 'key': 'value' 格式中的 key 部分
+        keys_in_map = re.findall(r"'([^']+)':\s*'", content)
+        required_keys = [
+            "token.created",
+            "token.revoked",
+            "token.name_invalid",
+            "token.not_found",
+            "token.assigned",
+            "token.assign_failed",
+            "token.owner_set",
+            "token.owner_failed",
+        ]
+        for k in required_keys:
+            assert k in keys_in_map, f"TOAST_KEY_MAP missing: {k}"

@@ -140,7 +140,15 @@
       'subscription.endpoint_added': '端点已添加',
       'subscription.endpoint_removed': '端点已移除',
       'message.retry_success': '消息已重置，cron 将重新处理',
-      'message.retry_failed': '重试失败：消息状态异常'
+      'message.retry_failed': '重试失败：消息状态异常',
+      'token.created': 'Token 创建成功',
+      'token.revoked': 'Token 已撤销',
+      'token.name_invalid': 'Token 名称无效',
+      'token.not_found': 'Token 不存在',
+      'token.assigned': '已成功分配',
+      'token.assign_failed': '分配失败',
+      'token.owner_set': 'Owner 已设置',
+      'token.owner_failed': '设置 Owner 失败'
     };
     document.addEventListener('htmx:afterOnLoad', function(e) {
       var trigger = e.detail.xhr.getResponseHeader('HX-Trigger');
