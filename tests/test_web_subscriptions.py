@@ -131,3 +131,35 @@ class TestEndpointAddRedirect:
         loc = resp.headers["location"]
         assert "toast_key=subscription.not_found" in loc
         assert "type=error" in loc
+
+
+# ── subscription owner badge (Task 6) ──────────────────────────────────
+
+
+class TestSubscriptionOwnershipBadge:
+    @patch("web.routes.subscriptions.list_subscriptions", new_callable=AsyncMock)
+    async def test_owner_badge_shows_token_name(self, mock_list, client: AsyncClient) -> None:
+        mock_list.return_value = {
+            "bilibili": [{"uid": 1, "name": "UP主", "owner_token": "admin-token"}]
+        }
+        resp = await client.get("/subscriptions")
+        assert resp.status_code == 200
+        assert "admin-token" in resp.text
+
+    @patch("web.routes.subscriptions.list_subscriptions", new_callable=AsyncMock)
+    async def test_orphan_badge_red(self, mock_list, client: AsyncClient) -> None:
+        mock_list.return_value = {
+            "bilibili": [{"uid": 2, "name": "孤儿UP"}]
+        }
+        resp = await client.get("/subscriptions")
+        assert resp.status_code == 200
+        assert "孤儿" in resp.text
+
+    @patch("web.routes.subscriptions.list_subscriptions", new_callable=AsyncMock)
+    async def test_orphan_shows_set_owner_button(self, mock_list, client: AsyncClient) -> None:
+        mock_list.return_value = {
+            "bilibili": [{"uid": 2, "name": "孤儿UP"}]
+        }
+        resp = await client.get("/subscriptions")
+        assert resp.status_code == 200
+        assert "设为 owner" in resp.text

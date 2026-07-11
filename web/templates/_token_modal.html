@@ -1,0 +1,44 @@
+<div id="ownership-modal-overlay" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
+     onclick="if(event.target===this) this.remove()">
+  <div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-card border border-[var(--card-border)] p-6 max-w-md w-full mx-4">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-base font-medium">管理 Ownership</h3>
+      <button onclick="this.closest('#ownership-modal-overlay').remove()" class="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <p class="text-sm text-[var(--text-secondary)] mb-4">订阅：{{ sub_name }}（{{ platform }}/{{ identifier }}）</p>
+
+    <div class="mb-4">
+      <label class="block text-sm font-medium mb-1.5">Owner token</label>
+      <form hx-post="/subscriptions/{{ platform }}/{{ identifier }}/owner" hx-target="body" class="flex gap-2">
+        <select name="owner_token" class="flex-1 px-3 py-2 rounded-[8px] border border-[var(--card-border)] bg-[var(--card-bg)] text-sm focus:ring-2 focus:ring-[var(--color-primary)]/20 outline-none">
+          <option value="">（无 owner）</option>
+          {% for t in all_tokens %}
+          <option value="{{ t }}" {% if t == owner %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit"
+                class="px-3 py-2 rounded-[8px] bg-apple-blue text-white text-sm font-medium hover:bg-blue-600 transition-colors">改 Owner</button>
+      </form>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1.5">Assigned tokens（只读权限）</label>
+      <div class="space-y-1">
+        {% for t in all_tokens %}
+        <form hx-post="/subscriptions/{{ platform }}/{{ identifier }}/{{ 'unassign' if t in assigned else 'assign' }}" hx-target="body" class="block">
+          <input type="hidden" name="token_name" value="{{ t }}">
+          <label class="flex items-center gap-2 px-3 py-1.5 rounded-[8px] hover:bg-gray-50/50 dark:hover:bg-gray-800/30 cursor-pointer transition-colors">
+            <input type="checkbox" name="assigned"
+                   {% if t in assigned %}checked{% endif %}
+                   onchange="this.closest('form').requestSubmit()"
+                   class="rounded border-gray-300">
+            <span class="text-sm">{{ t }}</span>
+          </label>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>

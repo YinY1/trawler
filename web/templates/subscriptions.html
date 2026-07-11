@@ -97,6 +97,23 @@
             </button>
           </form>
           {% endif %}
+            {% set owner = item.get("owner_token", "") %}
+            {% if owner %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50/70 text-green-700 border border-green-200/60 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800/40">
+              {{ owner }}
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50/70 text-red-700 border border-red-200/60 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800/40">
+              孤儿
+            </span>
+            {% endif %}
+            <button type="button"
+              hx-get="/subscriptions/{{ p.key }}/{{ item.get('uid') or item.get('user_id', '') }}/ownership"
+              hx-target="body"
+              hx-swap="beforeend"
+              class="text-[11px] px-2 py-1 rounded-[6px] text-[var(--text-secondary)] hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              {% if owner %}管理 ownership{% else %}设为 owner{% endif %}
+            </button>
           <form hx-post="/subscriptions/remove" hx-target="body" hx-confirm="确定删除此订阅？">
             <input type="hidden" name="platform" value="{{ p.key }}">
             <input type="hidden" name="identifier" value="{{ item.get('uid') or item.get('user_id', '') }}">

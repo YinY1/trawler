@@ -260,11 +260,15 @@ def create_app() -> FastAPI:
     from web.routes.logs import router as logs_router
     from web.routes.messages import router as messages_router
     from web.routes.settings import router as settings_router
+    from web.routes.subscription_ownership import router as sub_ownership_router
     from web.routes.subscriptions import router as subscriptions_router
+    from web.routes.tokens import router as tokens_router
     from web.routes.web_auth import router as web_auth_router
 
     app.include_router(dashboard_router)
     app.include_router(subscriptions_router)
+    app.include_router(sub_ownership_router)
+    app.include_router(tokens_router)
     app.include_router(check_router)
     app.include_router(auth_router)
     app.include_router(logs_router)
