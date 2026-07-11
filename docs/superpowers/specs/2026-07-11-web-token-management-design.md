@@ -264,20 +264,27 @@ Web session 走 cookie 不走 Bearer token，revoke 自己用来调 API 的 toke
 | 场景 | toast key | type |
 |---|---|---|
 | 创建成功 | `token_created` | success |
-| 创建失败（name 重复） | `token_name_taken` | error |
 | 创建失败（name 空/非法） | `token_name_invalid` | error |
 | Revoke 成功 | `token_revoked` | success |
 | Revoke 失败（name 不存在） | `token_not_found` | error |
 | Assign 成功 | `token_assigned` | success |
-| Assign 失败（token 已分配） | `token_already_assigned` | error |
+| Assign 失败（订阅/token 不存在） | `assign_failed` | error |
 | Set owner 成功 | `owner_set` | success |
-| Adopt 成功 | `sub_adopted` | success |
+| Set owner 失败（订阅/token 不存在） | `owner_failed` | error |
 
 ### 8.2 校验逻辑
 
-CLI 纯函数内部已有 name 唯一性校验、存在性校验。Web 路由 catch 异常 → 映射到对应 toast key → Redirect 303。
+CLI 纯函数错误行为已核实（implementation plan 前置探索确认）：
 
-**实现细节**：纯函数错误报告方式（抛异常 vs 返回错误码）在 implementation plan 阶段核实。spec 层面假设「纯函数会以某种方式报告错误，路由 catch 后映射」。
+| 函数 | 错误行为 | 路由处理 |
+|---|---|---|
+| `create_token` | 同名 token **覆盖**（先删后加），总是成功 | 路由层校验 name 非空 |
+| `revoke_token` | name 不存在返回 `False` | 路由检查 bool → 映射 toast |
+| `assign_token_to_subscription` | 返回 `tuple[bool, str]` | 路由检查 `[0]` → 映射 toast |
+| `unassign_token_from_subscription` | 返回 `tuple[bool, str]` | 路由检查 `[0]` → 映射 toast |
+| `set_subscription_owner` | 返回 `tuple[bool, str]` | 路由检查 `[0]` → 映射 toast |
+
+**所有纯函数不抛异常**，唯一异常可能来自 `save_auth_config` / 文件 I/O（视为 500 系统错误，不映射 toast）。
 
 ## 9. 测试策略
 
