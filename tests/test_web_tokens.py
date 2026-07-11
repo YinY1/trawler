@@ -33,3 +33,31 @@ class TestTokensPage:
         resp = await client.get("/tokens")
         assert resp.status_code == 200
         assert "API Token" in resp.text
+
+    @patch("web.routes.tokens.load_auth_config")
+    async def test_list_shows_tokens(self, mock_load, client: AsyncClient) -> None:
+        from shared.config import ApiTokenEntry, WebAuthConfig
+
+        mock_load.return_value = WebAuthConfig(
+            api_tokens=[
+                ApiTokenEntry(
+                    name="admin",
+                    token_hash="a1b2c3d4e5f6...",
+                    created_at=1720600000.0,
+                    scopes=["tokens:manage"],
+                ),
+                ApiTokenEntry(
+                    name="viewer",
+                    token_hash="e5f6g7h8...",
+                    created_at=1720500000.0,
+                    scopes=["subscriptions:read"],
+                ),
+            ]
+        )
+        resp = await client.get("/tokens")
+        assert resp.status_code == 200
+        assert "admin" in resp.text
+        assert "viewer" in resp.text
+        assert "a1b2c3d4" in resp.text  # hash 前 8 位
+        assert "tokens:manage" in resp.text
+        assert "subscriptions:read" in resp.text

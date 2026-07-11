@@ -6,4 +6,59 @@
 {% block content %}
 <h1 class="text-2xl font-semibold tracking-tight mb-1">API Token 管理</h1>
 <p class="text-sm text-[var(--text-secondary)] mb-6">创建、查看和撤销 API token</p>
+
+{% if plaintext_name and plaintext_value %}
+<div class="mb-6 p-4 rounded-[12px] border border-yellow-200 bg-yellow-50/80 dark:border-yellow-800/40 dark:bg-yellow-900/20">
+  <p class="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-2">⚠️ Token「{{ plaintext_name }}」明文（仅此一次，刷新后丢失）：</p>
+  <div class="flex items-center gap-2">
+    <code id="plaintext-token" class="flex-1 px-3 py-2 rounded-[8px] bg-white dark:bg-gray-800 border border-yellow-300 dark:border-yellow-700 text-sm font-mono select-all">{{ plaintext_value }}</code>
+    <button onclick="navigator.clipboard.writeText(document.getElementById('plaintext-token').textContent); showToast('已复制', 'success')"
+            class="px-3 py-2 rounded-[8px] bg-yellow-600 text-white text-sm font-medium hover:bg-yellow-700 transition-colors">复制</button>
+  </div>
+  <p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">请立即保存。Trawler 不存储明文。</p>
+</div>
+{% endif %}
+
+{% if tokens %}
+<div class="bg-[var(--card-bg)] backdrop-blur-[12px] rounded-[14px] shadow-card border border-[var(--card-border)] overflow-hidden">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-[var(--card-border)] text-[var(--text-secondary)]">
+        <th class="text-left px-5 py-3 font-medium">名称</th>
+        <th class="text-left px-5 py-3 font-medium">Hash（前 8 位）</th>
+        <th class="text-left px-5 py-3 font-medium">权限</th>
+        <th class="text-left px-5 py-3 font-medium">创建时间</th>
+        <th class="text-right px-5 py-3 font-medium">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tokens %}
+      <tr class="border-b border-[var(--card-border)] last:border-0 hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
+        <td class="px-5 py-3 font-medium">{{ t.name }}</td>
+        <td class="px-5 py-3 font-mono text-xs text-[var(--text-secondary)]">{{ t.token_hash[:8] }}</td>
+        <td class="px-5 py-3">
+          <div class="flex flex-wrap gap-1">
+            {% for s in t.scopes %}
+            {{ badge(s, color="blue" if s != "tokens:manage" else "red") }}
+            {% else %}
+            <span class="text-xs text-[var(--text-tertiary)]">—</span>
+            {% endfor %}
+          </div>
+        </td>
+        <td class="px-5 py-3 text-[var(--text-secondary)]">{{ t.created_at | timeago if t.created_at else "—" }}</td>
+        <td class="px-5 py-3 text-right">
+          <button hx-post="/tokens/revoke"
+                  hx-vals='{"token_name":"{{ t.name }}"}'
+                  hx-target="body"
+                  hx-confirm="确定 revoke token「{{ t.name }}」？"
+                  class="px-3 py-1.5 rounded-[8px] text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">revoke</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-sm text-[var(--text-secondary)]">暂无 token。创建第一个 token 开始使用 API。</p>
+{% endif %}
 {% endblock %}
