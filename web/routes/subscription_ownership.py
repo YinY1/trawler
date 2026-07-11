@@ -25,9 +25,7 @@ def _key_field(platform_key: str) -> str:
 
 
 @router.get("/subscriptions/{platform}/{identifier}/ownership")
-async def ownership_modal(
-    request: Request, platform: str, identifier: str
-) -> HTMLResponse:
+async def ownership_modal(request: Request, platform: str, identifier: str) -> HTMLResponse:
     plat_name = _platform_key_to_name(platform)
     key = _key_field(platform)
     subs = await load_subscriptions()
@@ -57,11 +55,11 @@ async def ownership_modal(
 
 
 @router.post("/subscriptions/{platform}/{identifier}/assign")
-async def ownership_assign(
-    platform: str, identifier: str, token_name: str = Form(...)
-) -> RedirectResponse:
-    plat_name = _platform_key_to_name(platform)
-    ok, _msg = await assign_token_to_subscription(plat_name, identifier, token_name)
+async def ownership_assign(platform: str, identifier: str, token_name: str = Form(...)) -> RedirectResponse:
+    # platform 来自 URL path，已经是短名（bili/xhs/weibo），直接传给 core；
+    # core 内部用 PLATFORM_TO_SECTION 转换。不要再 _platform_key_to_name，
+    # 否则 core 收到 "bilibili" 不在 VALID_PLATFORMS 里 → "无效平台: bilibili"。
+    ok, _msg = await assign_token_to_subscription(platform, identifier, token_name)
     toast_key, t = ("token.assigned", "success") if ok else ("token.assign_failed", "error")
     return RedirectResponse(
         url=f"/subscriptions?toast_key={toast_key}&type={t}",
@@ -70,11 +68,9 @@ async def ownership_assign(
 
 
 @router.post("/subscriptions/{platform}/{identifier}/unassign")
-async def ownership_unassign(
-    platform: str, identifier: str, token_name: str = Form(...)
-) -> RedirectResponse:
-    plat_name = _platform_key_to_name(platform)
-    ok, _msg = await unassign_token_from_subscription(plat_name, identifier, token_name)
+async def ownership_unassign(platform: str, identifier: str, token_name: str = Form(...)) -> RedirectResponse:
+    # 同上：platform 是短名，core 内部自己转换，web 层不要重复转。
+    ok, _msg = await unassign_token_from_subscription(platform, identifier, token_name)
     toast_key, t = ("token.assigned", "success") if ok else ("token.assign_failed", "error")
     return RedirectResponse(
         url=f"/subscriptions?toast_key={toast_key}&type={t}",
