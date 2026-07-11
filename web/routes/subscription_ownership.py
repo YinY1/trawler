@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-from core.subscription_cli import SUBSCRIPTION_KEY
+from core.subscription_cli import (
+    SUBSCRIPTION_KEY,
+    assign_token_to_subscription,
+    unassign_token_from_subscription,
+)
 from web.app import TEMPLATES
 from web.auth import load_auth_config
 from web.routes.subscriptions import _platform_key_to_name
@@ -49,4 +53,30 @@ async def ownership_modal(
             "assigned": assigned,
             "all_tokens": [t.name for t in all_tokens],
         },
+    )
+
+
+@router.post("/subscriptions/{platform}/{identifier}/assign")
+async def ownership_assign(
+    platform: str, identifier: str, token_name: str = Form(...)
+) -> RedirectResponse:
+    plat_name = _platform_key_to_name(platform)
+    ok, _msg = await assign_token_to_subscription(plat_name, identifier, token_name)
+    toast_key, t = ("token.assigned", "success") if ok else ("token.assign_failed", "error")
+    return RedirectResponse(
+        url=f"/subscriptions?toast_key={toast_key}&type={t}",
+        status_code=303,
+    )
+
+
+@router.post("/subscriptions/{platform}/{identifier}/unassign")
+async def ownership_unassign(
+    platform: str, identifier: str, token_name: str = Form(...)
+) -> RedirectResponse:
+    plat_name = _platform_key_to_name(platform)
+    ok, _msg = await unassign_token_from_subscription(plat_name, identifier, token_name)
+    toast_key, t = ("token.assigned", "success") if ok else ("token.assign_failed", "error")
+    return RedirectResponse(
+        url=f"/subscriptions?toast_key={toast_key}&type={t}",
+        status_code=303,
     )

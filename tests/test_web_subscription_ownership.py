@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -70,3 +70,57 @@ class TestOwnershipModal:
         resp = await client.get("/subscriptions/bili/2/ownership")
         assert resp.status_code == 200
         assert "孤儿" in resp.text or "无" in resp.text
+
+
+class TestTokenAssign:
+    @patch("web.routes.subscription_ownership.assign_token_to_subscription", new_callable=AsyncMock)
+    async def test_assign_success(self, mock_assign, client: AsyncClient) -> None:
+        mock_assign.return_value = (True, "已分配: viewer-token")
+        resp = await client.post(
+            "/subscriptions/bili/1/assign",
+            data={"token_name": "viewer-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.assigned" in loc
+        assert "type=success" in loc
+
+    @patch("web.routes.subscription_ownership.assign_token_to_subscription", new_callable=AsyncMock)
+    async def test_assign_failure(self, mock_assign, client: AsyncClient) -> None:
+        mock_assign.return_value = (False, "未知 token: bad")
+        resp = await client.post(
+            "/subscriptions/bili/1/assign",
+            data={"token_name": "bad"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.assign_failed" in loc
+        assert "type=error" in loc
+
+    @patch("web.routes.subscription_ownership.unassign_token_from_subscription", new_callable=AsyncMock)
+    async def test_unassign_success(self, mock_unassign, client: AsyncClient) -> None:
+        mock_unassign.return_value = (True, "已解绑: viewer-token")
+        resp = await client.post(
+            "/subscriptions/bili/1/unassign",
+            data={"token_name": "viewer-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.assigned" in loc  # 复用 success key
+        assert "type=success" in loc
+
+    @patch("web.routes.subscription_ownership.unassign_token_from_subscription", new_callable=AsyncMock)
+    async def test_unassign_failure(self, mock_unassign, client: AsyncClient) -> None:
+        mock_unassign.return_value = (False, "未找到订阅")
+        resp = await client.post(
+            "/subscriptions/bili/1/unassign",
+            data={"token_name": "viewer-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.assign_failed" in loc
+        assert "type=error" in loc
