@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from core.subscription_cli import (
     SUBSCRIPTION_KEY,
     assign_token_to_subscription,
+    set_subscription_owner,
     unassign_token_from_subscription,
 )
 from web.app import TEMPLATES
@@ -51,6 +52,21 @@ async def ownership_modal(request: Request, platform: str, identifier: str) -> H
             "assigned": assigned,
             "all_tokens": [t.name for t in all_tokens],
         },
+    )
+
+
+@router.post("/subscriptions/{platform}/{identifier}/owner")
+async def ownership_set_owner(
+    platform: str, identifier: str, owner_token: str = Form(...)
+) -> RedirectResponse:
+    # 同 assign/unassign：platform 是短名（bili/xhs/weibo），core 内部用
+    # PLATFORM_TO_SECTION 自己转 section name，web 层不要再 _platform_key_to_name，
+    # 否则 core 收到 "bilibili" 不在 VALID_PLATFORMS 里 → "无效平台: bilibili"。
+    ok, _msg = await set_subscription_owner(platform, identifier, owner_token)
+    toast_key, t = ("token.owner_set", "success") if ok else ("token.owner_failed", "error")
+    return RedirectResponse(
+        url=f"/subscriptions?toast_key={toast_key}&type={t}",
+        status_code=303,
     )
 
 

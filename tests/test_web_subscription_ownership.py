@@ -10,6 +10,9 @@ from core.subscription_cli import (
     assign_token_to_subscription as _real_assign,
 )
 from core.subscription_cli import (
+    set_subscription_owner as _real_set_owner,
+)
+from core.subscription_cli import (
     unassign_token_from_subscription as _real_unassign,
 )
 from web.app import create_app
@@ -122,6 +125,34 @@ class TestTokenAssign:
         assert "type=error" in loc
 
 
+class TestOwnerSet:
+    @patch("web.routes.subscription_ownership.set_subscription_owner", new_callable=AsyncMock)
+    async def test_set_owner_success(self, mock_set, client: AsyncClient) -> None:
+        mock_set.return_value = (True, "已设置 owner: admin-token")
+        resp = await client.post(
+            "/subscriptions/bili/1/owner",
+            data={"owner_token": "admin-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.owner_set" in loc
+        assert "type=success" in loc
+
+    @patch("web.routes.subscription_ownership.set_subscription_owner", new_callable=AsyncMock)
+    async def test_set_owner_failure(self, mock_set, client: AsyncClient) -> None:
+        mock_set.return_value = (False, "未找到订阅")
+        resp = await client.post(
+            "/subscriptions/bili/999/owner",
+            data={"owner_token": "admin-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.owner_failed" in loc
+        assert "type=error" in loc
+
+
 # ═══════════════════════════════════════════════════════════
 # Integration tests — 真实 core 函数 + tmp TOML（防 false-green）
 # ═══════════════════════════════════════════════════════════
@@ -175,6 +206,11 @@ class TestAssignIntegration:
         async def unassign_wrapper(platform: str, identifier: int | str, token_name: str) -> tuple[bool, str]:
             return await _real_unassign(platform, identifier, token_name, path=str(subs_path))
 
+        async def set_owner_wrapper(
+            platform: str, identifier: int | str, owner_token: str
+        ) -> tuple[bool, str]:
+            return await _real_set_owner(platform, identifier, owner_token, path=str(subs_path))
+
         monkeypatch.setattr(
             "web.routes.subscription_ownership.assign_token_to_subscription",
             assign_wrapper,
@@ -182,6 +218,10 @@ class TestAssignIntegration:
         monkeypatch.setattr(
             "web.routes.subscription_ownership.unassign_token_from_subscription",
             unassign_wrapper,
+        )
+        monkeypatch.setattr(
+            "web.routes.subscription_ownership.set_subscription_owner",
+            set_owner_wrapper,
         )
         return subs_path
 
@@ -237,3 +277,83 @@ class TestAssignIntegration:
         # 空列表 → 字段应被移除
         content = subs_and_auth.read_text(encoding="utf-8")
         assert "real-token" not in content
+
+
+class TestOwnerSetIntegration:
+    """不 mock core，验证 set_owner 路由传正确的短名 platform + 真实写盘 owner_token。"""
+
+    @pytest.fixture
+    def subs_and_auth(self, client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """复用 TestAssignIntegration 同款 fixture 模式（见上方注释）。"""
+        subs_path = tmp_path / "subscriptions.toml"
+        subs_path.write_text(
+            '[[bilibili.subscriptions]]\nuid = 1\nname = "UP主"\n',
+            encoding="utf-8",
+        )
+        from shared.config import ApiTokenEntry
+        from web.auth import load_auth_config, save_auth_config
+
+        cfg = load_auth_config()
+        cfg.api_tokens.append(ApiTokenEntry(name="real-token", token_hash="a" * 64, scopes=[]))
+        save_auth_config(cfg)
+
+        async def set_owner_wrapper(
+            platform: str, identifier: int | str, owner_token: str
+        ) -> tuple[bool, str]:
+            return await _real_set_owner(platform, identifier, owner_token, path=str(subs_path))
+
+        monkeypatch.setattr(
+            "web.routes.subscription_ownership.set_subscription_owner",
+            set_owner_wrapper,
+        )
+        return subs_path
+
+    async def test_set_owner_real_writes_toml(self, client: AsyncClient, subs_and_auth: Path) -> None:
+        """路由传短名 bili → core 成功写盘 owner_token 字段。
+
+        若路由层错误地用 _platform_key_to_name(platform) 传 bilibili，
+        core 会返回 (False, "无效平台: bilibili")，本断言 fail。
+        """
+        resp = await client.post(
+            "/subscriptions/bili/1/owner",
+            data={"owner_token": "real-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.owner_set" in loc, (
+            f"set_owner 应成功但 toast 显示失败: {loc}（疑似 platform 参数 double-convert）"
+        )
+        assert "type=success" in loc
+        # 落盘验证：owner_token 字段写入 real-token
+        content = subs_and_auth.read_text(encoding="utf-8")
+        assert 'owner_token = "real-token"' in content, (
+            f"owner_token 未落盘: {content}"
+        )
+
+    async def test_set_owner_real_replaces_existing(
+        self, client: AsyncClient, subs_and_auth: Path
+    ) -> None:
+        """set（非 add）语义：已有 owner 应被覆盖。"""
+        # 第一次设置
+        resp = await client.post(
+            "/subscriptions/bili/1/owner",
+            data={"owner_token": "real-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert "type=success" in resp.headers["location"]
+
+        # 再次设置同一个（idempotent）— core 仍返回 success
+        resp = await client.post(
+            "/subscriptions/bili/1/owner",
+            data={"owner_token": "real-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.owner_set" in loc
+        assert "type=success" in loc
+
+        content = subs_and_auth.read_text(encoding="utf-8")
+        # 只有一个 owner_token 字段（replace 不是 append）
+        assert content.count("owner_token") == 1
