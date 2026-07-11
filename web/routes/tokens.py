@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from api.auth import create_token
+from api.auth import create_token, revoke_token
 from web.app import TEMPLATES
 from web.auth import load_auth_config
 
@@ -43,3 +43,17 @@ async def tokens_create(
     request.session["created_token_name"] = name.strip()
     request.session["created_token_plaintext"] = plaintext
     return RedirectResponse(url="/tokens?toast_key=token.created&type=success", status_code=303)
+
+
+@router.post("/tokens/revoke")
+async def tokens_revoke(token_name: str = Form(...)) -> RedirectResponse:
+    ok = revoke_token(token_name)
+    if ok:
+        return RedirectResponse(
+            url="/tokens?toast_key=token.revoked&type=success",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url="/tokens?toast_key=token.not_found&type=error",
+        status_code=303,
+    )

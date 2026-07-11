@@ -120,3 +120,32 @@ class TestTokenCreate:
         loc = resp.headers["location"]
         assert "toast_key=token.name_invalid" in loc
         assert "type=error" in loc
+
+
+class TestTokenRevoke:
+    @patch("web.routes.tokens.revoke_token")
+    async def test_revoke_success(self, mock_revoke, client: AsyncClient) -> None:
+        mock_revoke.return_value = True
+        resp = await client.post(
+            "/tokens/revoke",
+            data={"token_name": "test-token"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.revoked" in loc
+        assert "type=success" in loc
+        mock_revoke.assert_called_once_with("test-token")
+
+    @patch("web.routes.tokens.revoke_token")
+    async def test_revoke_not_found(self, mock_revoke, client: AsyncClient) -> None:
+        mock_revoke.return_value = False
+        resp = await client.post(
+            "/tokens/revoke",
+            data={"token_name": "nonexistent"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert "toast_key=token.not_found" in loc
+        assert "type=error" in loc
